@@ -20,6 +20,7 @@ class TaskNode(Base):
         UUID(as_uuid=True),
         ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     agent_role: Mapped[str | None] = mapped_column(String(50), nullable=True)

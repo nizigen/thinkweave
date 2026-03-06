@@ -20,6 +20,7 @@ class Message(Base):
         UUID(as_uuid=True),
         ForeignKey("tasks.id"),
         nullable=True,
+        index=True,
     )
     from_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
     to_agent: Mapped[str | None] = mapped_column(String(100), nullable=True)

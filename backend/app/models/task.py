@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Text, Integer, SmallInteger, DateTime
+from sqlalchemy import String, Text, Integer, SmallInteger, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -39,7 +39,10 @@ class Outline(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     task_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(SmallInteger, default=1)
@@ -56,10 +59,16 @@ class ChapterReview(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     task_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     node_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("task_nodes.id"),
+        nullable=False,
+        index=True,
     )
     chapter_index: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     score: Mapped[int] = mapped_column(SmallInteger, nullable=False)
