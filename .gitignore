@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+
+# Docker volumes
+pgdata/
+redisdata/
+
+# Logs
+logs/
+*.log
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+# npm cache
+.npm-cache/
+
+# Alembic
+backend/migrations/versions/__pycache__/
+
+# Project docs (generated specs)
+docs/
+diagrams/
+
+# Claude Code / OMC
+.claude/
+.omc/
+nul
