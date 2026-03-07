@@ -43,3 +43,50 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #3A3A5C;
 }
+
+/* Agent 状态脉冲动画 */
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
+
+/* 表格行 hover 左侧指示条 */
+.ant-table-tbody > tr:hover > td:first-child {
+  box-shadow: inset 3px 0 0 #6366F1;
+}
+
+/* Ant Design 表格深色调优 */
+.ant-table {
+  background: #111118 !important;
+}
+.ant-table-thead > tr > th {
+  background: #0F0F18 !important;
+  border-bottom: 1px solid #1E1E2E !important;
+  color: #94A3B8 !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+}
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid #1E1E2E !important;
+  transition: background 0.2s !important;
+}
+.ant-table-tbody > tr:hover > td {
+  background: #1A1A26 !important;
+}
+
+/* Modal / Drawer 深色背景增强 */
+.ant-modal-content {
+  background: #111118 !important;
+  border: 1px solid #2A2A3E !important;
+}
+.ant-drawer-content {
+  background: #0A0A0F !important;
+}
+
+/* prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
