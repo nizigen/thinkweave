@@ -25,6 +25,11 @@ class Base(DeclarativeBase):
 
 
 async def get_session() -> AsyncSession:  # type: ignore[misc]
-    """FastAPI Depends 注入用的 session 生成器"""
+    """FastAPI Depends — auto-commit on success, rollback on error."""
     async with async_session_factory() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise

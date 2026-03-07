@@ -1,7 +1,7 @@
 """Agent ORM 模型"""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import String, SmallInteger, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
@@ -23,7 +23,7 @@ class Agent(Base):
     model: Mapped[str] = mapped_column(String(100), default="gpt-4o")
     status: Mapped[str] = mapped_column(String(20), default="idle")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
 
 
@@ -44,5 +44,5 @@ class AgentHeartbeat(Base):
     )
     status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )

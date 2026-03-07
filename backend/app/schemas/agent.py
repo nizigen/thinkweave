@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -28,4 +29,4 @@ class AgentRead(BaseModel):
 
 
 class AgentStatusUpdate(BaseModel):
-    status: str
+    status: Literal["idle", "busy", "offline"]
