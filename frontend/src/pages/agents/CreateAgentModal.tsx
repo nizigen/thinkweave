@@ -7,9 +7,6 @@ import { useCallback, useMemo } from 'react';
 import { Modal, Form, Input, Select, message, Typography } from 'antd';
 import {
   RobotOutlined,
-  ThunderboltOutlined,
-  AppstoreOutlined,
-  ApiOutlined,
 } from '@ant-design/icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAgentStore } from '../../stores/agentStore';
@@ -254,106 +251,52 @@ export default function CreateAgentModal({ open, onClose }: Props) {
           initialValues={{ layer: 2, model: 'gpt-4o' }}
           requiredMark="optional"
         >
-          {/* 基本信息区块 */}
-          <div
-            style={{
-              marginBottom: 20,
-              padding: '16px 16px 4px',
-              borderRadius: 10,
-              background: '#0D0D14',
-              border: '1px solid #1A1A26',
-            }}
+          <Form.Item
+            name="name"
+            label="名称"
+            rules={[{ required: true, message: '请输入 Agent 名称' }]}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <ThunderboltOutlined style={{ color: '#6366F1', fontSize: 13 }} />
-              <Text style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                基本信息
-              </Text>
-            </div>
+            <Input placeholder="例如: Writer-1" maxLength={100} />
+          </Form.Item>
 
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <Form.Item
-              name="name"
-              label="名称"
-              rules={[{ required: true, message: '请输入 Agent 名称' }]}
+              name="role"
+              label="角色类型"
+              rules={[{ required: true, message: '请选择角色' }]}
             >
-              <Input placeholder="例如: Writer-1" maxLength={100} />
-            </Form.Item>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <Form.Item
-                name="role"
-                label="角色类型"
-                rules={[{ required: true, message: '请选择角色' }]}
-              >
-                <Select
-                  placeholder="选择角色"
-                  options={ROLE_OPTIONS}
-                  onChange={handleRoleChange}
-                />
-              </Form.Item>
-
-              <Form.Item
-                name="layer"
-                label="层级"
-                rules={[{ required: true, message: '请选择层级' }]}
-              >
-                <Select options={LAYER_OPTIONS} />
-              </Form.Item>
-            </div>
-          </div>
-
-          {/* 模型配置区块 */}
-          <div
-            style={{
-              marginBottom: 20,
-              padding: '16px 16px 4px',
-              borderRadius: 10,
-              background: '#0D0D14',
-              border: '1px solid #1A1A26',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <AppstoreOutlined style={{ color: '#10B981', fontSize: 13 }} />
-              <Text style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                模型配置
-              </Text>
-            </div>
-
-            <Form.Item
-              name="model"
-              label="LLM 模型"
-              rules={[{ required: true, message: '请选择模型' }]}
-            >
-              <Select options={MODEL_OPTIONS} />
-            </Form.Item>
-          </div>
-
-          {/* 能力描述区块 */}
-          <div
-            style={{
-              marginBottom: 4,
-              padding: '16px 16px 4px',
-              borderRadius: 10,
-              background: '#0D0D14',
-              border: '1px solid #1A1A26',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <ApiOutlined style={{ color: '#F59E0B', fontSize: 13 }} />
-              <Text style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                能力定义
-              </Text>
-            </div>
-
-            <Form.Item name="capabilities" label="能力描述">
-              <TextArea
-                rows={3}
-                placeholder="描述该 Agent 的专长和能力，用于任务分配时参考..."
-                maxLength={500}
-                showCount
+              <Select
+                placeholder="选择角色"
+                options={ROLE_OPTIONS}
+                onChange={handleRoleChange}
               />
             </Form.Item>
+
+            <Form.Item
+              name="layer"
+              label="层级"
+              rules={[{ required: true, message: '请选择层级' }]}
+            >
+              <Select options={LAYER_OPTIONS} />
+            </Form.Item>
           </div>
+
+          <Form.Item
+            name="model"
+            label="LLM 模型"
+            rules={[{ required: true, message: '请选择模型' }]}
+          >
+            <Select options={MODEL_OPTIONS} />
+          </Form.Item>
+
+          <Form.Item name="capabilities" label="能力描述">
+            <TextArea
+              rows={3}
+              placeholder="描述该 Agent 的专长和能力，用于任务分配时参考..."
+              maxLength={500}
+              showCount
+            />
+          </Form.Item>
         </Form>
       </div>
     </Modal>
