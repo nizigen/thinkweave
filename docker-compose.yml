@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:15.8
+    image: ankane/pgvector:pg15
     container_name: hierarch-postgres
     environment:
       POSTGRES_USER: agent_user
