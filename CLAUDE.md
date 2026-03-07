@@ -154,6 +154,7 @@ type: feat | fix | refactor | docs | test | chore | perf | ci
 
 ## 进度追踪
 每完成一个 Step 后立即更新 `progress.txt`。
+每完成一个 Step 后，同时在 `IMPLEMENTATION_PLAN.md` 中将对应的 `- [ ]` 改为 `- [x]`。
 
 ## 自我改进
 每次 AI 犯错被用户纠正时，立即在此文件添加新规则防止再犯。
@@ -171,6 +172,16 @@ type: feat | fix | refactor | docs | test | chore | perf | ci
 | PDF导出 | reportlab（纯Python，Windows友好），不用weasyprint | 2026-03-06 |
 | LLM降级 | 主模型不可用时自动fallback到备用模型 | 2026-03-06 |
 | Docker策略 | 开发阶段Docker只跑PostgreSQL+Redis，backend/frontend本地运行 | 2026-03-06 |
+| DeerFlow参考 | 借鉴中间件模式/并发控制/输入验证/Token追踪/模型配置化，不引入LangChain | 2026-03-07 |
+| MCP + Skills | Agent支持MCP工具调用（客户端模式）+ Skills系统（写作风格模板+Agent行为定义，Markdown+YAML frontmatter） | 2026-03-07 |
+| 上下文管理 | 三层记忆（Working/Task/Persistent）+ 渐进式披露 + 上下文压缩，参考OpenClaw+claude-mem | 2026-03-07 |
+| Prompt缓存 | 利用OpenAI/DeepSeek自动前缀缓存（静态在前变量在后），不做应用层语义缓存 | 2026-03-07 |
+| 向量数据库 | pgvector（复用PG，零新基础设施），嵌入模型text-embedding-3-small | 2026-03-07 |
+| RAG策略 | v1实现轻量RAG（跨章节检索+一致性检查），rag_enabled默认关闭；用户文档上传推迟到v2 | 2026-03-07 |
+| Prompt模板 | 文件化管理（prompts/{role}/{action}.md），str.format_map渲染，不引入Jinja2 | 2026-03-07 |
+| 结构化日志 | loguru + logger.bind(task_id, agent_id, role)，多Agent并发日志关联 | 2026-03-07 |
+| 错误恢复 | FSM检查点机制（checkpoint_data JSONB），崩溃后resume()恢复，不重置重试计数 | 2026-03-07 |
+| 测试策略 | BaseLLMClient ABC + MockLLMClient依赖注入，fakeredis替代Redis，测试不调外部API | 2026-03-07 |
 
 ## 纠错记录
 （随项目推进动态添加）
@@ -180,7 +191,7 @@ type: feat | fix | refactor | docs | test | chore | perf | ci
 ## 开发模式强制规则
 
 ### 前端开发
-- **必须使用 `/ui-ux-pro-max` 技能进行 UI/UX 指导**
+- **必须使用 `/ui-ux-pro-max`以及`/frontend-design` 技能进行 UI/UX 指导**
 - 每次前端页面开发前，**必须要求用户提供参考网页/截图**作为设计基准
 - 没有参考网页不开始前端 UI 编码（技术基础设施除外）
 - 参考网页用于指导布局、交互、视觉风格，结合 FRONTEND_GUIDELINES.md 确保一致性
