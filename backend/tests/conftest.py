@@ -1,5 +1,11 @@
 """Test configuration and fixtures."""
 
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any
+
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -7,7 +13,135 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.database import get_session
 from app.main import app
+from app.utils.llm_client import BaseLLMClient
 
+
+# ---------------------------------------------------------------------------
+# Mock LLM responses (按角色返回预设内容)
+# ---------------------------------------------------------------------------
+
+MOCK_OUTLINE = """# 大纲
+## 第1章 引言
+## 第2章 核心概念
+## 第3章 总结"""
+
+MOCK_CHAPTER = "这是一段模拟生成的章节内容，用于测试。" * 10
+
+MOCK_REVIEW_JSON = {
+    "score": 85,
+    "accuracy_score": 90,
+    "coherence_score": 80,
+    "style_score": 85,
+    "feedback": "内容结构清晰，论述完整。",
+    "pass": True,
+}
+
+MOCK_DAG_JSON = {
+    "nodes": [
+        {"id": "n1", "title": "大纲生成", "role": "outline", "depends_on": []},
+        {"id": "n2", "title": "第1章撰写", "role": "writer", "depends_on": ["n1"]},
+        {"id": "n3", "title": "第2章撰写", "role": "writer", "depends_on": ["n1"]},
+    ]
+}
+
+
+# ---------------------------------------------------------------------------
+# MockLLMClient — 测试用，不调用任何外部API
+# ---------------------------------------------------------------------------
+
+class MockLLMClient(BaseLLMClient):
+    """Mock LLM客户端：按角色返回预设响应，记录所有调用供断言"""
+
+    def __init__(self) -> None:
+        self.call_log: list[dict[str, Any]] = []
+
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.7,
+    ) -> str:
+        self.call_log.append({
+            "method": "chat", "role": role, "model": model,
+            "messages": messages,
+        })
+        if role == "outline":
+            return MOCK_OUTLINE
+        if role == "writer":
+            return MOCK_CHAPTER
+        if role == "reviewer":
+            return "审查通过，评分85分。"
+        if role == "consistency":
+            return "一致性检查通过，无问题。"
+        return "mock response"
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.7,
+    ) -> AsyncIterator[str]:
+        self.call_log.append({
+            "method": "chat_stream", "role": role, "model": model,
+        })
+        chunks = ["这是", "一段", "流式", "输出", "测试。"]
+        for chunk in chunks:
+            yield chunk
+
+    async def chat_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        schema: type | None = None,
+        max_tokens: int | None = None,
+    ) -> dict:
+        self.call_log.append({
+            "method": "chat_json", "role": role, "model": model,
+            "messages": messages,
+        })
+        if role == "orchestrator":
+            return MOCK_DAG_JSON
+        if role == "reviewer":
+            return MOCK_REVIEW_JSON
+        return {"result": "mock"}
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        max_tokens: int | None = None,
+    ) -> dict:
+        self.call_log.append({
+            "method": "chat_with_tools", "role": role, "tools": tools,
+        })
+        return {"type": "text", "content": "mock tool response"}
+
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+    ) -> list[list[float]]:
+        self.call_log.append({
+            "method": "embed", "count": len(texts),
+        })
+        return [[0.1] * 1536 for _ in texts]
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
 
 @pytest_asyncio.fixture
 async def db_session():
@@ -36,3 +170,9 @@ async def client(db_session: AsyncSession):
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def mock_llm():
+    """Mock LLM客户端 — 所有测试默认使用，不调用外部API"""
+    return MockLLMClient()

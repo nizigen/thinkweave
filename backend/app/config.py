@@ -17,6 +17,19 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     default_model: str = "gpt-4o"
 
+    # 并发控制
+    max_concurrent_llm_calls: int = 5
+    max_concurrent_writers: int = 3
+
+    # LLM 重试
+    llm_max_retries: int = 3
+    llm_retry_base_delay: float = 1.0
+
+    # RAG（可选）
+    rag_enabled: bool = False
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+
     # 应用
     app_host: str = "0.0.0.0"
     app_port: int = 8000
