@@ -95,44 +95,49 @@ function StatCard({ title, count, color, icon, delay }: StatCardProps) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, delay }}
       style={{
-        background: '#111118',
+        position: 'relative',
+        background: 'linear-gradient(135deg, #111118 0%, #0F0F1A 100%)',
         border: '1px solid #2A2A3E',
         borderRadius: 12,
         padding: '20px 20px 16px',
         flex: 1,
         minWidth: 0,
         cursor: 'default',
-        transition: 'border-color 0.2s, box-shadow 0.2s',
+        transition: 'border-color 0.3s, box-shadow 0.3s',
+        overflow: 'hidden',
       }}
       whileHover={{
         borderColor: color,
-        boxShadow: `0 0 20px ${color}12`,
+        boxShadow: `0 0 24px ${color}20, inset 0 1px 0 ${color}15`,
       }}
     >
+      {/* 顶部色条 */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${color}00, ${color}60, ${color}00)` }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Text style={{ color: '#94A3B8', fontSize: 13 }}>{title}</Text>
+        <Text style={{ color: '#CBD5E1', fontSize: 13, fontWeight: 500 }}>{title}</Text>
         <div
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
+            width: 36,
+            height: 36,
+            borderRadius: 10,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: `${color}14`,
+            background: `${color}18`,
+            border: `1px solid ${color}25`,
             color,
-            fontSize: 16,
+            fontSize: 17,
           }}
         >
           {icon}
         </div>
       </div>
-      <div style={{ fontSize: 32, fontWeight: 700, color: '#F1F5F9', marginTop: 8, lineHeight: 1 }}>
+      <div style={{ fontSize: 36, fontWeight: 700, color: '#F8FAFC', marginTop: 10, lineHeight: 1, letterSpacing: '-0.02em' }}>
         {count}
       </div>
       <div
         style={{
-          marginTop: 12,
+          marginTop: 14,
           height: 3,
           borderRadius: 2,
           background: '#1E1E2E',
@@ -142,9 +147,10 @@ function StatCard({ title, count, color, icon, delay }: StatCardProps) {
         <div
           style={{
             height: '100%',
-            width: '60%',
+            width: count > 0 ? '60%' : '0%',
             borderRadius: 2,
-            background: `linear-gradient(90deg, ${color}, ${color}66)`,
+            background: `linear-gradient(90deg, ${color}, ${color}80)`,
+            transition: 'width 0.6s ease',
           }}
         />
       </div>
@@ -444,7 +450,12 @@ export default function Agents() {
             style: { cursor: 'pointer', transition: 'background 0.2s' },
             onClick: () => openDetail(record),
           })}
-          style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #2A2A3E' }}
+          style={{
+            borderRadius: 12,
+            overflow: 'hidden',
+            border: '1px solid #2A2A3E',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
+          }}
           locale={{ emptyText: '暂无 Agent，点击右上角「注册新 Agent」开始' }}
         />
       </motion.div>
