@@ -114,15 +114,28 @@ class TimeoutMiddleware(AgentMiddleware):
 class ContextSummaryMiddleware(AgentMiddleware):
     """长上下文自动摘要压缩 — 超过窗口 75% 时压缩"""
 
-    MAX_CONTEXT_CHARS = 30000  # 约 7500 tokens 的粗略近似
+    DEFAULT_MAX_CHARS = 30000  # 约 7500 tokens 的粗略近似
+    CHARS_PER_TOKEN = 4  # 粗略估算
+    THRESHOLD_RATIO = 0.75  # 上下文窗口使用率阈值
 
     async def before_task(self, agent: BaseAgent, ctx: dict[str, Any]) -> dict[str, Any]:
         messages = ctx.get("messages", [])
         if not messages:
             return ctx
 
+        # 动态阈值：优先从模型配置读取 context_window
+        max_chars = self.DEFAULT_MAX_CHARS
+        if hasattr(agent.llm_client, 'get_model_config'):
+            try:
+                config = agent.llm_client.get_model_config(agent.role)
+                context_window = getattr(config, 'context_window', 0)
+                if context_window > 0:
+                    max_chars = int(context_window * self.CHARS_PER_TOKEN * self.THRESHOLD_RATIO)
+            except Exception:
+                pass  # fallback to default
+
         total_len = sum(len(m.get("content", "")) for m in messages)
-        if total_len <= self.MAX_CONTEXT_CHARS:
+        if total_len <= max_chars:
             return ctx
 
         # 压缩：保留 system + 最新 2 条，中间部分请求 LLM 摘要

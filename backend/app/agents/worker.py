@@ -9,6 +9,7 @@ Worker 根据 ctx.agent_role 自动加载对应 Prompt 模板，
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
@@ -104,7 +105,10 @@ class WorkerAgent(BaseAgent):
                 return self._prompt_loader.load(
                     agent_role,
                     action,
-                    **{k: str(v) for k, v in payload.items()},
+                    **{
+                        k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else str(v)
+                        for k, v in payload.items()
+                    },
                 )
             except (FileNotFoundError, KeyError):
                 pass

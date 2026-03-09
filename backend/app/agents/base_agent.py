@@ -210,11 +210,17 @@ class BaseAgent(ABC):
                         self.agent_id, msg.message_id,
                     )
 
+                # 成功消费后重置退避计数器
+                self._consume_errors = 0
+
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self._log.opt(exception=True).error("consume loop error")
-                await asyncio.sleep(1)
+                # 指数退避：最多 30 秒
+                backoff = min(2 ** getattr(self, '_consume_errors', 0), 30)
+                self._consume_errors = getattr(self, '_consume_errors', 0) + 1
+                await asyncio.sleep(backoff)
 
     async def _heartbeat_loop(self) -> None:
         """定期发送心跳。"""
@@ -223,7 +229,11 @@ class BaseAgent(ABC):
                 await send_heartbeat(self.agent_id, status="idle")
             except Exception:
                 self._log.opt(exception=True).warning("heartbeat failed")
-            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=HEARTBEAT_INTERVAL)
+                break  # stop event was set
+            except TimeoutError:
+                pass  # normal heartbeat cycle
 
     def stop(self) -> None:
         """请求停止 Agent。"""

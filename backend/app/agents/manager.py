@@ -15,7 +15,6 @@ from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.utils.logger import logger
-from app.utils.prompt_loader import PromptLoader
 
 
 # Manager 角色 → 行为描述
@@ -49,7 +48,6 @@ class ManagerAgent(BaseAgent):
                 f"must be one of {sorted(_MANAGER_ROLE_PROMPTS)}"
             )
         self.manager_role = manager_role
-        self._prompt_loader = PromptLoader()
 
     async def handle_task(self, ctx: dict[str, Any]) -> str:
         """处理管理层任务 — 根据 manager_role 执行不同逻辑。

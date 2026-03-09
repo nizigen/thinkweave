@@ -256,12 +256,19 @@ class TestHeartbeat:
         import time
         now = str(time.time())
         old = str(1000.0)
-        states = {"a1": {"last_heartbeat": now}, "a2": {"last_heartbeat": old}, "a3": {}}
+        # Mock pipeline-based batch query
+        states_list = [
+            {"last_heartbeat": now},   # a1: alive
+            {"last_heartbeat": old},   # a2: expired
+            {},                         # a3: no state
+        ]
 
-        async def mock_get(aid):
-            return states.get(str(aid), {})
+        mock_pipe = MagicMock()
+        mock_pipe.hgetall = MagicMock(return_value=mock_pipe)
+        mock_pipe.execute = AsyncMock(return_value=states_list)
 
-        with patch("app.services.heartbeat.get_agent_state", side_effect=mock_get):
+        with patch("app.services.heartbeat.redis_client") as mock_redis:
+            mock_redis.pipeline = MagicMock(return_value=mock_pipe)
             from app.services.heartbeat import find_expired_agents
             expired = await find_expired_agents(["a1", "a2", "a3"])
             assert "a2" in expired

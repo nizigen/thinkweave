@@ -128,12 +128,27 @@ class DAGScheduler:
             log.opt(exception=True).error("DAGScheduler crashed")
             await self._mark_task_failed("Scheduler internal error")
         finally:
+            await self.cleanup()
             log.info("DAGScheduler stopped")
 
     def stop(self) -> None:
         """外部请求停止调度。"""
         self._stop.set()
         self._schedule_event.set()
+
+    async def cleanup(self) -> None:
+        """停止后清理运行中节点的超时监控和 Agent 状态。"""
+        for node_id, agent_id in list(self._running_nodes.items()):
+            await remove_timeout_watch(str(node_id))
+            async with async_session_factory() as session:
+                await session.execute(
+                    update(Agent)
+                    .where(Agent.id == agent_id)
+                    .values(status=AGENT_IDLE)
+                )
+                await session.commit()
+        self._running_nodes.clear()
+        self._node_roles.clear()
 
     async def on_node_completed(
         self,
@@ -167,6 +182,7 @@ class DAGScheduler:
         await remove_timeout_watch(str(node_id))
 
         self._running_nodes.pop(node_id, None)
+        self._node_roles.pop(node_id, None)
         log.info("node completed")
 
         # 标记下游节点为 ready
@@ -211,6 +227,7 @@ class DAGScheduler:
                 await remove_timeout_watch(str(node_id))
 
                 self._running_nodes.pop(node_id, None)
+                self._node_roles.pop(node_id, None)
                 log.warning("node failed (retry {}/{}): {}", new_retry, MAX_RETRIES, error)
 
                 # 推入就绪队列，优先级降低
@@ -232,6 +249,7 @@ class DAGScheduler:
                 await remove_timeout_watch(str(node_id))
 
                 self._running_nodes.pop(node_id, None)
+                self._node_roles.pop(node_id, None)
                 log.error("node permanently failed after {} retries", MAX_RETRIES)
 
             self._schedule_event.set()

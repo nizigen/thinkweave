@@ -14,7 +14,7 @@ from app.services.redis_streams import (
     get_agent_state,
     set_agent_state,
 )
-from app.redis_client import redis_client
+from app.redis_client import redis_client  # noqa: F401 — used in pipeline ops
 from app.utils.logger import logger
 
 # 心跳超时阈值（秒）— Agent 超过此时间未发心跳视为离线
@@ -55,10 +55,18 @@ async def check_agent_alive(
 async def get_all_agent_states(
     agent_ids: list[str | uuid.UUID],
 ) -> dict[str, dict[str, str]]:
-    """批量获取多个 Agent 的运行时状态。"""
+    """批量获取多个 Agent 的运行时状态（pipeline 批量化）。"""
+    if not agent_ids:
+        return {}
+
     result: dict[str, dict[str, str]] = {}
-    for aid in agent_ids:
-        state = await get_agent_state(aid)
+    pipe = redis_client.pipeline(transaction=False)
+    keys = [agent_state_key(aid) for aid in agent_ids]
+    for key in keys:
+        pipe.hgetall(key)
+    states = await pipe.execute()
+
+    for aid, state in zip(agent_ids, states):
         if state:
             result[str(aid)] = state
     return result
@@ -67,11 +75,20 @@ async def get_all_agent_states(
 async def find_expired_agents(
     agent_ids: list[str | uuid.UUID],
 ) -> list[str]:
-    """返回所有心跳超时的 agent_id 列表。"""
+    """返回所有心跳超时的 agent_id 列表（pipeline 批量化）。"""
+    if not agent_ids:
+        return []
+
     expired: list[str] = []
     now = time.time()
-    for aid in agent_ids:
-        state = await get_agent_state(aid)
+
+    pipe = redis_client.pipeline(transaction=False)
+    keys = [agent_state_key(aid) for aid in agent_ids]
+    for key in keys:
+        pipe.hgetall(key)
+    states = await pipe.execute()
+
+    for aid, state in zip(agent_ids, states):
         if not state:
             expired.append(str(aid))
             continue

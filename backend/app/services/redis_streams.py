@@ -50,7 +50,7 @@ class MessageEnvelope:
     node_id: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
-    ttl: int = 60  # seconds
+    ttl: int = 60  # seconds — 预留字段，当前未做消费端过期检查
 
     def to_redis(self) -> dict[str, str]:
         """序列化为 Redis Stream field-value 映射（全部字符串）。"""
@@ -191,11 +191,16 @@ async def xread_latest(
     streams: dict[str, str],
     *,
     count: int = 50,
+    block: int = 5000,
     r: aioredis.Redis | None = None,
 ) -> list[StreamMessage]:
-    """非 Consumer Group 读取 — 用于 WebSocket 订阅等只读场景。"""
+    """非 Consumer Group 读取 — 用于 WebSocket 订阅等只读场景。
+
+    block: 阻塞等待毫秒数。默认 5000ms，调用者应在外层循环中重复调用。
+           传 0 表示非阻塞立即返回。不建议传极大值以免协程无法取消。
+    """
     cli = r or redis_client
-    raw = await cli.xread(streams=streams, count=count, block=0)
+    raw = await cli.xread(streams=streams, count=count, block=block)
     if not raw:
         return []
 

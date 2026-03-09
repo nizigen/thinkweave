@@ -264,8 +264,13 @@ async def _persist_message(envelope: MessageEnvelope) -> None:
             )
             session.add(msg)
             await session.commit()
-    except Exception:
-        logger.opt(exception=True).warning("failed to persist message {}", envelope.msg_id)
+    except Exception as exc:
+        # 唯一键冲突（重复消息）可安全忽略，其他错误上报
+        from sqlalchemy.exc import IntegrityError
+        if isinstance(exc, IntegrityError):
+            logger.debug("duplicate message ignored: {}", envelope.msg_id)
+        else:
+            logger.opt(exception=True).error("failed to persist message {}", envelope.msg_id)
 
 
 async def get_task_messages(
