@@ -7,6 +7,15 @@ from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
+# Constants (must be defined before schemas that reference them)
+# ---------------------------------------------------------------------------
+
+VALID_MODES = {"report", "novel", "custom"}
+VALID_DEPTHS = {"quick", "standard", "deep"}
+VALID_AGENT_ROLES = {"outline", "writer", "reviewer", "consistency"}
+
+
+# ---------------------------------------------------------------------------
 # API Schemas
 # ---------------------------------------------------------------------------
 
@@ -65,10 +74,6 @@ class TaskDetailRead(TaskRead):
 # ---------------------------------------------------------------------------
 # DAG Validation Schemas (for LLM JSON response parsing)
 # ---------------------------------------------------------------------------
-
-VALID_MODES = {"report", "novel", "custom"}
-VALID_DEPTHS = {"quick", "standard", "deep"}
-VALID_AGENT_ROLES = {"outline", "writer", "reviewer", "consistency"}
 
 
 class DAGNodeSchema(BaseModel):

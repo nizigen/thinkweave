@@ -9,30 +9,18 @@ from app.database import get_session
 from app.schemas.task import TaskCreate, TaskDetailRead, TaskRead
 from app.services import task_service
 from app.services.task_decomposer import TaskValidationError
-from app.utils.llm_client import BaseLLMClient
+from app.utils.llm_client import BaseLLMClient, LLMClient
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
 
 # ---------------------------------------------------------------------------
 # LLM client dependency — overridable in tests via app.dependency_overrides
 # ---------------------------------------------------------------------------
 
-_llm_client_instance: BaseLLMClient | None = None
-
-
 def get_llm_client() -> BaseLLMClient:
-    """Return the LLM client singleton. Must be set before first request."""
-    if _llm_client_instance is None:
-        # Lazily import and instantiate the real LLMClient
-        from app.utils.llm_client import LLMClient
-        set_llm_client(LLMClient())
-    return _llm_client_instance  # type: ignore[return-value]
-
-
-def set_llm_client(client: BaseLLMClient) -> None:
-    """Set the LLM client instance (used in startup / tests)."""
-    global _llm_client_instance
-    _llm_client_instance = client
+    """Return a LLM client instance. Override via app.dependency_overrides in tests."""
+    return LLMClient()
 
 
 # ---------------------------------------------------------------------------
