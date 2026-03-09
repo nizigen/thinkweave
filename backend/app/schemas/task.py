@@ -11,10 +11,24 @@ from pydantic import BaseModel, Field, field_validator
 # ---------------------------------------------------------------------------
 
 class TaskCreate(BaseModel):
-    title: str
+    title: str = Field(..., min_length=5, max_length=500)
     mode: str = "report"
     depth: str = "standard"
-    target_words: int = 10000
+    target_words: int = Field(default=10000, ge=500, le=200000)
+
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        if v not in VALID_MODES:
+            raise ValueError(f"Invalid mode '{v}', must be one of {sorted(VALID_MODES)}")
+        return v
+
+    @field_validator("depth")
+    @classmethod
+    def validate_depth(cls, v: str) -> str:
+        if v not in VALID_DEPTHS:
+            raise ValueError(f"Invalid depth '{v}', must be one of {sorted(VALID_DEPTHS)}")
+        return v
 
 
 class TaskRead(BaseModel):

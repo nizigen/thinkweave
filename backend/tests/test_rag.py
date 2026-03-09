@@ -187,3 +187,130 @@ class TestHybridRetriever:
         # Score should be 1/(60+1) + 1/(60+1) = 2/61
         expected = 2.0 / 61.0
         assert abs(result[0].score - expected) < 0.0001
+
+
+# ---------------------------------------------------------------------------
+# RetrievalMiddleware Tests
+# ---------------------------------------------------------------------------
+
+from app.rag.middleware import RetrievalContext, RetrievalMiddleware
+
+
+class TestRetrievalContext:
+    def test_empty_context(self):
+        ctx = RetrievalContext(results=(), query="")
+        assert ctx.is_empty
+        assert ctx.to_prompt_text() == ""
+
+    def test_context_with_results(self):
+        results = (
+            RetrievalResult(
+                content="参考内容", score=0.85,
+                source_type="chapter", chapter_index=1,
+            ),
+        )
+        ctx = RetrievalContext(results=results, query="测试查询")
+        assert not ctx.is_empty
+        text = ctx.to_prompt_text()
+        assert "参考内容" in text
+        assert "相关度" in text
+        assert "第1章" in text
+
+    def test_prompt_text_max_results(self):
+        results = tuple(
+            RetrievalResult(content=f"内容{i}", score=0.5)
+            for i in range(10)
+        )
+        ctx = RetrievalContext(results=results, query="q")
+        text = ctx.to_prompt_text(max_results=3)
+        assert "内容0" in text
+        assert "内容2" in text
+        assert "内容3" not in text
+
+
+class TestRetrievalMiddlewareDisabled:
+    """Tests for RetrievalMiddleware when rag_enabled=False (zero overhead)."""
+
+    @pytest.mark.asyncio
+    async def test_retrieve_returns_empty_when_disabled(self):
+        mw = RetrievalMiddleware(enabled=False)
+        ctx = await mw.retrieve("some query", task_id="t1")
+        assert ctx.is_empty
+
+    @pytest.mark.asyncio
+    async def test_ingest_returns_zero_when_disabled(self):
+        mw = RetrievalMiddleware(enabled=False)
+        count = await mw.ingest("some text", task_id="t1")
+        assert count == 0
+
+    def test_components_not_initialized_when_disabled(self):
+        mw = RetrievalMiddleware(enabled=False)
+        assert mw._retriever is None
+        assert mw._embedder is None
+        assert mw._chunker is None
+        assert mw.enabled is False
+
+
+class TestRetrievalMiddlewareEnabled:
+    """Tests for RetrievalMiddleware when rag_enabled=True."""
+
+    @pytest.mark.asyncio
+    async def test_components_initialized_when_enabled(self):
+        mock = MockLLMClient()
+        mw = RetrievalMiddleware(llm_client=mock, enabled=True)
+        assert mw._retriever is not None
+        assert mw._embedder is not None
+        assert mw._chunker is not None
+        assert mw.enabled is True
+
+    @pytest.mark.asyncio
+    async def test_retrieve_runs_search(self):
+        mock = MockLLMClient()
+        mw = RetrievalMiddleware(llm_client=mock, enabled=True)
+        ctx = await mw.retrieve("量子计算基础", task_id="t1")
+        # Stub retriever returns empty, but middleware ran without error
+        assert ctx.is_empty
+        assert ctx.query == "量子计算基础"
+
+    @pytest.mark.asyncio
+    async def test_retrieve_empty_query(self):
+        mock = MockLLMClient()
+        mw = RetrievalMiddleware(llm_client=mock, enabled=True)
+        ctx = await mw.retrieve("", task_id="t1")
+        assert ctx.is_empty
+
+    @pytest.mark.asyncio
+    async def test_retrieve_whitespace_query(self):
+        mock = MockLLMClient()
+        mw = RetrievalMiddleware(llm_client=mock, enabled=True)
+        ctx = await mw.retrieve("   ", task_id="t1")
+        assert ctx.is_empty
+
+    @pytest.mark.asyncio
+    async def test_ingest_chunks_and_embeds(self):
+        mock = MockLLMClient()
+        mw = RetrievalMiddleware(llm_client=mock, enabled=True)
+        text = "段落一内容。\n\n段落二内容。\n\n段落三内容。"
+        count = await mw.ingest(text, task_id="t1", source_type="chapter", chapter_index=2)
+        assert count > 0
+        # Verify embedder was called
+        embed_calls = [c for c in mock.call_log if c["method"] == "embed"]
+        assert len(embed_calls) >= 1
+
+    @pytest.mark.asyncio
+    async def test_ingest_empty_text(self):
+        mock = MockLLMClient()
+        mw = RetrievalMiddleware(llm_client=mock, enabled=True)
+        count = await mw.ingest("", task_id="t1")
+        assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_custom_retriever_injected(self):
+        """Verify dependency injection works for custom retriever."""
+        mock = MockLLMClient()
+        custom_retriever = HybridRetriever(k=30)
+        mw = RetrievalMiddleware(
+            llm_client=mock, retriever=custom_retriever, enabled=True
+        )
+        assert mw._retriever is custom_retriever
+        assert mw._retriever._k == 30
