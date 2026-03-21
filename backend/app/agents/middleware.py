@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from app.memory.session import SessionMemory
 from app.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -182,10 +184,68 @@ class ContextSummaryMiddleware(AgentMiddleware):
         return ctx
 
 
-# 默认中间件栈（执行顺序：Logging → TokenTracking → Timeout → ContextSummary → Agent.handle_task）
+class MemoryMiddleware(AgentMiddleware):
+    """Session memory injection and write-back middleware."""
+
+    def __init__(
+        self,
+        session_factory: Callable[[str], SessionMemory] | None = None,
+    ) -> None:
+        self._session_factory = session_factory or (
+            lambda task_id: SessionMemory(task_id=task_id)
+        )
+
+    async def before_task(self, agent: BaseAgent, ctx: dict[str, Any]) -> dict[str, Any]:
+        task_id = ctx.get("task_id")
+        if not task_id:
+            return {**ctx, "memory_context": ""}
+
+        session = self._session_factory(str(task_id))
+        enabled = await session.initialize()
+
+        if not enabled:
+            return {**ctx, "_session_memory": session, "memory_context": ""}
+
+        query_text = ctx.get("title") or ""
+        if not query_text:
+            return {**ctx, "_session_memory": session, "memory_context": ""}
+
+        rows = await session.query(query_text, limit=5)
+        memory_context = "\n".join(
+            str(row.get("content", "")).strip()
+            for row in rows
+            if row.get("content")
+        )
+        return {**ctx, "_session_memory": session, "memory_context": memory_context}
+
+    async def after_task(
+        self, agent: BaseAgent, ctx: dict[str, Any], result: str,
+    ) -> str:
+        session: SessionMemory | None = ctx.get("_session_memory")
+        if not session:
+            return result
+
+        try:
+            await session.store(
+                result,
+                metadata={
+                    "node_id": ctx.get("node_id"),
+                    "agent_role": agent.role,
+                },
+            )
+            if agent.role == "outline":
+                await session.store_territory_map(result)
+        except Exception:
+            logger.opt(exception=True).warning("memory write-back failed")
+
+        return result
+
+
+# 默认中间件栈（执行顺序：Logging → TokenTracking → Timeout → ContextSummary → Memory → Agent.handle_task）
 DEFAULT_MIDDLEWARES: tuple[AgentMiddleware, ...] = (
     LoggingMiddleware(),
     TokenTrackingMiddleware(),
     TimeoutMiddleware(),
     ContextSummaryMiddleware(),
+    MemoryMiddleware(),
 )

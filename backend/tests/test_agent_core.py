@@ -1,4 +1,4 @@
-"""Tests for Step 3.3 — Agent基类 + 层级Agent + 中间件 + 注册表
+﻿"""Tests for Step 3.3 — Agent基类 + 层级Agent + 中间件 + 注册表
 
 测试策略：
   - 使用 MockLLMClient（不调用外部API）
@@ -22,6 +22,7 @@ from app.agents.middleware import (
     ContextSummaryMiddleware,
     DEFAULT_MIDDLEWARES,
     LoggingMiddleware,
+    MemoryMiddleware,
     TimeoutMiddleware,
     TokenTrackingMiddleware,
 )
@@ -664,8 +665,9 @@ class TestMiddlewarePipeline:
 
     async def test_default_middlewares_count(self):
         """默认中间件应该有4个"""
-        assert len(DEFAULT_MIDDLEWARES) == 4
+        assert len(DEFAULT_MIDDLEWARES) == 5
         assert isinstance(DEFAULT_MIDDLEWARES[0], LoggingMiddleware)
         assert isinstance(DEFAULT_MIDDLEWARES[1], TokenTrackingMiddleware)
         assert isinstance(DEFAULT_MIDDLEWARES[2], TimeoutMiddleware)
         assert isinstance(DEFAULT_MIDDLEWARES[3], ContextSummaryMiddleware)
+        assert isinstance(DEFAULT_MIDDLEWARES[4], MemoryMiddleware)
