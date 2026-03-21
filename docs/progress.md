@@ -110,3 +110,13 @@
   - mid-entry draft routes to `fsm_state=pre_review_integrity`
 - Verification:
   - `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_service_entry_stage.py backend/tests/test_entry_stage.py` => 6 passed.
+2026-03-22: Step 4.3D API coverage + dual-review evidence lane.
+- Added API tests for mid-entry routing in `backend/tests/test_task_api.py`:
+  - `draft_text` request -> `fsm_state=pre_review_integrity`
+  - `review_comments` request -> `fsm_state=pre_review_integrity`
+- Security review finding fixed (MEDIUM): `TaskCreate` previously accepted unbounded `draft_text/review_comments`, risking oversized payload abuse.
+  - Fix: added schema limits in `backend/app/schemas/task.py` (`draft_text<=200000`, `review_comments<=50000`)
+  - Added schema tests in `backend/tests/test_task_schema_entry_inputs.py` (3 tests).
+- Verification:
+  - `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_schema_entry_inputs.py backend/tests/test_task_service_entry_stage.py backend/tests/test_entry_stage.py` => 9 passed.
+  - `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_api.py -k \"draft_text_enters_pre_review_integrity or review_comments_enters_pre_review_integrity\"` blocked by local PostgreSQL connection reset in this environment.
