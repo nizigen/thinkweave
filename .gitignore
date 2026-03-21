@@ -53,7 +53,6 @@ htmlcov/
 backend/migrations/versions/__pycache__/
 
 # Project docs (generated specs)
-docs/
 diagrams/
 CLAUDE.md
 progress.txt
