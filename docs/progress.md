@@ -100,3 +100,13 @@
 - Note: full `test_long_text_fsm.py` remains blocked by local PostgreSQL connectivity in this environment.
 2026-03-21: Step 4.2 bugfix (tri-plugin Stage 2 execution) - fixed WriterAgent payload normalization to include `memory_context` (ctx-level preferred, payload fallback), preventing `write_chapter` template key-miss fallback and restoring memory-guided drafting behavior.
 - Verification: `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_specialized_agents.py::test_writer_agent_injects_memory_context_into_prompt` => 1 passed; `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_specialized_agents.py` => 4 passed.
+2026-03-22: Step 4.3D entry-stage bootstrap wiring completed via tri-plugin TDD.
+- Added optional task input fields `draft_text` / `review_comments` in `TaskCreate` schema.
+- Wired `task_service.create_task()` to call `build_entry_metadata(...)` and persist:
+  - `tasks.fsm_state` from detected `entry_stage`
+  - `tasks.checkpoint_data` with `entry_stage` + `entry_inputs` flags
+- Added non-DB unit tests `backend/tests/test_task_service_entry_stage.py` with fake session + decomposer monkeypatch:
+  - title-only keeps `fsm_state=init`
+  - mid-entry draft routes to `fsm_state=pre_review_integrity`
+- Verification:
+  - `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_service_entry_stage.py backend/tests/test_entry_stage.py` => 6 passed.

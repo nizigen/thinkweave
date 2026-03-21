@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.schemas.task import TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
+from app.services.entry_stage import build_entry_metadata
 from app.services.task_decomposer import decompose_task, TaskValidationError
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
@@ -26,12 +27,18 @@ async def create_task(
     Flow: create Task row → decompose via LLM → create TaskNode rows → return detail.
     """
     # 1. 持久化 Task 主记录
+    entry_meta = build_entry_metadata(
+        draft_text=task_in.draft_text,
+        review_comments=task_in.review_comments,
+    )
     task = Task(
         title=task_in.title,
         mode=task_in.mode,
         depth=task_in.depth,
         target_words=task_in.target_words,
         status="decomposing",
+        fsm_state=entry_meta["entry_stage"],
+        checkpoint_data=entry_meta,
     )
     session.add(task)
     await session.flush()

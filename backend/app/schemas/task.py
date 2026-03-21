@@ -24,6 +24,8 @@ class TaskCreate(BaseModel):
     mode: str = "report"
     depth: str = "standard"
     target_words: int = Field(default=10000, ge=500, le=200000)
+    draft_text: str | None = None
+    review_comments: str | None = None
 
     @field_validator("mode")
     @classmethod
