@@ -98,3 +98,5 @@
 - Added policy tests in `tests/test_long_text_fsm.py`.
 - Verification: `pytest backend/tests/test_long_text_fsm.py -k "CheckpointPolicy or TestConstants" -q` => 7 passed.
 - Note: full `test_long_text_fsm.py` remains blocked by local PostgreSQL connectivity in this environment.
+2026-03-21: Step 4.2 bugfix (tri-plugin Stage 2 execution) - fixed WriterAgent payload normalization to include `memory_context` (ctx-level preferred, payload fallback), preventing `write_chapter` template key-miss fallback and restoring memory-guided drafting behavior.
+- Verification: `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_specialized_agents.py::test_writer_agent_injects_memory_context_into_prompt` => 1 passed; `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_specialized_agents.py` => 4 passed.
