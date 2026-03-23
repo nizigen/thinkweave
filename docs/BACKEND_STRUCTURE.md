@@ -752,20 +752,20 @@ class RetrievalMiddleware(AgentMiddleware):
 
 ### 记忆层（memory/）— cognee 驱动（pip install），`memory_enabled` 配置控制
 
-基于 cognee 的 Graph+Vector 混合知识引擎（`pip install cognee==0.1.21`），通过薄适配层对接项目配置和 LLM 客户端。解决并行写作内容重复和跨任务知识积累。
+基于 cognee 的 Graph+Vector 混合知识引擎（`pip install cognee==0.5.5`），通过薄适配层对接项目配置。默认 provider 为 `graph=kuzu`、`vector=lancedb`（cognee 内置默认）。支持的 graph 后端：kuzu / falkor / neo4j_aura_dev；支持的 vector 后端：lancedb / falkor / pgvector。不受支持的组合在 enabled 模式下显式报错。该层解决并行写作内容重复和跨任务知识积累。
 
 **两层记忆架构**：
 
 | 层级 | 存储 | 生命周期 | 用途 |
 |------|------|---------|------|
-| **Session Memory** | Neo4j 图 + Qdrant 向量 | 单次任务 | 并行章节协调、主题领地、内容去重、图片/引用去重 |
-| **Knowledge Graph** | Neo4j + Qdrant（持久） | 永久 | 跨任务知识积累、已验证引用库、实体关系图谱 |
+| **Session Memory** | Kuzu 图 + LanceDB 向量（via cognee 0.5.5） | 单次任务 | 并行章节协调、主题领地、内容去重、图片/引用去重 |
+| **Knowledge Graph** | 由 cognee promotion lane 管理的 graph/vector 存储 | 永久 | 跨任务知识积累、已验证引用库、实体关系图谱 |
 
 **数据模型**（`memory/models.py`）：
 ```python
 @dataclass
 class TopicClaim:
-    """章节主题领地声明 — Neo4j 图节点"""
+    """章节主题领地声明 — Kuzu 图节点（via cognee）"""
     section_id: str
     topic: str                    # 主题描述
     owns: list[str]               # 本章负责的论点
@@ -774,7 +774,7 @@ class TopicClaim:
 
 @dataclass
 class ContentSummary:
-    """章节内容摘要 — Qdrant 向量 + Neo4j 图节点"""
+    """章节内容摘要 — LanceDB 向量 + Kuzu 图节点（via cognee）"""
     section_id: str
     key_points: list[str]         # 核心论点
     word_count: int
@@ -800,13 +800,13 @@ class SessionMemory:
     """单次任务记忆 — 统一 API"""
 
     def __init__(self, session_id: str, config: MemoryConfig):
-        self.topic_store = TopicStore(session_id, config.neo4j)      # Neo4j
-        self.vector_index = VectorIndex(session_id, config.qdrant)   # Qdrant
+        self.topic_store = TopicStore(session_id, config)              # Kuzu via cognee
+        self.vector_index = VectorIndex(session_id, config)           # LanceDB via cognee
         self.image_registry = ImageRegistry()
         self.embedder = Embedder(config.embedding_model)             # 复用 llm_client.embed()
 
     async def initialize(self):
-        """创建 session 命名空间（Neo4j 图 + Qdrant 临时 collection）"""
+        """创建 session 命名空间（Kuzu 图 + LanceDB 向量，via cognee）"""
         # 连接失败时 graceful degradation 到 InMemory 实现
 
     async def store_territory_map(self, territory: dict[str, TopicClaim]):
@@ -911,8 +911,8 @@ Level 3 — Reviewer Agent 审查时（MemoryMiddleware.before_task）：
 
 | 组件不可用 | 降级方案 | 影响 |
 |-----------|---------|------|
-| Neo4j 连接失败 | `InMemoryTopicStore`（dict 实现） | 丢失图查询，主题领地仍工作 |
-| Qdrant 连接失败 | `InMemoryVectorIndex`（numpy 暴力余弦） | 小规模可用，大规模变慢 |
+| Kuzu 连接失败 | `InMemoryTopicStore`（dict 实现） | 丢失图查询，主题领地仍工作 |
+| LanceDB 连接失败 | `InMemoryVectorIndex`（numpy 暴力余弦） | 小规模可用，大规模变慢 |
 | Embedding API 失败 | 跳过向量相似度，仅关键词去重 | 去重精度下降 |
 | `MEMORY_ENABLED=false` | 跳过所有记忆操作，v1 行为 | 无去重 |
 
@@ -920,8 +920,8 @@ Level 3 — Reviewer Agent 审查时（MemoryMiddleware.before_task）：
 
 | 组件 | 并发场景 | 安全保证 |
 |------|---------|---------|
-| Neo4j 写入 | 多个 Writer 同时 store_content_summary | Neo4j ACID 事务，原生并发安全，无需应用层锁 |
-| Qdrant upsert | 多个 Writer 同时 upsert 章节嵌入 | Qdrant 原生支持并发 upsert，无需应用层锁 |
+| Kuzu 写入 | 多个 Writer 同时 store_content_summary | Kuzu ACID 事务，原生并发安全，无需应用层锁 |
+| LanceDB upsert | 多个 Writer 同时 upsert 章节嵌入 | LanceDB 原生支持并发 upsert，无需应用层锁 |
 | ImageRegistry | 两个 Writer 同时选同一张图片 | **需要 `asyncio.Lock`** — check-then-mark 必须原子化 |
 | get_other_sections_context | 读取时其他 Writer 正在写入 | 返回**最终一致性快照**（不是强一致性），后启动的 Writer 天然获得更丰富上下文（Progressive Awareness） |
 
@@ -929,13 +929,13 @@ Level 3 — Reviewer Agent 审查时（MemoryMiddleware.before_task）：
 
 **Persistent Memory vs Knowledge Graph 职责分界**：
 
-| 维度 | Persistent Memory (pgvector) | Knowledge Graph (Neo4j/Qdrant) |
+| 维度 | Persistent Memory (pgvector) | Knowledge Graph (Kuzu/LanceDB via cognee) |
 |------|-----|-----|
 | **关注** | **怎么写** — 写作偏好、风格规范 | **写什么** — 领域知识、事实性数据 |
 | **存什么** | 历史输出摘要、用户偏好（语气/长度/格式）、写作模板 | 实体关系、已验证引用、术语定义 |
 | **谁读** | Writer（风格参考）、Outline（结构参考） | Writer（事实参考）、Outline（领域知识）、Reviewer（事实核查） |
 | **更新频率** | 低（用户偏好变化慢） | 高（每次任务产出新知识） |
-| **查询方式** | 向量语义检索（pgvector cosine） | 图遍历（Neo4j Cypher）+ 向量检索（Qdrant） |
+| **查询方式** | 向量语义检索（pgvector cosine） | 图遍历（Kuzu Cypher）+ 向量检索（LanceDB） |
 | **管理者** | `context_manager.py` | `memory/knowledge/graph.py` |
 
 ### 长文本FSM（long_text_fsm.py）
@@ -1323,11 +1323,10 @@ EMBEDDING_DIMENSIONS=1536
 
 # Memory Layer（记忆层，自研）
 MEMORY_ENABLED=true
-NEO4J_URI=bolt://localhost:7687
-NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=your_neo4j_password
-NEO4J_DATABASE=agentic_nexus
-QDRANT_URL=http://localhost:6333
+# Memory (cognee defaults: kuzu + lancedb, no extra config needed)
+MEMORY_ENABLED=false
+GRAPH_DATABASE_PROVIDER=kuzu
+VECTOR_DATABASE_PROVIDER=lancedb
 MEMORY_OVERLAP_THRESHOLD=0.85
 KNOWLEDGE_GRAPH_ENABLED=true
 KG_PROMOTE_MIN_CREDIBILITY=0.7

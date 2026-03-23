@@ -12,14 +12,10 @@ class MemoryConfig(BaseSettings):
 
     memory_enabled: bool = False
 
-    neo4j_uri: str = "bolt://localhost:7687"
-    neo4j_user: str = "neo4j"
-    neo4j_password: str = "neo4j_password"
-    neo4j_database: str = "neo4j"
-
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_api_key: str = ""
-    qdrant_collection: str = "session_memory"
+    cognee_version: str = "0.5.5"
+    graph_database_provider: str = "kuzu"
+    vector_database_provider: str = "lancedb"
+    enable_backend_access_control: bool = False
 
     memory_embedding_model: str = "text-embedding-3-small"
     memory_namespace_prefix: str = "task"

@@ -26,12 +26,12 @@
 | YAML解析 | pyyaml | 6.0.2 | 技能文件YAML frontmatter解析 |
 | MCP客户端 | mcp | 1.6.0 | Model Context Protocol客户端SDK |
 | 向量扩展 | pgvector | 0.3.6 | PostgreSQL向量搜索（RAG检索模块用，pgvector-python绑定） |
-| 记忆层框架 | cognee | 0.1.21 | Graph+Vector混合知识引擎（add/search/cognify API） |
-| 图数据库客户端 | neo4j | 5.25.0 | Neo4j Python驱动（cognee 图后端） |
-| 向量数据库客户端 | qdrant-client | 1.12.1 | Qdrant Python客户端（cognee 向量后端） |
+| 记忆层框架 | cognee | 0.5.5 | Graph+Vector 混合记忆引擎（add/search/cognify API） |
+| 图后端默认 provider | kuzu | current via cognee | 当前环境下 `cognee==0.5.5` 的默认图后端 |
+| 向量后端默认 provider | lancedb | current via cognee | 当前环境下 `cognee==0.5.5` 的默认向量后端 |
 | 日志 | loguru | 0.7.2 | 结构化日志 |
 
-> **cognee 作为 pip 依赖引入**（`pip install cognee==0.1.21`）。通过薄适配层封装 cognee 的 `add()`/`search()`/`cognify()` API，对接项目的 `llm_client` 和 `MemoryConfig`。cognee 自带的 LLM provider 和配置系统通过环境变量覆盖。详见 `docs/spike_4_1a_cognee_vendor.md`。
+> **cognee 作为 pip 依赖引入**（`pip install cognee==0.5.5`）。通过薄适配层封装 `cognee` 的 `add()`/`search()`/`cognify()` API，对接项目的 `MemoryConfig`。默认 provider 为 `graph=kuzu`、`vector=lancedb`（cognee 内置默认）。支持的 graph 后端：kuzu / falkor / neo4j_aura_dev；支持的 vector 后端：lancedb / falkor / pgvector。不受支持的组合会显式报错。Windows 原生支持，无需 Docker。
 | 测试 | pytest | 8.3.3 | 单元测试 |
 | 测试异步 | pytest-asyncio | 0.24.0 | 异步测试支持 |
 
@@ -66,10 +66,10 @@
 |------|------|------|
 | PostgreSQL | 15.8 | 持久化存储（任务/Agent/消息历史）+ pgvector RAG检索 |
 | Redis | 7.4.0 | 消息队列（Streams Consumer Group）+ 状态缓存（Hash/Sorted Set） |
-| Neo4j | 5-community | 图数据库（记忆层：章节主题领地图、实体关系、跨任务知识图谱） |
-| Qdrant | 1.12.0 | 向量数据库（记忆层：章节内容嵌入、语义去重、相似度检索） |
+| Kuzu | via cognee | 记忆层默认图后端（SessionMemory / promotion handoff） |
+| LanceDB | via cognee | 记忆层默认向量后端（章节摘要、语义去重、相似检索） |
 
-> **pgvector vs Qdrant 职责分离**：pgvector 服务于 RAG 检索模块（文档分块检索），Qdrant 服务于记忆层（章节级去重 + 跨任务知识检索）。两者关注点不同，不合并。
+> **RAG vs Memory 职责分离**：pgvector 服务于 RAG 检索模块（文档分块检索）；`cognee` 管理的 memory provider 服务于章节级去重、会话记忆和后续知识提升。两者关注点不同，不合并。
 
 ---
 
@@ -89,8 +89,8 @@ Docker Compose 启动以下服务（backend/frontend 本地直接运行）：
 |------|------|------|------|
 | PostgreSQL | ankane/pgvector:pg15 | 15432 | 数据库 + pgvector |
 | Redis | redis:7.4 | 6379 | 消息队列 + 缓存 |
-| Neo4j | neo4j:5-community | 7687/7474 | 记忆层图数据库 |
-| Qdrant | qdrant/qdrant:v1.12.0 | 6333 | 记忆层向量数据库 |
+| Kuzu/LanceDB | provider-managed | local provider paths | 记忆层默认 graph/vector backend（由 `cognee==0.5.5` 管理） |
+
 
 ---
 

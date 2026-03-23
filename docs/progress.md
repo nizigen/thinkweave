@@ -1,16 +1,31 @@
+## 文档同步（2026-03-22）
+- 已吸收可复用设计：分层推进、生命周期 hook、SessionMemory 优先落地。
+- 已明确本仓库 provider 真值：`cognee==0.5.5`，默认 `kuzu+lancedb`。
+
+## 编码与记忆口径固化（2026-03-22）
+- 已更新根规范：`CLAUDE.md`、`AGENTS.md`，写入当前记忆层真值与 PowerShell UTF-8 防乱码流程。
+- 已新增根记忆文件：`MEMORY.md`（记录长期稳定口径，防后续会话漂移）。
+- 已补充 `docs/lessons.md`：新增”Windows PowerShell 乱码教训”与恢复流程。
+
+## 记忆层文档重构（2026-03-23）
+- 移除 MemoryConfig 中废弃的 neo4j/qdrant 配置字段和测试
+- 清理 adapter.py 中冗余的 neo4j/qdrant 显式拒绝逻辑（已由白名单覆盖）
+- 统一 TECH_STACK.md / BACKEND_STRUCTURE.md / CLAUDE.md 中记忆层引用为 kuzu+lancedb
+- 确认 cognee==0.5.5 是 PyPI 最新版，Windows 原生支持，无需 Docker
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b（记忆层基础设施）
 进行中：无
-下一步：Step 4.1b — 记忆层基础设施（pip install cognee + 薄适配层）
+下一步：Step 4.2 — MemoryMiddleware 实现（before_task/after_task 集成到 Agent 中间件链）
 
 ## 文档更新（2026-03-18）
 - 6 份规范文档 + CLAUDE.md + lessons.md 已融入 cognee Memory Layer 设计
 - 来源：Aletheia v2 Architecture Design Spec + Memory Layer Design Spec（2026-03-17）
-- 新增依赖：cognee 0.1.21 + Neo4j 5-community + Qdrant v1.12.0
+- 新增依赖方向：`cognee==0.5.5`（memory）+ `pgvector`（RAG），memory 默认 provider 为 `kuzu+lancedb`
 - IMPLEMENTATION_PLAN.md：Phase 4 新增 Step 4.1b（记忆层基础设施）、Step 4.4（Knowledge Graph）
 - PRD.md：新增 F5.5 记忆协调模块
 - APP_FLOW.md：写作/审查/一致性阶段增加 Session Memory 交互
-- TECH_STACK.md：新增 cognee/Neo4j/Qdrant 依赖，新增 Docker 服务表
+- TECH_STACK.md：新增 cognee 依赖（kuzu+lancedb 默认 provider），新增 Docker 服务表
 - BACKEND_STRUCTURE.md：新增 memory/ 模块结构、MemoryMiddleware、四级去重设计
 - CLAUDE.md：新增记忆层架构约束、6 条关键决策记录
 - lessons.md：新增记忆层设计借鉴（8 条经验）
@@ -100,6 +115,37 @@
 - Note: full `test_long_text_fsm.py` remains blocked by local PostgreSQL connectivity in this environment.
 2026-03-21: Step 4.2 bugfix (tri-plugin Stage 2 execution) - fixed WriterAgent payload normalization to include `memory_context` (ctx-level preferred, payload fallback), preventing `write_chapter` template key-miss fallback and restoring memory-guided drafting behavior.
 - Verification: `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_specialized_agents.py::test_writer_agent_injects_memory_context_into_prompt` => 1 passed; `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_specialized_agents.py` => 4 passed.
+
+2026-03-22: Step 4.3 dedup metric landed - added `backend/app/services/dedup_quality.py` with `evaluate_dedup_quality(session, task_id)` and pairwise cosine duplicate-rate report (`threshold=0.85`).
+- Added tests: `backend/tests/test_dedup_quality.py` (3 passed).
+- Regression spot-check: `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_memory_core.py::TestSessionMemory::test_session_lifecycle` (1 passed).
+
+2026-03-22: tri-plugin Stage 1-3 execution (dedup API subflow)
+- Stage 1 (planning): 目标收敛为 Step 4.3 对外触发闭环（API 暴露 + DoS 上限 + 测试补盲）。
+- Stage 2 (TDD): 新增 `GET /api/tasks/{task_id}/dedup-quality`，新增响应 schema，补充 API/服务测试，定向测试 `6 passed`。
+- Stage 3 (dual review via subagents): 代码审查通过；安全审查剩余 1 个 HIGH（全局鉴权/授权缺失，影响 `GET /api/tasks/{task_id}` 与 dedup 接口）。
+- 状态：**BLOCKED BY PROCESS**（需产品/架构决策：是否在本轮引入任务级鉴权）。
+
+2026-03-22: tri-plugin follow-up closure (authz hardening)
+- Stage 2 fix: 所有任务读接口统一改为 `Authorization: Bearer <token>` 认证，服务端由 `settings.task_auth_tokens` 映射 token→user，再进行任务 owner 授权校验。
+- Stage 2 fix: `create/list/get/dedup` 全链路按同一 user_id 口径执行，关闭“匿名创建后不可读”和“列表可枚举”漏洞。
+- Stage 2 fix: `task_service.list_tasks` 增加 owner 过滤；dedup 度量保留 `max_chapters/max_chars_per_chapter` 上限与稳定排序。
+- Tests: `backend/tests/test_task_api.py::{TestGetTask,TestTaskDedupQuality,TestListTasks}` + `backend/tests/test_dedup_quality.py` => `15 passed`。
+- Stage 3 (dual review via subagents): code review **No findings**；security review **No findings**。
+- 状态：**UNBLOCKED**（本轮三阶段闭环完成，可继续下一实现项）。
+
+2026-03-22: tri-plugin Stage 1-3 (Step 4.3 baseline compare subflow)
+- Stage 1: 收敛为“基线对比 API 子流程”交付（baseline vs candidate，目标阈值可配置，沿用任务级授权）。
+- Stage 2: 新增 `GET /api/tasks/dedup-compare`，输出 `baseline_report/candidate_report/duplicate_rate_delta/goal_threshold/goal_met`；并补 `TaskDedupCompareRead` schema 与 compare service。
+- Stage 2 security hardening: 授权来源从 `checkpoint_data` 迁移到 `tasks.owner_id`（新增迁移 `d5e6f7a8b9c0_add_owner_id_to_tasks.py`），对象级未授权统一返回 `404`，`goal_threshold` 限制为 `[0,1]`。
+- Tests: `backend/tests/test_task_api.py::{TestGetTask,TestTaskDedupQuality,TestTaskDedupCompare,TestListTasks}` + `backend/tests/test_dedup_quality.py` => `22 passed`。
+- Stage 3: code review subagent **No findings**；security review subagent **No findings**。
+
+2026-03-22: Step 4.3 dedup compare subflow completed via tri-plugin TDD.
+- Added `GET /api/tasks/dedup-compare?baseline_task_id=...&candidate_task_id=...` with Bearer auth + owner checks.
+- Added compare response schema and service helper returning `baseline_report`, `candidate_report`, `duplicate_rate_delta`, `goal_threshold`, `goal_met`.
+- Added tests for success, `401`, `403`, `404`; compare-related suite now passes (`16 passed` for targeted task API + dedup tests).
+- Verification: `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_api.py::TestTaskDedupCompare backend/tests/test_dedup_quality.py::test_compare_dedup_quality_builds_delta_report` => 5 passed; `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_api.py::TestGetTask backend/tests/test_task_api.py::TestTaskDedupQuality backend/tests/test_task_api.py::TestListTasks backend/tests/test_dedup_quality.py` => 16 passed.
 2026-03-22: Step 4.3D entry-stage bootstrap wiring completed via tri-plugin TDD.
 - Added optional task input fields `draft_text` / `review_comments` in `TaskCreate` schema.
 - Wired `task_service.create_task()` to call `build_entry_metadata(...)` and persist:

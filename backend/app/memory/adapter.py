@@ -1,7 +1,8 @@
-"""Cognee-compatible adapter with graceful degradation."""
+"""Project-owned adapter around the installed cognee runtime."""
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from app.memory.config import MemoryConfig, get_memory_config
@@ -9,10 +10,10 @@ from app.utils.logger import logger
 
 
 class MemoryAdapter:
-    """Adapter layer for memory operations.
+    """Adapter layer for task-scoped memory operations.
 
-    This class wraps cognee-like APIs and provides a no-op fallback when
-    memory is disabled or the provider is unavailable.
+    Disabled mode preserves the v1 no-op behavior. Enabled mode must use a
+    supported cognee backend matrix and surface provider failures explicitly.
     """
 
     def __init__(
@@ -28,19 +29,44 @@ class MemoryAdapter:
     def enabled(self) -> bool:
         return self.config.memory_enabled
 
+    def ensure_supported_backend_matrix(self) -> None:
+        graph = self.config.graph_database_provider
+        vector = self.config.vector_database_provider
+
+        supported_graph = {"kuzu", "falkor", "neo4j_aura_dev"}
+        supported_vector = {"lancedb", "falkor", "pgvector"}
+
+        if graph not in supported_graph or vector not in supported_vector:
+            raise RuntimeError(
+                f"Unsupported cognee backend combination: "
+                f"graph={graph}, vector={vector}"
+            )
+
+    def _require_client(self) -> Any:
+        client = self._resolve_client()
+        if client is None:
+            raise RuntimeError("cognee client unavailable while memory is enabled")
+        return client
+
     def _resolve_client(self) -> Any | None:
         if not self.enabled:
             return None
         if self._cognee_client is not None:
             return self._cognee_client
 
+        self.ensure_supported_backend_matrix()
+
         try:
             import cognee  # type: ignore
 
+            os.environ.setdefault(
+                "ENABLE_BACKEND_ACCESS_CONTROL",
+                str(self.config.enable_backend_access_control).lower(),
+            )
             self._cognee_client = cognee
             return self._cognee_client
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"Memory provider unavailable, fallback to no-op: {exc}")
+            logger.warning(f"Memory provider unavailable in enabled mode: {exc}")
             return None
 
     async def add(
@@ -50,9 +76,9 @@ class MemoryAdapter:
         namespace: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Any | None:
-        client = self._resolve_client()
-        if client is None:
+        if not self.enabled:
             return None
+        client = self._require_client()
 
         try:
             return await client.add(
@@ -61,8 +87,8 @@ class MemoryAdapter:
                 metadata=metadata or {},
             )
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"Memory add failed, fallback to no-op: {exc}")
-            return None
+            logger.warning(f"Memory add failed in enabled mode: {exc}")
+            raise
 
     async def search(
         self,
@@ -71,16 +97,16 @@ class MemoryAdapter:
         namespace: str | None = None,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        client = self._resolve_client()
-        if client is None:
+        if not self.enabled:
             return []
+        client = self._require_client()
 
         try:
             rows = await client.search(query, namespace=namespace, top_k=limit)
             return rows or []
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"Memory search failed, fallback to empty: {exc}")
-            return []
+            logger.warning(f"Memory search failed in enabled mode: {exc}")
+            raise
 
     async def cognify(
         self,
@@ -88,13 +114,13 @@ class MemoryAdapter:
         *,
         namespace: str | None = None,
     ) -> dict[str, Any]:
-        client = self._resolve_client()
-        if client is None:
+        if not self.enabled:
             return {}
+        client = self._require_client()
 
         try:
             data = await client.cognify(content, namespace=namespace)
             return data or {}
         except Exception as exc:  # pragma: no cover
-            logger.warning(f"Memory cognify failed, fallback to empty: {exc}")
-            return {}
+            logger.warning(f"Memory cognify failed in enabled mode: {exc}")
+            raise

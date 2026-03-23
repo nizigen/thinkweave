@@ -1,5 +1,6 @@
 # IMPLEMENTATION_PLAN.md — 实施计划
 
+
 ## 原则
 - 每步只做这一步，不跳跃
 - 每步完成后更新 progress.md
@@ -159,23 +160,22 @@
 
 ### Step 4.1a — cognee vendor 验证 spike（2-4 小时）
 - [x] 调研 cognee v0.1.21 + v0.5.5 仓库结构、依赖链、核心 API 实现
-- [x] 画出 3 个 API 的 import 依赖链 → **结论：依赖链过深（>3000 LOC，35+ 核心依赖）**
+- [x] 画出 3 个 API 的 import 依赖链 → **结论：vendor 源码方式依赖链过深（>3000 LOC，35+ 核心依赖）**
 - [x] 评估 `cognify()` 实体提取 → **可用 `llm_client.chat_json()` 完全替代**（cognee 内部也是 LLM 结构化输出）
-- [x] 发现 cognee **无内置 Qdrant 适配器**（仅 LanceDB/PGVector/ChromaDB），Qdrant 必须自研
-- [x] **触发降级方案**：不 vendor cognee，自研记忆层，参考 cognee 架构模式
-- [x] 产出 spike 报告（`docs/spike_4_1a_cognee_vendor.md`），更新 TECH_STACK.md + Step 4.1b
+- [x] **最终方案**：不 vendor cognee 源码，改为 `pip install cognee==0.5.5` 使用其 API，封装薄适配层
+- [x] 产出 spike 报告，更新 TECH_STACK.md + Step 4.1b
 
-### Step 4.1b — 记忆层基础设施（自研，参考 cognee 架构模式）
-- [ ] Docker Compose 添加 Neo4j（5-community, port 7687/7474）+ Qdrant（v1.12.0, port 6333）
-- [ ] 实现 `memory/config.py`（MemoryConfig，pydantic-settings，从 .env 加载 Neo4j/Qdrant/Embedding 配置，MEMORY_ENABLED 开关）
-- [ ] 实现 `memory/models.py`（TopicClaim / ContentSummary / EntityRelation / KnowledgeGraph 数据模型，参考 cognee DataPoint 模式）
-- [ ] 实现 `memory/embedding.py`（复用 llm_client.embed()，带 SHA256 内容哈希缓存）
-- [ ] 实现 `memory/graph_store.py`（GraphStoreABC + Neo4jGraphStore + InMemoryGraphStore，参考 cognee GraphDBInterface 精简为 ~8 核心方法）
-- [ ] 实现 `memory/vector_store.py`（VectorStoreABC + QdrantVectorStore + InMemoryVectorStore，参考 cognee VectorDBInterface 精简为 ~6 核心方法）
-- [ ] 实现 `memory/entity_extractor.py`（LLM 结构化输出提取实体关系，通过 llm_client.chat_json() + KnowledgeGraph schema）
-- [ ] 实现 `memory/image_registry.py`（图片 URL→章节映射，asyncio.Lock 防跨章节重复）
-- [ ] 实现 `memory/session.py`（SessionMemory 统一 API：initialize/store/query/cleanup，namespace 隔离）
-- [ ] 单元测试（InMemory 后端，mock Neo4j/Qdrant/Embedding）
+### Step 4.1b — 记忆层基础设施（pip install cognee==0.5.5 + 薄适配层）
+- [x] `pip install cognee==0.5.5` 到项目 venv，验证基础 import 和 `add()`/`search()`/`cognify()` 可调用
+- [x] cognee 默认 provider（kuzu + lancedb）开箱即用，无需额外 Docker 服务
+- [x] 实现 `memory/config.py`（MemoryConfig，pydantic-settings，MEMORY_ENABLED 开关，graph/vector provider 可配置）
+- [x] 实现 `memory/adapter.py`（cognee 薄适配层：封装 cognee.add/search/cognify，白名单校验 provider 组合）
+- [x] 实现 `memory/models.py`（TopicClaim / ContentSummary / EntityRelation 等项目侧数据模型）
+- [x] 实现 `memory/embedding.py`（复用 llm_client.embed()，带 SHA256 内容哈希缓存）
+- [x] 实现 `memory/image_registry.py`（图片 URL→章节映射，asyncio.Lock 防跨章节重复）
+- [x] 实现 `memory/session.py`（SessionMemory 统一 API：initialize/store/query/cleanup，namespace 隔离，内部调用 cognee adapter）
+- [x] 实现优雅降级（MEMORY_ENABLED=false 跳过所有 cognee 调用，provider 不可用时显式报错）
+- [x] 单元测试（FakeCogneeClient mock，测试适配层和 SessionMemory 逻辑，10 测试全通过）
 
 ### Step 4.2 — 专用Agent实现（含记忆集成）
 - [ ] 实现 `outline_agent.py`（生成Markdown大纲，包含 context bridges + **topic_claims**：每章 owns + boundary）
@@ -215,141 +215,140 @@
 
 ## Phase 5：实时监控 + WebSocket（第10周）
 
-### Step 5.1 — WebSocket后端
-- [ ] 实现 `/ws/task/{task_id}` 端点
-- [ ] 监听Redis各channel，转发给WebSocket客户端
-- [ ] 消息类型：node_update / log / agent_status / task_done
+### Step 5.1 — WebSocket 后端基础设施
+- [ ] 实现 `routers/ws.py`：`/ws/task/{task_id}` WebSocket 端点，FastAPI WebSocket 路由
+- [ ] 实现连接管理器 `services/ws_manager.py`：维护 task_id → WebSocket 连接集合的映射，支持多客户端同时订阅同一任务
+- [ ] 实现 `connect(task_id, ws)` / `disconnect(task_id, ws)` / `broadcast(task_id, message)` 三个核心方法
+- [ ] 心跳机制：每 30 秒发送 ping，客户端 60 秒无 pong 断开
+- [ ] 连接鉴权：WebSocket 握手时校验 task_id 是否存在（404 拒绝连接）
 
-### Step 5.2 — 前端监控页（重点页面）
-- [ ] 集成 @antv/g6，渲染DAG图
-- [ ] WebSocket连接 + 实时更新节点颜色/状态
-- [ ] 执行中节点：边框发光动画
-- [ ] Agent活动面板（右上）
-- [ ] 执行日志流（右下，自动滚动）
-- [ ] FSM进度条（顶部）
+### Step 5.2 — Redis→WebSocket 事件桥接
+- [ ] 实现 `services/event_bridge.py`：后台 asyncio task，XREAD `task:{task_id}:events` 流
+- [ ] 消息类型定义（Pydantic 模型）：`node_update` / `log` / `agent_status` / `task_done` / `chapter_preview` / `review_score` / `consistency_result` / `dag_update`
+- [ ] 每条 Redis event 解析后通过 `ws_manager.broadcast(task_id, msg)` 推送给所有订阅客户端
+- [ ] 事件桥接生命周期：首个客户端连接时启动 XREAD，最后一个客户端断开时停止
+- [ ] 单元测试：mock Redis stream，验证消息正确转发到 WebSocket
 
-**验收：** 运行任务时，前端DAG实时变色，日志实时滚动
+### Step 5.3 — Agent 侧事件发射
+- [ ] 在 `LoggingMiddleware` 中，每次 Agent 开始/完成任务时，XADD `node_update` 事件到 `task:{task_id}:events`
+- [ ] 在 Writer Agent 写作过程中，定期 XADD `chapter_preview` 事件（每 500 字或每段落）
+- [ ] 在 Reviewer Agent 评分后，XADD `review_score` 事件
+- [ ] 在 Consistency Agent 检查后，XADD `consistency_result` 事件
+- [ ] FSM 状态转换时，XADD `dag_update` 事件（节点状态变更）
+- [ ] 任务完成/失败时，XADD `task_done` 事件
+
+### Step 5.4 — 前端 WebSocket 连接层
+- [ ] 实现 `hooks/useTaskWebSocket.ts`：封装原生 WebSocket 连接，自动重连（指数退避，最多 5 次）
+- [ ] 消息分发：根据 `type` 字段路由到不同的 Zustand store action
+- [ ] 连接状态管理：`connecting` / `connected` / `disconnected` / `error`，UI 显示连接指示器
+- [ ] 断线重连后，通过 REST API `GET /api/tasks/{id}` 拉取最新状态做一次全量同步
+- [ ] 单元测试：mock WebSocket，验证消息分发和重连逻辑
+
+### Step 5.5 — 前端 DAG 实时可视化
+- [ ] 实现 `components/DagViewer.tsx`：@antv/g6 v5 初始化，从 task nodes 数据渲染 DAG 图
+- [ ] 节点颜色映射：pending(灰) → running(蓝+边框发光动画) → completed(绿) → failed(红)
+- [ ] 边样式：已完成依赖(实线) / 待执行依赖(虚线)
+- [ ] 接收 `node_update` 消息后，实时更新对应节点颜色和状态标签
+- [ ] 接收 `dag_update` 消息后，动态增删节点和边（支持 FSM 驱动的动态 DAG 变更）
+- [ ] 布局算法：dagre 分层布局，节点可拖拽调整位置
+- [ ] 节点点击弹出详情面板（Agent 名称、开始时间、耗时、输出摘要）
+
+### Step 5.6 — 前端监控面板组件
+- [ ] 实现 `pages/TaskMonitor.tsx` 页面布局：左侧 DAG 图（70%宽）+ 右侧面板（30%宽）
+- [ ] 右上：Agent 活动面板 `components/AgentPanel.tsx`（当前活跃 Agent 列表，每个 Agent 显示角色/状态/当前任务）
+- [ ] 右下：执行日志流 `components/LogStream.tsx`（接收 `log` 消息，自动滚动，支持按 Agent 过滤，最多保留 500 条）
+- [ ] 顶部：FSM 进度条 `components/FsmProgress.tsx`（显示当前 FSM 阶段，已完成阶段打勾）
+- [ ] 实时预览面板 `components/ChapterPreview.tsx`：接收 `chapter_preview` 消息，Markdown 渲染，按章节 tab 切换
+- [ ] 审查评分显示：接收 `review_score` 后在对应章节 tab 上显示分数徽标
+- [ ] 响应式布局：窄屏时右侧面板折叠为底部 tab
+
+**验收：** 运行长文本任务时，前端 DAG 节点实时变色（≤2秒延迟），日志实时滚动，章节预览实时追加，断线重连后自动恢复状态
 
 ---
 
 ## Phase 6：结果展示 + 导出（第10-11周）
 
-### Step 6.1 — 导出功能
-- [ ] 实现 DOCX 导出（python-docx）
-- [ ] 实现 PDF 导出（weasyprint）
-- [ ] 实现导出API（流式文件响应）
+### Step 6.1 — 导出服务后端
+- [ ] 实现 `services/exporter.py` 基类 `BaseExporter`（接收 task output_text + metadata，返回 bytes）
+- [ ] 实现 `DocxExporter`（python-docx 1.1.2）：标题页（任务标题+创建时间）、自动目录、章节标题（Heading 1/2）、正文段落、代码块等格式映射
+- [ ] 实现 `PdfExporter`（reportlab 4.2.5）：中文字体支持（注册 SimSun/SimHei）、标题页、章节标题、正文段落、页码页脚
+- [ ] Markdown→结构化内容解析：使用 `markdown` 库解析 output_text，提取标题层级、段落、代码块、列表
+- [ ] 实现 `routers/export.py`：`GET /api/export/{task_id}/docx` 和 `GET /api/export/{task_id}/pdf`，流式文件响应（StreamingResponse）
+- [ ] 导出文件命名规则：`{task_title}_{date}.docx/pdf`，中文文件名 URL 编码
+- [ ] 错误处理：task 不存在返回 404，task 未完成返回 409（Conflict）
+- [ ] 单元测试：mock task 数据，验证 DOCX/PDF 生成和格式正确性
 
-### Step 6.2 — 前端结果页
-- [ ] Markdown渲染（react-markdown + 代码高亮）
-- [ ] 文档目录（章节锚点）
-- [ ] 导出按钮（DOCX/PDF）
-- [ ] 生成统计展示
+### Step 6.2 — 前端结果展示页
+- [ ] 实现 `pages/TaskResult.tsx` 页面：从 `GET /api/tasks/{id}/result` 获取完成的任务数据
+- [ ] Markdown 渲染区：`react-markdown` + `react-syntax-highlighter` 代码高亮，支持表格/列表/引用
+- [ ] 左侧文档目录 `components/TableOfContents.tsx`：解析 Markdown 标题层级，生成锚点导航，滚动时高亮当前章节
+- [ ] 导出按钮组：DOCX / PDF 两个按钮，点击后 `window.open(/api/export/...)` 触发下载
+- [ ] 生成统计卡片：总字数、章节数、生成耗时、使用的 Agent 数、Token 消耗
+- [ ] 审查评分展示：每章节评分徽标（≥70 绿色，<70 红色）
+- [ ] 空状态/加载状态/错误状态处理
 
 ### Step 6.3 — 历史任务页
-- [ ] 任务列表表格
-- [ ] 搜索/筛选
-- [ ] 点击查看历史结果
+- [ ] 实现 `pages/TaskHistory.tsx`：Ant Design Table 展示已完成任务列表
+- [ ] 列定义：任务标题、生成模式（技术报告/小说/自定义）、创建时间、完成时间、字数、状态
+- [ ] 搜索：按标题关键词模糊搜索（前端过滤 or 后端 `GET /api/tasks?search=xxx`）
+- [ ] 筛选：按状态（completed/failed/running）、按生成模式、按时间范围筛选
+- [ ] 排序：默认按创建时间倒序，支持点击列头切换排序
+- [ ] 分页：每页 20 条，Ant Design Pagination 组件
+- [ ] 行点击：跳转到 TaskResult 页面查看历史结果
+- [ ] 批量操作：多选 + 批量删除（确认弹窗）
+- [ ] 后端支持：`GET /api/tasks` 添加 `search`、`status`、`mode`、`offset`、`limit` 查询参数
+- [ ] 空状态：无历史任务时显示引导文案
 
-**验收：** 完整走通一次任务：创建 → 监控 → 查看结果 → 导出DOCX
+### Step 6.4 — 任务创建页优化
+- [ ] 创建成功后自动跳转到 TaskMonitor 页面
+- [ ] 大纲确认交互：OUTLINE_REVIEW 状态时，前端展示可编辑大纲（Markdown 编辑器），用户确认后继续
+- [ ] 进度通知：任务完成时浏览器 Notification API 推送（需用户授权）
 
----
-
-## Phase 7：系统集成测试（第11周）
-
-- [ ] 端到端测试：技术报告生成完整流程
-- [ ] 端到端测试：小说写作完整流程
-- [ ] Agent失败恢复测试
-- [ ] WebSocket断线重连测试
-- [ ] 导出文件格式验证
-
----
-
-## progress.md 更新规范
-
-每完成一个Step后立即更新：
-
-```
-## 当前状态
-已完成：Step 0.1, 0.2, 0.3, 1.1
-进行中：Step 1.2（前端Agent管理页）
-下一步：Step 2.1（LLM适配层）
-
-## 已知问题
-- WebSocket在Windows上有时连接超时（待查）
-
-## 本次更新
-2026-03-05：完成Step 0.x，项目骨架搭建完毕
-```
+**验收：** 完整走通一次任务：创建 → 大纲确认 → 监控实时进度 → 查看结果 → 导出 DOCX/PDF → 在历史任务页找到并重新查看
 
 ---
 
-## 2026-03-21 Addendum (Step 4.2 Integration)
+## Phase 7：系统集成测试 + 收尾（第11周）
 
-To align new agent profile configuration with runtime behavior, add these mandatory items:
+### Step 7.1 — 端到端测试用例
+- [ ] E2E 测试：技术报告生成完整流程（创建 → 大纲 → 写作 → 审查 → 一致性 → 完成），验证输出≥8000字、结构完整
+- [ ] E2E 测试：小说写作完整流程（创建 → 大纲 → 并行章节写作 → 审查 → 一致性 → 完成），验证叙事连贯
+- [ ] E2E 测试：自定义模式流程（用户自定义 prompt → 生成），验证自定义 prompt 正确注入
+- [ ] E2E 测试：草稿续写/评论修改入口（draft_text / review_comments → 跳过大纲直接进入 PRE_REVIEW_INTEGRITY）
 
-- [x] Scheduler dispatch payload includes `model` and `agent_config` from `agents` table.
-- [x] Worker/Manager/Orchestrator consume runtime LLM overrides from payload:
-  - `model`
-  - `agent_config.max_tokens`
-  - `agent_config.temperature`
-- [x] Unit tests for runtime integration:
-  - worker call parameter propagation
-  - scheduler payload propagation
-- [x] Extend retry/fallback behavior to consume `agent_config.max_retries` and `agent_config.fallback_models` in `llm_client` orchestration path.
+### Step 7.2 — 故障恢复与边界测试
+- [ ] Agent 超时恢复测试：模拟 Writer Agent 超时（心跳丢失），验证系统自动重试或标记失败
+- [ ] FSM 检查点恢复测试：任务执行到 WRITING 阶段时模拟进程崩溃，重启后 `scan_and_resume_running_tasks()` 恢复执行
+- [ ] LLM 降级测试：主模型 API 返回 429/500，验证自动 fallback 到备用模型
+- [ ] Redis 断连恢复测试：临时断开 Redis，验证重连后消息不丢失（Consumer Group ACK 机制）
+- [ ] 审查重试上限测试：章节连续 3 次审查不通过（<70分），验证 FSM 正确转到 FAILED 状态
+- [ ] 一致性重试上限测试：一致性检查连续 2 次不通过，验证 FSM 正确处理
 
-Notes:
-- This keeps API-level configuration and execution behavior consistent.
-- Existing role-based model routing remains default when overrides are absent.
+### Step 7.3 — WebSocket 与前端集成测试
+- [ ] WebSocket 断线重连测试：服务端主动断开连接，验证前端自动重连 + 全量状态同步
+- [ ] 多客户端订阅测试：两个浏览器 tab 同时监控同一任务，验证都能收到实时更新
+- [ ] 大量日志压力测试：快速生成 1000+ 条日志消息，验证前端 LogStream 不卡顿（虚拟滚动 or 截断）
+- [ ] DAG 动态更新测试：FSM 回退（审查不通过→重写）时，验证 DAG 节点状态正确回退
 
----
+### Step 7.4 — 导出文件验证
+- [ ] DOCX 格式验证：用 python-docx 读回导出文件，验证标题层级、段落数、中文渲染正确
+- [ ] PDF 格式验证：用 PyPDF2 读回导出文件，验证页数合理、中文字体正确嵌入、页码连续
+- [ ] 大文件导出测试：≥20000 字文档导出，验证不超时（StreamingResponse 分块传输）
+- [ ] 特殊字符测试：包含代码块、表格、LaTeX 公式的文档导出，验证格式不丢失
 
-## 2026-03-21 Addendum (Academic Research Skills Mapping)
+### Step 7.5 — 性能与安全基线
+- [ ] 并发写作性能：5 个 Writer Agent 并行写作，验证总耗时 < 单 Agent 顺序写作的 2x
+- [ ] Token 消耗统计：一次完整技术报告生成的总 Token 消耗，记录基线（目标：input < 50k，output < 30k）
+- [ ] 记忆层去重效果：对比有/无记忆层的章节重复率（目标 < 5% vs 20-30%）
+- [ ] API 安全检查：确认所有端点有适当的输入校验（Pydantic），无 SQL 注入风险
+- [ ] 环境变量安全：确认 `.env` 在 `.gitignore`，前端代码无 API key 泄露
 
-### Step 4.3A -> Flow Gate Integration
-- [ ] Extend `long_text_fsm.py` states with:
-  - `pre_review_integrity`
-  - `re_review`
-  - `re_revise`
-  - `final_integrity`
-- [ ] Implement transition guards for integrity/review mandatory gates.
-- [ ] Add checkpoint policy enum: `FULL | SLIM | MANDATORY`.
+### Step 7.6 — 文档收尾
+- [ ] 更新 README.md：项目介绍、快速开始、架构图、API 文档链接
+- [ ] 更新 BACKEND_STRUCTURE.md：反映最终实现（如有偏差）
+- [ ] 更新 progress.md：标记所有 Phase 完成
+- [ ] 更新 IMPLEMENTATION_PLAN.md：所有 checkbox 标记完成
+- [ ] 编写部署指南：Docker Compose 一键启动（PostgreSQL + Redis + Backend + Frontend）
+- [ ] 编写 `.env.example`：所有必需环境变量及说明
 
-### Step 4.3B -> Prompt Hardening (Writing-Oriented)
-- [ ] Update reviewer prompt to output rubric JSON (0-100 + must_fix + strongest_counterargument).
-- [ ] Update revision prompt to output closure table (`issue -> action -> evidence`).
-- [ ] Add integrity-check prompt for claim-level verification (`verified/weak/unverifiable`).
-
-### Step 4.3C -> Skill Injection Refinement
-- [ ] Add stage-aware skill profile resolution in skill loader.
-- [ ] Inject stage skill snippets before model call with deterministic order.
-- [ ] Persist resolved injection trace for observability/debugging.
-
-### Step 4.3D -> Mid-Entry Support
-- [ ] Add entry-stage detector from user materials (title/draft/review comments).
-- [ ] Enforce non-skippable integrity stage even for mid-entry workflows.
-
-### Step 4.3E -> Tests
-- [ ] FSM transition tests for new states and guardrails.
-- [ ] Prompt output schema tests (rubric / closure / integrity JSON).
-- [ ] Middleware injection-order tests.
-- [ ] End-to-end tests: write -> pre_integrity -> review -> revise -> final_integrity -> done.
-- [ ] Mid-entry e2e tests: draft-entry / review-comment-entry.
-
----
-
-## 2026-03-21 Step 4.2 Agent Config Deep Integration (Execution Steps)
-
-Scope: wire `agent_config.max_retries` and `agent_config.fallback_models` into real retry/fallback execution path.
-
-Implementation steps:
-1. Scheduler payload: include `model` + `agent_config` in assignment payload.
-2. Runtime extraction: resolve LLM params from payload in `agents/runtime_config.py`.
-3. Agent callsites: pass resolved params in Worker/Manager/Orchestrator.
-4. Decomposer path: propagate overrides into `task_decomposer.chat_json(...)`.
-5. LLM path: consume `max_retries` and `fallback_models` in `llm_client._call_with_retry(...)` and fallback chain resolution.
-6. Verification: add/extend unit tests for Worker/Manager/Orchestrator + llm_client + task_decomposer.
-
-Acceptance:
-- `max_retries` changes effective retry attempts for a call.
-- `fallback_models` overrides default fallback order and de-duplicates invalid/self models.
-- Missing overrides keep role-default model routing unchanged.
+**验收：** 所有 E2E 测试通过；故障恢复测试覆盖 Agent 超时、FSM 检查点、LLM 降级、Redis 断连场景；导出文件格式正确；并行章节重复率 < 5%；README 和部署指南完整可用
