@@ -33,7 +33,7 @@ class TestMCPConfig:
         assert "web_search" in configs
         cfg = configs["web_search"]
         assert cfg.command == "uvx"
-        assert cfg.args == ["mcp-server-fetch"]
+        assert list(cfg.args) == ["mcp-server-fetch"]
         assert cfg.description == "网页抓取"
 
     def test_load_with_env(self, tmp_path: Path):
@@ -49,7 +49,7 @@ class TestMCPConfig:
         }), encoding="utf-8")
 
         configs = load_mcp_config(config_file)
-        assert configs["brave"].env == {"BRAVE_API_KEY": "$BRAVE_API_KEY"}
+        assert dict(configs["brave"].env) == {"BRAVE_API_KEY": "$BRAVE_API_KEY"}
 
     def test_load_nonexistent_file(self, tmp_path: Path):
         configs = load_mcp_config(tmp_path / "nonexistent.json")

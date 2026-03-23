@@ -31,6 +31,9 @@ class _FakeSession:
             if hasattr(obj, "retry_count") and getattr(obj, "retry_count", None) is None:
                 setattr(obj, "retry_count", 0)
 
+    async def commit(self) -> None:
+        pass
+
 
 class _DummyLLM:
     pass
