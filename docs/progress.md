@@ -13,10 +13,19 @@
 - 统一 TECH_STACK.md / BACKEND_STRUCTURE.md / CLAUDE.md 中记忆层引用为 kuzu+lancedb
 - 确认 cognee==0.5.5 是 PyPI 最新版，Windows 原生支持，无需 Docker
 
+## Step 4.3 FSM 输出组装 + SessionMemory 生命周期（2026-03-23）
+- 新增 `LongTextFSM.initialize_session_memory(session)`: 显式初始化 SessionMemory，将 namespace 持久化到 checkpoint_data（所有后续 transition 均保留）
+- 新增 `LongTextFSM.finalize_output(session)`: 查询 writer 节点，natural sort 排序（修复 10+ 章节乱序 bug），拼接 output_text，更新 word_count
+- `get_checkpoint_data()` base dict 加入 `session_memory_namespace`，确保每次 transition 不丢失 namespace
+- `resume()` 恢复时读取 `session_memory_namespace` 到实例属性
+- 修复 `test_prompt_contracts.py`: reviewer prompt 测试补充 `topic_claims` + `assigned_evidence` 缺失参数
+- 三插件双审查：代码审查 3 HIGH 已修复；安全审查 0 CRITICAL/HIGH，2 MEDIUM 已知悉
+- 114 非 DB 测试通过，commit: c81c014
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b（记忆层基础设施）
-进行中：无
-下一步：Step 4.2 — MemoryMiddleware 实现（before_task/after_task 集成到 Agent 中间件链）
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3（核心实现）
+进行中：Step 4.3 基线测试（需 Docker PostgreSQL）
+下一步：Step 4.4 — Knowledge Graph（跨任务知识积累）或 Step 5.1 WebSocket 基础设施
 
 ## 文档更新（2026-03-18）
 - 6 份规范文档 + CLAUDE.md + lessons.md 已融入 cognee Memory Layer 设计
@@ -166,3 +175,12 @@
 - Verification:
   - `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_schema_entry_inputs.py backend/tests/test_task_service_entry_stage.py backend/tests/test_entry_stage.py` => 9 passed.
   - `.\\backend\\.venv\\Scripts\\python.exe -m pytest -q backend/tests/test_task_api.py -k \"draft_text_enters_pre_review_integrity or review_comments_enters_pre_review_integrity\"` blocked by local PostgreSQL connection reset in this environment.
+
+2026-03-23: Step 4.2 agent contract upgrade completed via vibe tri-plugin flow.
+- Kept the current runtime architecture (OutlineAgent, WriterAgent, ReviewerAgent, ConsistencyAgent) and upgraded their payload contracts based on the academic-paper reference agents.
+- Added role-aware MemoryMiddleware as the default final middleware in the required order: Logging -> TokenTracking -> Timeout -> ContextSummary -> Memory.
+- Rewrote the specialized prompts to require explicit handoff fields (topic_claims, assigned_evidence, chapter summaries, consistency issue families).
+- Verification:
+  - backend/.venv/Scripts/python.exe -m pytest -q tests/test_memory_middleware.py tests/test_agent_core.py tests/test_specialized_agents.py tests/test_agent_prompt_contracts.py -> 53 passed.
+  - backend/.venv/Scripts/python.exe -m pytest -q tests/test_review_fixes.py tests/test_llm_client.py tests/test_agents.py tests/test_long_text_fsm.py::TestCheckpoint tests/test_memory_core.py tests/test_task_api.py -> 85 passed.
+- Follow-up hardening: MemoryMiddleware now degrades gracefully on query/store failures and caps in-process cached sessions to avoid unbounded growth in long-lived workers.

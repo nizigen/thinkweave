@@ -178,28 +178,28 @@
 - [x] 单元测试（FakeCogneeClient mock，测试适配层和 SessionMemory 逻辑，10 测试全通过）
 
 ### Step 4.2 — 专用Agent实现（含记忆集成）
-- [ ] 实现 `outline_agent.py`（生成Markdown大纲，包含 context bridges + **topic_claims**：每章 owns + boundary）
-- [ ] 实现 `writer_agent.py`（基于完整大纲+章节描述并行写作，**启动前从 Session Memory 读取其他章节摘要**）
-- [ ] 实现 `reviewer_agent.py`（对每章评分0-100，≥70通过，**审查时检测内容重叠**）
-- [ ] 实现 `consistency_agent.py`（全文扫描，**从 Session Memory 读取章节摘要而非全文**，降低 token 消耗）
-- [ ] 实现 `MemoryMiddleware`（记忆层中间件：before_task 注入去重指令，after_task 写入摘要）
-- [ ] 更新 Outline prompt 模板（`prompts/outline/generate.md`）：要求输出 topic_claims 字段
-- [ ] 更新 Writer prompt 模板（`prompts/writer/write_chapter.md`）：增加 `{memory_context}` 占位符
-- [ ] 更新 Reviewer prompt 模板：增加重叠检测结果注入
+- [x] 实现 `outline_agent.py`（生成Markdown大纲，包含 context bridges + **topic_claims**：每章 owns + boundary）
+- [x] 实现 `writer_agent.py`（基于完整大纲+章节描述并行写作，**启动前从 Session Memory 读取其他章节摘要**）
+- [x] 实现 `reviewer_agent.py`（对每章评分0-100，≥70通过，**审查时检测内容重叠**）
+- [x] 实现 `consistency_agent.py`（全文扫描，**从 Session Memory 读取章节摘要而非全文**，降低 token 消耗）
+- [x] 实现 `MemoryMiddleware`（记忆层中间件：before_task 注入去重指令，after_task 写入摘要）
+- [x] 更新 Outline prompt 模板（`prompts/outline/generate.md`）：要求输出 topic_claims 字段
+- [x] 更新 Writer prompt 模板（`prompts/writer/write_chapter.md`）：增加 `{memory_context}` 占位符
+- [x] 更新 Reviewer prompt 模板：增加重叠检测结果注入
 
 ### Step 4.3 — 长文本生成流程集成（含记忆生命周期）
-- [ ] FSM 进入 OUTLINE 状态时：**初始化 SessionMemory**（创建 session 命名空间）
-- [ ] FSM 进入 OUTLINE 后：大纲生成后，**topic_claims 写入 SessionMemory.store_territory_map()**
-- [ ] 大纲生成后进入OUTLINE_REVIEW，等待用户确认/编辑
-- [ ] 写作Agent并行执行，每个Writer拿到完整大纲+自己的章节+**Session Memory 去重上下文**
-- [ ] 审查不通过（<70分）或检测到重叠 → 回到WRITING状态对应章节重写（最多3次）
-- [ ] 一致性不通过 → 问题清单发给对应Writer修改（最多2次循环）
-- [ ] FSM 进入 DONE 时：**SessionMemory.cleanup()（可选提升数据到 Knowledge Graph）**
-- [ ] 各章节文本拼接为完整文档
-- [ ] 更新 tasks.output_text + tasks.word_count
-- [ ] 检查点数据中包含 session_memory_id，崩溃恢复时可重新挂载
-- [ ] 实现 `evaluate_dedup_quality(task_id)` 度量脚本：计算所有章节对的向量相似度，>0.85 判定为重复，输出重复率报告
-- [ ] 基线测试：关闭记忆层生成一篇报告 → 跑度量脚本得基线；启用记忆层再生成 → 对比（目标 < 5%）
+- [x] FSM 进入 OUTLINE 状态时：**初始化 SessionMemory**（`initialize_session_memory()`，namespace 写入 checkpoint）
+- [x] FSM 进入 OUTLINE 后：大纲生成后，**topic_claims 写入 SessionMemory.store_territory_map()**（MemoryMiddleware.after_task for outline role）
+- [x] 大纲生成后进入OUTLINE_REVIEW，等待用户确认/编辑
+- [x] 写作Agent并行执行，每个Writer拿到完整大纲+自己的章节+**Session Memory 去重上下文**（MemoryMiddleware.before_task）
+- [x] 审查不通过（<70分）或检测到重叠 → 回到WRITING状态对应章节重写（最多3次）
+- [x] 一致性不通过 → 问题清单发给对应Writer修改（最多2次循环）
+- [x] FSM 进入 DONE 时：**SessionMemory.cleanup()** — `_cleanup_session_memory()` 自动触发
+- [x] 各章节文本拼接为完整文档（`finalize_output()`，natural sort 修复 10+ 章节排序）
+- [x] 更新 tasks.output_text + tasks.word_count
+- [x] 检查点数据中包含 session_memory_namespace，崩溃恢复时可重新挂载
+- [x] 实现 `evaluate_dedup_quality(task_id)` 度量脚本：计算所有章节对的向量相似度，>0.85 判定为重复，输出重复率报告
+- [ ] 基线测试：关闭记忆层生成一篇报告 → 跑度量脚本得基线；启用记忆层再生成 → 对比（目标 < 5%）（需 Docker PostgreSQL）
 
 ### Step 4.4 — Knowledge Graph（跨任务知识积累）
 - [ ] 实现 `memory/knowledge/graph.py`（KnowledgeGraph：持久化查询/存储 API）
