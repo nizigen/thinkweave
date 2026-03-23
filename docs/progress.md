@@ -22,10 +22,17 @@
 - 三插件双审查：代码审查 3 HIGH 已修复；安全审查 0 CRITICAL/HIGH，2 MEDIUM 已知悉
 - 114 非 DB 测试通过，commit: c81c014
 
+## Step 4.4 Knowledge Graph（2026-03-23）
+- 新增 `app/memory/knowledge/graph.py`：KnowledgeGraph（add_entry 按 key 去重取高置信度、tokenised query 前缀匹配、90 天 TTL prune_stale、to_context_string）
+- 新增 `app/memory/knowledge/promotion.py`：promote_session()（筛选 credibility≥0.7，写入 KG）
+- `session.cleanup()` 新增 `kg` + `topic` 参数；使用 topic 作为查询锚点，sha1 作为稳定 key fallback
+- `MemoryMiddleware` 新增 `knowledge_graph` 参数；`before_task` 为 outline/writer 角色注入 `kg_context`
+- 代码审查 2 HIGH 修复完成，15 新测试，129 非 DB 测试全绿，commit: 8e1f3c6
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3（核心实现）
-进行中：Step 4.3 基线测试（需 Docker PostgreSQL）
-下一步：Step 4.4 — Knowledge Graph（跨任务知识积累）或 Step 5.1 WebSocket 基础设施
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4
+进行中：—
+下一步：Step 5.1 WebSocket 后端基础设施（实时监控）
 
 ## 文档更新（2026-03-18）
 - 6 份规范文档 + CLAUDE.md + lessons.md 已融入 cognee Memory Layer 设计

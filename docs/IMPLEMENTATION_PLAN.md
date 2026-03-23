@@ -202,12 +202,12 @@
 - [ ] 基线测试：关闭记忆层生成一篇报告 → 跑度量脚本得基线；启用记忆层再生成 → 对比（目标 < 5%）（需 Docker PostgreSQL）
 
 ### Step 4.4 — Knowledge Graph（跨任务知识积累）
-- [ ] 实现 `memory/knowledge/graph.py`（KnowledgeGraph：持久化查询/存储 API）
-- [ ] 实现 `memory/knowledge/promotion.py`（Session→KG 数据提升：已验证引用、实体关系、术语定义）
-- [ ] 任务完成时 SessionMemory.cleanup() 自动触发 promote（credibility ≥ 0.7 的数据提升到 KG）
-- [ ] Outline/Writer Agent 启动前查询 KG 历史知识（通过 MemoryMiddleware.before_task）
-- [ ] KG 条目 90 天 TTL（stale 后需重新验证）
-- [ ] 集成测试（跨任务知识复用场景）
+- [x] 实现 `memory/knowledge/graph.py`（KnowledgeGraph：tokenised query, dedup by key, TTL prune）
+- [x] 实现 `memory/knowledge/promotion.py`（Session→KG 数据提升：credibility ≥ 0.7）
+- [x] 任务完成时 SessionMemory.cleanup(kg=, topic=) 自动触发 promote
+- [x] Outline/Writer Agent 启动前查询 KG 历史知识（MemoryMiddleware.before_task → kg_context）
+- [x] KG 条目 90 天 TTL（prune_stale()）
+- [ ] 集成测试（跨任务知识复用场景，需 Docker PostgreSQL）
 
 **验收：** 输入"写一篇量子计算技术报告"，系统输出≥8000字的结构化文档；并行章节内容重复率 < 5%（对比无记忆层的 20-30%）；第二次生成同主题报告时，能复用首次验证的引用和实体关系
 
