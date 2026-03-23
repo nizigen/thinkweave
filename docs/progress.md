@@ -29,8 +29,16 @@
 - `MemoryMiddleware` 新增 `knowledge_graph` 参数；`before_task` 为 outline/writer 角色注入 `kg_context`
 - 代码审查 2 HIGH 修复完成，15 新测试，129 非 DB 测试全绿，commit: 8e1f3c6
 
+## 基线集成测试（2026-03-23，Docker 在线）
+- 完整测试套件：**437 passed，4 pre-existing failures**
+  - `test_mcp.py` 2 个：MCP 配置断言预存 bug
+  - `test_task_service_entry_stage.py` 2 个：`_FakeSession` 缺少 `commit` 方法，预存 bug
+- 修复：conftest.py 自动加载 `.env`（dotenv），无需手动传 POSTGRES_URL
+- PostgreSQL: localhost:15432，Redis: localhost:6379，均正常
+- commit: a58a704
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + 基线集成测试
 进行中：—
 下一步：Step 5.1 WebSocket 后端基础设施（实时监控）
 
