@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
+import dotenv
 import pytest
 import pytest_asyncio
+
+# Load .env so POSTGRES_URL and other settings are available during tests.
+dotenv.load_dotenv(Path(__file__).parent.parent / ".env", override=False)
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -63,9 +68,12 @@ class MockLLMClient(BaseLLMClient):
         role: str | None = None,
         max_tokens: int | None = None,
         temperature: float = 0.7,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
     ) -> str:
         self.call_log.append({
             "method": "chat", "role": role, "model": model,
+            "max_retries": max_retries, "fallback_models": fallback_models,
             "messages": messages,
         })
         if role == "outline":
@@ -86,9 +94,12 @@ class MockLLMClient(BaseLLMClient):
         role: str | None = None,
         max_tokens: int | None = None,
         temperature: float = 0.7,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
     ) -> AsyncIterator[str]:
         self.call_log.append({
             "method": "chat_stream", "role": role, "model": model,
+            "max_retries": max_retries, "fallback_models": fallback_models,
         })
         chunks = ["这是", "一段", "流式", "输出", "测试。"]
         for chunk in chunks:
@@ -102,9 +113,12 @@ class MockLLMClient(BaseLLMClient):
         role: str | None = None,
         schema: type | None = None,
         max_tokens: int | None = None,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
     ) -> dict:
         self.call_log.append({
             "method": "chat_json", "role": role, "model": model,
+            "max_retries": max_retries, "fallback_models": fallback_models,
             "messages": messages,
         })
         if role == "orchestrator":
@@ -121,9 +135,12 @@ class MockLLMClient(BaseLLMClient):
         model: str | None = None,
         role: str | None = None,
         max_tokens: int | None = None,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
     ) -> dict:
         self.call_log.append({
             "method": "chat_with_tools", "role": role, "tools": tools,
+            "max_retries": max_retries, "fallback_models": fallback_models,
         })
         return {"type": "text", "content": "mock tool response"}
 
@@ -176,3 +193,14 @@ async def client(db_session: AsyncSession):
 def mock_llm():
     """Mock LLM客户端 — 所有测试默认使用，不调用外部API"""
     return MockLLMClient()
+
+
+@pytest.fixture(autouse=True)
+def _default_auth_settings():
+    old_tokens = settings.task_auth_tokens
+    old_admins = settings.admin_user_ids
+    settings.task_auth_tokens = "token-admin:admin-user,token-user:test-user"
+    settings.admin_user_ids = "admin-user"
+    yield
+    settings.task_auth_tokens = old_tokens
+    settings.admin_user_ids = old_admins
