@@ -17,6 +17,7 @@ from app.services.communicator import (
     ack_task_event,
     consume_agent_inbox,
     consume_task_events,
+    send_task_event,
     send_status_update,
     send_system_log,
     send_task_assignment,
@@ -122,6 +123,31 @@ class TestSendTaskResult:
 
 
 # ---------------------------------------------------------------------------
+# send_task_event
+# ---------------------------------------------------------------------------
+
+
+class TestSendTaskEvent:
+    @pytest.mark.asyncio
+    async def test_sends_generic_task_event(self, _mock_streams):
+        mid = await send_task_event(
+            task_id="t1",
+            node_id="n1",
+            from_agent="writer-1",
+            msg_type="chapter_preview",
+            payload={"chunk_index": 0, "content": "preview"},
+        )
+
+        assert mid == "100-0"
+        stream_arg = _mock_streams["xadd"].call_args[0][0]
+        assert stream_arg == "task:t1:events"
+
+        envelope_arg = _mock_streams["xadd"].call_args[0][1]
+        assert envelope_arg.msg_type == "chapter_preview"
+        assert envelope_arg.payload["chunk_index"] == 0
+
+
+# ---------------------------------------------------------------------------
 # send_status_update
 # ---------------------------------------------------------------------------
 
@@ -145,6 +171,12 @@ class TestSendStatusUpdate:
         )
         envelope_arg = _mock_streams["xadd"].call_args[0][1]
         assert envelope_arg.payload["word_count"] == 5000
+
+    @pytest.mark.asyncio
+    async def test_status_update_uses_status_update_msg_type(self, _mock_streams):
+        await send_status_update(task_id="t1", status="done")
+        envelope_arg = _mock_streams["xadd"].call_args[0][1]
+        assert envelope_arg.msg_type == "status_update"
 
 
 # ---------------------------------------------------------------------------

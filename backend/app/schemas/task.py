@@ -20,7 +20,7 @@ VALID_AGENT_ROLES = {"outline", "writer", "reviewer", "consistency"}
 # ---------------------------------------------------------------------------
 
 class TaskCreate(BaseModel):
-    title: str = Field(..., min_length=5, max_length=500)
+    title: str = Field(..., min_length=6, max_length=500)
     mode: str = "report"
     depth: str = "standard"
     target_words: int = Field(default=10000, ge=500, le=200000)

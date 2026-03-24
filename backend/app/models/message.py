@@ -1,7 +1,7 @@
 """Message ORM 模型 — Agent 间消息记录"""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import String, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -27,5 +27,5 @@ class Message(Base):
     msg_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     content: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )

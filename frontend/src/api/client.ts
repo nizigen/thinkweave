@@ -1,4 +1,4 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 
 const apiClient = axios.create({
   baseURL: '/api',
@@ -6,14 +6,25 @@ const apiClient = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+apiClient.interceptors.request.use((config) => {
+  const token = sessionStorage.getItem('task_auth_token') || '';
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status;
     if (status === 401) {
-      console.warn('未授权，请重新登录');
+      console.warn('Unauthorized request');
+    } else if (status === 403) {
+      console.warn('Forbidden request');
     } else if (status === 500) {
-      console.error('服务器内部错误');
+      console.error('Server error');
     }
     return Promise.reject(error);
   },

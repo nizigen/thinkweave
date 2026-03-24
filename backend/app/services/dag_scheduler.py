@@ -1,4 +1,4 @@
-"""DAG 调度引擎 — 就绪节点检测 / Agent匹配 / 并发控制 / 任务分配 / 失败重试
+﻿"""DAG 调度引擎 — 就绪节点检测 / Agent匹配 / 并发控制 / 任务分配 / 失败重试
 
 核心循环（每秒一轮）：
   1. 收集已完成节点的结果
@@ -80,6 +80,9 @@ class DAGScheduler:
 
         # 追踪运行中的节点 {node_id: agent_id}
         self._running_nodes: dict[uuid.UUID, uuid.UUID] = {}
+
+        # 运行中节点的角色缓存 {node_id: role}
+        self._cached_node_roles: dict[uuid.UUID, str] = {}
 
         # 就绪计算通知
         self._schedule_event = asyncio.Event()
@@ -336,9 +339,7 @@ class DAGScheduler:
 
     @property
     def _node_roles(self) -> dict[uuid.UUID, str]:
-        """延迟缓存：当前 running 节点的角色映射。"""
-        if not hasattr(self, "_cached_node_roles"):
-            self._cached_node_roles: dict[uuid.UUID, str] = {}
+        """当前 running 节点的角色映射。"""
         return self._cached_node_roles
 
     async def _match_agent(
@@ -548,6 +549,12 @@ class DAGScheduler:
             status="done",
             from_agent="scheduler",
         )
+        await communicator.send_task_event(
+            task_id=self.task_id,
+            from_agent="scheduler",
+            msg_type="task_done",
+            payload={"status": "done"},
+        )
 
     async def _mark_task_failed(self, reason: str) -> None:
         """标记 Task 为失败。"""
@@ -567,6 +574,12 @@ class DAGScheduler:
             status="failed",
             from_agent="scheduler",
             extra={"reason": reason},
+        )
+        await communicator.send_task_event(
+            task_id=self.task_id,
+            from_agent="scheduler",
+            msg_type="task_done",
+            payload={"status": "failed", "reason": reason},
         )
         logger.bind(task_id=str(self.task_id)).error("task failed: {}", reason)
 

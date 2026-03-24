@@ -1,1 +1,1 @@
-# Hierarch Backend App
+"""Backend application package."""

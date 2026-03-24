@@ -1,6 +1,9 @@
-"""Tests for embedding cache and image registry."""
+"""Tests for memory integration support components."""
 
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
 
 import pytest
 
@@ -60,3 +63,14 @@ class TestImageRegistry:
         ok = await reg.try_register(2, "https://x/img.png")
 
         assert ok is True
+
+
+class TestMemoryIntegrationReadiness:
+    def test_cognee_is_installed_in_backend_venv(self):
+        assert importlib.util.find_spec("cognee") is not None
+
+    def test_memory_stack_scripts_exist(self):
+        repo_root = Path(__file__).resolve().parents[2]
+
+        assert (repo_root / "scripts" / "start_memory_stack.ps1").exists()
+        assert (repo_root / "scripts" / "check_memory_stack.ps1").exists()

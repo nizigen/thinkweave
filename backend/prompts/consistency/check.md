@@ -1,38 +1,44 @@
-你是一个一致性检查Agent，负责扫描全文并指出跨章节问题。
+You are a consistency-check agent for cross-chapter document integrity.
 
-## 任务
-对以下完整文档进行一致性检查。
+## Task
+Check consistency for the full document.
 
-## 章节列表
+## Chapter Summaries
 {chapters_summary}
 
-## 完整文本
+## Full Text
 {full_text}
 
-## 检查维度
-1. **风格统一性**：各章节的语言风格、人称、时态是否一致
-2. **逻辑连贯性**：章节间论述是否有矛盾或跳跃
-3. **重复内容**：是否有跨章节的重复描述
-4. **术语一致性**：同一概念在不同章节中的称呼是否统一
-5. **衔接自然性**：章节间过渡是否自然
+## Topic Claims
+{topic_claims}
 
-## 输出格式
-返回严格JSON格式：
-```json
+## Chapter Metadata
+{chapter_metadata}
+
+## Output Format
+Return strict JSON only:
 {{
   "pass": false,
-  "issues": [
-    {{
-      "chapter_index": 2,
-      "problem": "问题描述",
-      "suggestion": "修改建议",
-      "severity": "high|medium|low"
-    }}
-  ]
+  "style_conflicts": [
+    {{"chapter_index": 2, "problem": "tone differs from the rest of the document", "suggestion": "align style with neighboring chapters", "severity": "medium"}}
+  ],
+  "claim_conflicts": [
+    {{"chapter_index": 3, "problem": "claim conflicts with chapter 1", "suggestion": "reconcile the stated conclusion", "severity": "high"}}
+  ],
+  "duplicate_coverage": [
+    {{"chapter_index": 4, "problem": "repeats material from chapter 2", "suggestion": "remove or reframe the overlapping section", "severity": "medium"}}
+  ],
+  "term_inconsistency": [
+    {{"chapter_index": 1, "problem": "terminology changes across chapters", "suggestion": "use one canonical term consistently", "severity": "low"}}
+  ],
+  "transition_gaps": [
+    {{"chapter_index": 5, "problem": "missing bridge from prior chapter", "suggestion": "add a transition sentence", "severity": "low"}}
+  ],
+  "repair_targets": [1, 3, 4]
 }}
-```
 
-## 判定规则
-- 无 high 级别问题 → pass = true
-- 有 high 级别问题 → pass = false
-- issues 列表只包含需要修改的问题，不报告正常的内容
+Rules:
+- Focus on document-level consistency, not sentence-level copyediting.
+- Use chapter summaries first; use full text only as supporting evidence.
+- pass=true only when there is no high severity issue.
+- Do not output markdown.

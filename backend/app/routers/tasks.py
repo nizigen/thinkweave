@@ -1,12 +1,15 @@
-"""Task 管理路由 — /api/tasks"""
+﻿"""Task 管理路由 — /api/tasks"""
 
 import uuid
+from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.schemas.task import TaskCreate, TaskDetailRead, TaskRead
+from app.security.auth import AuthContext, require_auth_context, require_user_id
+from app.security.rate_limit import enforce_task_create_rate_limit
 from app.services import task_service
 from app.services.task_decomposer import TaskValidationError
 from app.utils.llm_client import BaseLLMClient, LLMClient
@@ -18,6 +21,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 # LLM client dependency — overridable in tests via app.dependency_overrides
 # ---------------------------------------------------------------------------
 
+@lru_cache(maxsize=1)
 def get_llm_client() -> BaseLLMClient:
     """Return a LLM client instance. Override via app.dependency_overrides in tests."""
     return LLMClient()
@@ -28,9 +32,14 @@ def get_llm_client() -> BaseLLMClient:
 # ---------------------------------------------------------------------------
 
 @router.get("", response_model=list[TaskRead])
-async def list_tasks(session: AsyncSession = Depends(get_session)):
-    """获取历史任务列表"""
-    return await task_service.list_tasks(session)
+async def list_tasks(
+    session: AsyncSession = Depends(get_session),
+    user_id: str = Depends(require_user_id),
+    offset: int = 0,
+    limit: int = 50,
+):
+    """获取历史任务列表（分页）"""
+    return await task_service.list_tasks(session, user_id=user_id, offset=offset, limit=min(limit, 200))
 
 
 @router.post("", response_model=TaskDetailRead, status_code=201)
@@ -38,10 +47,12 @@ async def create_task(
     task_in: TaskCreate,
     session: AsyncSession = Depends(get_session),
     llm_client: BaseLLMClient = Depends(get_llm_client),
+    user_id: str = Depends(require_user_id),
 ):
     """创建新任务 — 触发LLM分解生成DAG节点"""
+    await enforce_task_create_rate_limit(user_id)
     try:
-        return await task_service.create_task(session, task_in, llm_client)
+        return await task_service.create_task(session, task_in, llm_client, owner_id=user_id)
     except TaskValidationError as e:
         raise HTTPException(status_code=422, detail=e.issues)
 
@@ -50,9 +61,15 @@ async def create_task(
 async def get_task(
     task_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
 ):
     """获取任务详情（含DAG节点树）"""
-    detail = await task_service.get_task_detail(session, task_id)
+    detail = await task_service.get_task_detail(
+        session,
+        task_id,
+        user_id=auth.user_id,
+        is_admin=auth.is_admin,
+    )
     if detail is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return detail

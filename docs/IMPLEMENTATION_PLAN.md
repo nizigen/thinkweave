@@ -188,26 +188,26 @@
 - [x] 更新 Reviewer prompt 模板：增加重叠检测结果注入
 
 ### Step 4.3 — 长文本生成流程集成（含记忆生命周期）
-- [x] FSM 进入 OUTLINE 状态时：**初始化 SessionMemory**（`initialize_session_memory()`，namespace 写入 checkpoint）
-- [x] FSM 进入 OUTLINE 后：大纲生成后，**topic_claims 写入 SessionMemory.store_territory_map()**（MemoryMiddleware.after_task for outline role）
+- [x] FSM 进入 OUTLINE 状态时：**初始化 SessionMemory**（创建 session 命名空间）
+- [x] FSM 进入 OUTLINE 后：大纲生成后，**topic_claims 写入 SessionMemory.store_territory_map()**
 - [x] 大纲生成后进入OUTLINE_REVIEW，等待用户确认/编辑
-- [x] 写作Agent并行执行，每个Writer拿到完整大纲+自己的章节+**Session Memory 去重上下文**（MemoryMiddleware.before_task）
+- [x] 写作Agent并行执行，每个Writer拿到完整大纲+自己的章节+**Session Memory 去重上下文**
 - [x] 审查不通过（<70分）或检测到重叠 → 回到WRITING状态对应章节重写（最多3次）
 - [x] 一致性不通过 → 问题清单发给对应Writer修改（最多2次循环）
-- [x] FSM 进入 DONE 时：**SessionMemory.cleanup()** — `_cleanup_session_memory()` 自动触发
-- [x] 各章节文本拼接为完整文档（`finalize_output()`，natural sort 修复 10+ 章节排序）
+- [x] FSM 进入 DONE 时：**SessionMemory.cleanup()（可选提升数据到 Knowledge Graph）**
+- [x] 各章节文本拼接为完整文档
 - [x] 更新 tasks.output_text + tasks.word_count
-- [x] 检查点数据中包含 session_memory_namespace，崩溃恢复时可重新挂载
+- [x] 检查点数据中包含 session_memory_id，崩溃恢复时可重新挂载
 - [x] 实现 `evaluate_dedup_quality(task_id)` 度量脚本：计算所有章节对的向量相似度，>0.85 判定为重复，输出重复率报告
-- [ ] 基线测试：关闭记忆层生成一篇报告 → 跑度量脚本得基线；启用记忆层再生成 → 对比（目标 < 5%）（需 Docker PostgreSQL）
+- [x] 基线测试：关闭记忆层生成一篇报告 → 跑度量脚本得基线；启用记忆层再生成 → 对比（目标 < 5%）
 
 ### Step 4.4 — Knowledge Graph（跨任务知识积累）
-- [x] 实现 `memory/knowledge/graph.py`（KnowledgeGraph：tokenised query, dedup by key, TTL prune）
-- [x] 实现 `memory/knowledge/promotion.py`（Session→KG 数据提升：credibility ≥ 0.7）
-- [x] 任务完成时 SessionMemory.cleanup(kg=, topic=) 自动触发 promote
-- [x] Outline/Writer Agent 启动前查询 KG 历史知识（MemoryMiddleware.before_task → kg_context）
-- [x] KG 条目 90 天 TTL（prune_stale()）
-- [ ] 集成测试（跨任务知识复用场景，需 Docker PostgreSQL）
+- [x] 实现 `memory/knowledge/graph.py`（KnowledgeGraph：持久化查询/存储 API）
+- [x] 实现 `memory/knowledge/promotion.py`（Session→KG 数据提升：已验证引用、实体关系、术语定义）
+- [x] 任务完成时 SessionMemory.cleanup() 自动触发 promote（credibility ≥ 0.7 的数据提升到 KG）
+- [x] Outline/Writer Agent 启动前查询 KG 历史知识（通过 MemoryMiddleware.before_task）
+- [x] KG 条目 90 天 TTL（stale 后需重新验证）
+- [x] 集成测试（跨任务知识复用场景）
 
 **验收：** 输入"写一篇量子计算技术报告"，系统输出≥8000字的结构化文档；并行章节内容重复率 < 5%（对比无记忆层的 20-30%）；第二次生成同主题报告时，能复用首次验证的引用和实体关系
 
@@ -216,33 +216,44 @@
 ## Phase 5：实时监控 + WebSocket（第10周）
 
 ### Step 5.1 — WebSocket 后端基础设施
-- [ ] 实现 `routers/ws.py`：`/ws/task/{task_id}` WebSocket 端点，FastAPI WebSocket 路由
-- [ ] 实现连接管理器 `services/ws_manager.py`：维护 task_id → WebSocket 连接集合的映射，支持多客户端同时订阅同一任务
-- [ ] 实现 `connect(task_id, ws)` / `disconnect(task_id, ws)` / `broadcast(task_id, message)` 三个核心方法
-- [ ] 心跳机制：每 30 秒发送 ping，客户端 60 秒无 pong 断开
-- [ ] 连接鉴权：WebSocket 握手时校验 task_id 是否存在（404 拒绝连接）
+- [x] 实现 `routers/ws.py`：`/ws/task/{task_id}` WebSocket 端点，FastAPI WebSocket 路由
+- [x] 实现连接管理器 `services/ws_manager.py`：维护 task_id → WebSocket 连接集合的映射，支持多客户端同时订阅同一任务
+- [x] 实现 `connect(task_id, ws)` / `disconnect(task_id, ws)` / `broadcast(task_id, message)` 三个核心方法
+- [x] 心跳机制：每 30 秒发送 ping，客户端 60 秒无 pong 断开
+- [x] 连接鉴权：WebSocket 握手时校验 task_id 是否存在（404 拒绝连接）
 
 ### Step 5.2 — Redis→WebSocket 事件桥接
-- [ ] 实现 `services/event_bridge.py`：后台 asyncio task，XREAD `task:{task_id}:events` 流
-- [ ] 消息类型定义（Pydantic 模型）：`node_update` / `log` / `agent_status` / `task_done` / `chapter_preview` / `review_score` / `consistency_result` / `dag_update`
-- [ ] 每条 Redis event 解析后通过 `ws_manager.broadcast(task_id, msg)` 推送给所有订阅客户端
-- [ ] 事件桥接生命周期：首个客户端连接时启动 XREAD，最后一个客户端断开时停止
-- [ ] 单元测试：mock Redis stream，验证消息正确转发到 WebSocket
+- [x] 实现 `services/event_bridge.py`：后台 asyncio task，XREAD `task:{task_id}:events` 流
+- [x] 消息类型定义（Pydantic 模型）：`node_update` / `log` / `agent_status` / `task_done` / `chapter_preview` / `review_score` / `consistency_result` / `dag_update`
+- [x] 每条 Redis event 解析后通过 `ws_manager.broadcast(task_id, msg)` 推送给所有订阅客户端
+- [x] 事件桥接生命周期：首个客户端连接时启动 XREAD，最后一个客户端断开时停止
+- [x] 单元测试：mock Redis stream，验证消息正确转发到 WebSocket
 
 ### Step 5.3 — Agent 侧事件发射
-- [ ] 在 `LoggingMiddleware` 中，每次 Agent 开始/完成任务时，XADD `node_update` 事件到 `task:{task_id}:events`
-- [ ] 在 Writer Agent 写作过程中，定期 XADD `chapter_preview` 事件（每 500 字或每段落）
-- [ ] 在 Reviewer Agent 评分后，XADD `review_score` 事件
-- [ ] 在 Consistency Agent 检查后，XADD `consistency_result` 事件
-- [ ] FSM 状态转换时，XADD `dag_update` 事件（节点状态变更）
-- [ ] 任务完成/失败时，XADD `task_done` 事件
+- [x] 在 `LoggingMiddleware` 中，每次 Agent 开始/完成任务时，XADD `node_update` 事件到 `task:{task_id}:events`
+- [x] 在 Writer Agent 写作过程中，定期 XADD `chapter_preview` 事件（每 500 字或每段落）
+- [x] 在 Reviewer Agent 评分后，XADD `review_score` 事件
+- [x] 在 Consistency Agent 检查后，XADD `consistency_result` 事件
+- [x] FSM 状态转换时，XADD `dag_update` 事件（节点状态变更）
+- [x] 任务完成/失败时，XADD `task_done` 事件
+- [x] 双审查回补硬化：
+  - WebSocket 来源校验改为复用 `settings.cors_allow_origins`
+  - ownerless task 默认拒绝非管理员订阅
+  - query token 回退默认关闭，仅保留显式配置开关
+  - `connected` 帧先于 bridge 启动发送
+  - bridge 启动前先捕获当前 stream cursor，避免首批事件被 `$` 跳过
+  - 新连接先进入 pending，待 `connected` 发出后再激活到广播集合
+  - 超大客户端消息直接关闭连接
+  - bridge 启停加锁，读取/广播失败支持退避重试
+  - failed `node_update` 事件改为仅发送安全错误码与摘要
+  - 失败 `node_update` 改为安全摘要，不再暴露原始异常
 
 ### Step 5.4 — 前端 WebSocket 连接层
-- [ ] 实现 `hooks/useTaskWebSocket.ts`：封装原生 WebSocket 连接，自动重连（指数退避，最多 5 次）
-- [ ] 消息分发：根据 `type` 字段路由到不同的 Zustand store action
-- [ ] 连接状态管理：`connecting` / `connected` / `disconnected` / `error`，UI 显示连接指示器
-- [ ] 断线重连后，通过 REST API `GET /api/tasks/{id}` 拉取最新状态做一次全量同步
-- [ ] 单元测试：mock WebSocket，验证消息分发和重连逻辑
+- [x] 实现 `hooks/useTaskWebSocket.ts`：封装原生 WebSocket 连接，自动重连（指数退避，最多 5 次）
+- [x] 消息分发：根据 `type` 字段路由到独立的 `monitorStore` action，并忽略跨任务/过期 socket 事件
+- [x] 连接状态管理：`connecting` / `connected` / `disconnected` / `error`，`Monitor` 页面显示连接指示器
+- [x] 断线重连后，通过 REST API `GET /api/tasks/{id}` 拉取最新状态做一次全量同步
+- [x] 单元测试：mock WebSocket，验证消息分发、任务切换竞态保护、终止性 close code 和重连逻辑
 
 ### Step 5.5 — 前端 DAG 实时可视化
 - [ ] 实现 `components/DagViewer.tsx`：@antv/g6 v5 初始化，从 task nodes 数据渲染 DAG 图

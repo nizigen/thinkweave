@@ -1,4 +1,4 @@
-"""Task service layer — create / read / list tasks + DAG persistence"""
+"""Task service layer for creating, reading, and listing tasks."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.schemas.task import TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
 from app.services.entry_stage import build_entry_metadata
-from app.services.task_decomposer import decompose_task, TaskValidationError
+from app.services.task_decomposer import TaskValidationError, decompose_task
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
 
@@ -20,13 +20,16 @@ async def create_task(
     session: AsyncSession,
     task_in: TaskCreate,
     llm_client: BaseLLMClient,
+    *,
+    owner_id: str = "",
 ) -> TaskDetailRead:
     """
     Create a task, trigger LLM decomposition, persist DAG nodes.
 
-    Flow: create Task row → decompose via LLM → create TaskNode rows → return detail.
+    Flow: create the task row, decompose it via the LLM, persist DAG nodes,
+    then return the task detail payload.
     """
-    # 1. 持久化 Task 主记录
+    # Persist the task row first so downstream records can reference it.
     entry_meta = build_entry_metadata(
         draft_text=task_in.draft_text,
         review_comments=task_in.review_comments,
@@ -36,6 +39,7 @@ async def create_task(
         mode=task_in.mode,
         depth=task_in.depth,
         target_words=task_in.target_words,
+        owner_id=owner_id or None,
         status="decomposing",
         fsm_state=entry_meta["entry_stage"],
         checkpoint_data=entry_meta,
@@ -47,7 +51,7 @@ async def create_task(
         "Task created, starting decomposition"
     )
 
-    # 2. 调用分解服务获取 DAG
+    # Ask the decomposer for a DAG plan.
     dag = await decompose_task(
         title=task_in.title,
         mode=task_in.mode,
@@ -56,7 +60,7 @@ async def create_task(
         llm_client=llm_client,
     )
 
-    # 3. DAG 节点 string ID → UUID 映射（数据库用 UUID 主键）
+    # Map DAG string IDs to database UUID primary keys.
     id_map: dict[str, uuid.UUID] = {}
     nodes: list[TaskNode] = []
 
@@ -77,15 +81,16 @@ async def create_task(
         nodes.append(node)
         session.add(node)
 
-    # 4. 更新任务状态
+    # Mark the task as ready once all nodes are persisted.
     task.status = "pending"
     await session.flush()
+    await session.commit()
 
     logger.bind(task_id=str(task.id), node_count=len(nodes)).info(
         "DAG nodes persisted"
     )
 
-    # 5. 构建返回值
+    # Build the response from the persisted task and node state.
     node_reads = [
         TaskNodeRead(
             id=n.id,
@@ -114,11 +119,17 @@ async def create_task(
 
 
 async def get_task_detail(
-    session: AsyncSession, task_id: uuid.UUID
+    session: AsyncSession,
+    task_id: uuid.UUID,
+    *,
+    user_id: str = "",
+    is_admin: bool = False,
 ) -> TaskDetailRead | None:
     """Get a task with its DAG nodes. Returns None if not found."""
     task = await session.get(Task, task_id)
     if task is None:
+        return None
+    if not _task_visible_to_user(task, user_id=user_id, is_admin=is_admin):
         return None
 
     result = await session.execute(
@@ -136,10 +147,33 @@ async def get_task_detail(
     return task_read
 
 
-async def list_tasks(session: AsyncSession) -> list[TaskRead]:
-    """Return all tasks ordered by creation time (newest first)."""
-    result = await session.execute(
-        select(Task).order_by(Task.created_at.desc())
-    )
+def _task_visible_to_user(
+    task: Task,
+    *,
+    user_id: str,
+    is_admin: bool,
+) -> bool:
+    if is_admin:
+        return True
+    owner_id = str(task.owner_id or "").strip()
+    requested_user_id = user_id.strip()
+    if not owner_id or not requested_user_id:
+        return False
+    return owner_id == requested_user_id
+
+
+async def list_tasks(
+    session: AsyncSession,
+    *,
+    user_id: str = "",
+    offset: int = 0,
+    limit: int = 50,
+) -> list[TaskRead]:
+    """Return tasks ordered by creation time (newest first), with pagination."""
+    stmt = select(Task).order_by(Task.created_at.desc())
+    if user_id:
+        stmt = stmt.where(Task.owner_id == user_id)
+    stmt = stmt.offset(offset).limit(limit)
+    result = await session.execute(stmt)
     tasks = result.scalars().all()
     return [TaskRead.model_validate(t) for t in tasks]

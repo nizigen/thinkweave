@@ -1,13 +1,10 @@
-"""任务分解服务 — 调用LLM将写作需求拆解为DAG子任务图"""
+"""Task decomposition service that turns writing requests into a DAG."""
 
 from __future__ import annotations
 
-from app.schemas.task import (
-    DAGSchema,
-    ValidationResult,
-    VALID_DEPTHS,
-    VALID_MODES,
-)
+from collections import deque
+
+from app.schemas.task import DAGSchema, VALID_DEPTHS, VALID_MODES, ValidationResult
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
 from app.utils.prompt_loader import PromptLoader
@@ -18,7 +15,7 @@ from app.utils.prompt_loader import PromptLoader
 # ---------------------------------------------------------------------------
 
 class TaskValidationError(Exception):
-    """输入验证失败（标题太短、mode非法等）"""
+    """Raised when task input validation fails."""
 
     def __init__(self, issues: list[str]) -> None:
         self.issues = issues
@@ -26,61 +23,57 @@ class TaskValidationError(Exception):
 
 
 class CyclicDAGError(Exception):
-    """DAG包含环或引用了不存在的节点"""
+    """Raised when the DAG contains a cycle or an unknown dependency."""
 
 
 # ---------------------------------------------------------------------------
 # Input Validation
 # ---------------------------------------------------------------------------
 
-_MIN_TITLE_LENGTH = 5
+_MIN_TITLE_LENGTH = 6
 
 
-def validate_task_input(
-    title: str, mode: str, depth: str
-) -> ValidationResult:
-    """
-    验证任务输入合法性（参考DeerFlow CLARIFY → PLAN → ACT模式）。
-    在调用LLM前拦截明显错误。
-    """
+def validate_task_input(title: str, mode: str, depth: str) -> ValidationResult:
+    """Validate task input before invoking the LLM."""
     issues: list[str] = []
     stripped = title.strip()
 
     if len(stripped) < _MIN_TITLE_LENGTH:
         issues.append(
-            f"标题长度不足（至少{_MIN_TITLE_LENGTH}个字符，当前{len(stripped)}个）"
+            f"Title must be at least {_MIN_TITLE_LENGTH} characters "
+            f"(got {len(stripped)})"
         )
 
     if mode not in VALID_MODES:
         issues.append(
-            f"无效的模式 '{mode}'，可选值: {sorted(VALID_MODES)}"
+            f"Invalid mode '{mode}', expected one of {sorted(VALID_MODES)}"
         )
 
     if depth not in VALID_DEPTHS:
         issues.append(
-            f"无效的深度 '{depth}'，可选值: {sorted(VALID_DEPTHS)}"
+            f"Invalid depth '{depth}', expected one of {sorted(VALID_DEPTHS)}"
         )
 
     return ValidationResult(ok=len(issues) == 0, issues=issues)
 
 
 # ---------------------------------------------------------------------------
-# DAG Parsing & Validation
+# DAG Parsing and Validation
 # ---------------------------------------------------------------------------
 
 def parse_dag_response(raw: dict) -> DAGSchema:
     """
-    解析并校验LLM返回的DAG JSON。
+    Parse and validate the DAG JSON returned by the LLM.
 
     Raises:
-        ValueError: JSON结构不合法、role非法、节点ID重复、首节点非outline
+        ValueError: The DAG payload is malformed or violates structural rules.
     """
     try:
         dag = DAGSchema.model_validate(raw)
     except Exception as e:
         raise ValueError(f"DAG schema validation failed: {e}") from e
 
-    # 检查节点ID唯一性
+    # Node IDs must be unique.
     node_ids = [n.id for n in dag.nodes]
     if len(node_ids) != len(set(node_ids)):
         seen: set[str] = set()
@@ -91,7 +84,7 @@ def parse_dag_response(raw: dict) -> DAGSchema:
             seen.add(nid)
         raise ValueError(f"Duplicate node IDs: {dupes}")
 
-    # 首节点必须是outline
+    # The first node must be the outline step.
     if dag.nodes[0].role != "outline":
         raise ValueError(
             f"First node must have role 'outline', got '{dag.nodes[0].role}'"
@@ -102,14 +95,14 @@ def parse_dag_response(raw: dict) -> DAGSchema:
 
 def validate_dag_acyclic(dag: DAGSchema) -> None:
     """
-    验证DAG无环（Kahn拓扑排序）。
+    Validate that the DAG is acyclic using Kahn topological sorting.
 
     Raises:
-        CyclicDAGError: 存在环或引用了不存在的节点
+        CyclicDAGError: The DAG contains a cycle or references unknown nodes.
     """
     node_ids = {n.id for n in dag.nodes}
 
-    # 检查依赖引用的节点是否都存在
+    # Every dependency must reference an existing node.
     for node in dag.nodes:
         for dep in node.depends_on:
             if dep not in node_ids:
@@ -117,7 +110,7 @@ def validate_dag_acyclic(dag: DAGSchema) -> None:
                     f"Node '{node.id}' depends on unknown node '{dep}'"
                 )
 
-    # Kahn拓扑排序检测环
+    # Detect cycles with Kahn topological sorting.
     in_degree: dict[str, int] = {n.id: 0 for n in dag.nodes}
     adjacency: dict[str, list[str]] = {n.id: [] for n in dag.nodes}
 
@@ -126,11 +119,11 @@ def validate_dag_acyclic(dag: DAGSchema) -> None:
             adjacency[dep].append(node.id)
             in_degree[node.id] += 1
 
-    queue = [nid for nid, deg in in_degree.items() if deg == 0]
+    queue = deque(nid for nid, deg in in_degree.items() if deg == 0)
     sorted_count = 0
 
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         sorted_count += 1
         for neighbor in adjacency[current]:
             in_degree[neighbor] -= 1
@@ -157,31 +150,34 @@ async def decompose_task(
     depth: str = "standard",
     target_words: int = 10000,
     llm_client: BaseLLMClient,
+    model: str | None = None,
+    max_retries: int | None = None,
+    fallback_models: list[str] | None = None,
 ) -> DAGSchema:
     """
-    验证输入 → 加载Prompt → 调用LLM → 解析DAG → 验证无环。
+    Validate input, load the prompt, call the LLM, and verify the DAG.
 
     Args:
-        title: 任务标题/描述
-        mode: 写作模式 (report/novel/custom)
-        depth: 研究深度 (quick/standard/deep)
-        target_words: 目标字数
-        llm_client: LLM客户端（支持依赖注入Mock）
+        title: Task title or description.
+        mode: Writing mode (report/novel/custom).
+        depth: Planning depth (quick/standard/deep).
+        target_words: Target word count.
+        llm_client: Injected LLM client, including mocks in tests.
 
     Returns:
-        DAGSchema: 经过验证的DAG结构
+        DAGSchema: A validated DAG structure.
 
     Raises:
-        TaskValidationError: 输入校验失败
-        ValueError: DAG结构非法
-        CyclicDAGError: DAG包含环
+        TaskValidationError: Task input is invalid.
+        ValueError: The DAG structure is invalid.
+        CyclicDAGError: The DAG contains a cycle.
     """
-    # 1. 输入验证
+    # Validate inputs before spending tokens.
     validation = validate_task_input(title, mode, depth)
     if not validation.ok:
         raise TaskValidationError(validation.issues)
 
-    # 2. 加载并渲染Prompt
+    # Load and render the decomposition prompt.
     prompt = _prompt_loader.load(
         "orchestrator",
         "decompose",
@@ -191,20 +187,23 @@ async def decompose_task(
         target_words=str(target_words),
     )
 
-    # 3. 调用LLM获取DAG JSON
+    # Ask the LLM for the DAG JSON.
     logger.bind(title=title, mode=mode, depth=depth).info(
         "Decomposing task via LLM"
     )
     raw = await llm_client.chat_json(
         messages=[{"role": "user", "content": prompt}],
         role="orchestrator",
+        model=model,
+        max_retries=max_retries,
+        fallback_models=fallback_models,
         schema=DAGSchema,
     )
 
-    # chat_json with schema returns model_dump() dict
+    # chat_json with schema returns model_dump() dict.
     dag = parse_dag_response(raw)
 
-    # 4. 验证DAG无环
+    # Ensure the returned DAG is acyclic.
     validate_dag_acyclic(dag)
 
     logger.bind(node_count=len(dag.nodes)).info("Task decomposed successfully")

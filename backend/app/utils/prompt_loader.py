@@ -6,6 +6,18 @@ from pathlib import Path
 
 from app.utils.logger import logger
 
+# Variables that contain user-supplied content and must be sanitized
+_USER_INPUT_VARS: frozenset[str] = frozenset({
+    "title", "draft_text", "review_comments", "chapter_content",
+    "full_text", "original_content",
+})
+
+
+def sanitize_prompt_variable(value: str) -> str:
+    """Wrap user input in <user_input> tags and escape inner XML-like tags."""
+    escaped = value.replace("<", "&lt;").replace(">", "&gt;")
+    return f"<user_input>{escaped}</user_input>"
+
 
 class PromptLoader:
     """
@@ -52,7 +64,11 @@ class PromptLoader:
 
         template = self._cache[cache_key]
         if variables:
-            return template.format_map(variables)
+            sanitized = {
+                k: sanitize_prompt_variable(v) if k in _USER_INPUT_VARS else v
+                for k, v in variables.items()
+            }
+            return template.format_map(sanitized)
         return template
 
     def load_system(self, role: str) -> str:

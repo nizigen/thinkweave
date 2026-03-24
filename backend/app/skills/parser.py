@@ -82,6 +82,10 @@ def parse_skill(text: str, source_path: str = "") -> Skill:
     if isinstance(applicable_modes, str):
         applicable_modes = [applicable_modes]
 
+    applicable_stages = meta.get("applicable_stages", ["all"])
+    if isinstance(applicable_stages, str):
+        applicable_stages = [applicable_stages]
+
     tools = meta.get("tools", [])
     if isinstance(tools, str):
         tools = [tools]
@@ -92,8 +96,10 @@ def parse_skill(text: str, source_path: str = "") -> Skill:
         description=meta.get("description", ""),
         applicable_roles=tuple(applicable_roles),
         applicable_modes=tuple(applicable_modes),
+        applicable_stages=tuple(applicable_stages),
         tools=tuple(tools),
         model_preference=meta.get("model_preference"),
+        priority=int(meta.get("priority", 100)),
         content=content,
         source_path=source_path,
     )

@@ -1,4 +1,4 @@
-"""技能加载器 — 扫描skills/目录，按role+mode匹配适用技能"""
+﻿"""Skills loader: scan skills directory and match by role/mode/stage."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from app.utils.logger import logger
 
 
 class SkillLoader:
-    """从文件系统加载技能，按Agent角色和任务模式匹配"""
+    """Load skills from filesystem and resolve prompt injections."""
 
     def __init__(self, skills_dir: str | Path | None = None) -> None:
         if skills_dir is None:
@@ -23,7 +23,6 @@ class SkillLoader:
         return dict(self._skills)
 
     def _is_safe_path(self, file_path: Path) -> bool:
-        """确保解析后的路径在skills_dir内（防止符号链接穿越）"""
         try:
             file_path.resolve().relative_to(self.skills_dir)
             return True
@@ -31,7 +30,6 @@ class SkillLoader:
             return False
 
     def load_all(self) -> None:
-        """扫描 skills/ 目录，解析所有 .md 文件"""
         new_skills: dict[str, Skill] = {}
 
         if not self.skills_dir.exists():
@@ -48,45 +46,47 @@ class SkillLoader:
                 skill = parse_skill(text, source_path=str(md_file))
                 new_skills[skill.name] = skill
                 logger.debug(f"Loaded skill: {skill.name}")
-            except SkillParseError as e:
-                logger.warning(f"Skipping invalid skill file: {e}")
+            except SkillParseError as exc:
+                logger.warning(f"Skipping invalid skill file: {exc}")
 
         self._skills = new_skills
         logger.info(f"Loaded {len(self._skills)} skills from {self.skills_dir}")
 
-    def match(self, role: str, mode: str) -> list[Skill]:
-        """
-        按 Agent角色 + 任务模式 匹配适用技能。
+    def match(self, role: str, mode: str, stage: str | None = None) -> list[Skill]:
+        """Match skills by role + mode + stage."""
+        matched: list[Skill] = []
+        stage_value = stage or "all"
 
-        匹配规则：
-        - applicable_roles 包含该role，或 applicable_roles 为空（通配）
-        - applicable_modes 包含该mode 或包含 "all"
-        """
-        matched = []
         for skill in self._skills.values():
             role_match = not skill.applicable_roles or role in skill.applicable_roles
             mode_match = "all" in skill.applicable_modes or mode in skill.applicable_modes
-            if role_match and mode_match:
+            stage_match = (
+                "all" in skill.applicable_stages
+                or stage_value in skill.applicable_stages
+            )
+            if role_match and mode_match and stage_match:
                 matched.append(skill)
+
+        matched.sort(key=lambda item: (item.priority, item.name))
         return matched
 
-    def get_prompt_injection(self, role: str, mode: str) -> str:
-        """返回拼接后的技能文本，供注入 system prompt"""
-        matched = self.match(role, mode)
+    def get_prompt_injection(
+        self, role: str, mode: str, stage: str | None = None
+    ) -> str:
+        matched = self.match(role, mode, stage=stage)
         if not matched:
             return ""
-        parts = []
+
+        parts: list[str] = []
         for skill in matched:
             if skill.skill_type == SkillType.WRITING_STYLE:
-                parts.append(f"\n## 写作规范：{skill.name}\n{skill.content}")
+                parts.append(f"\n## Writing Style ({skill.name})\n{skill.content}")
             else:
-                parts.append(f"\n## 行为定义：{skill.name}\n{skill.content}")
+                parts.append(f"\n## Agent Behavior ({skill.name})\n{skill.content}")
         return "\n".join(parts)
 
     def get(self, name: str) -> Skill | None:
-        """按名称获取技能"""
         return self._skills.get(name)
 
     def reload(self) -> None:
-        """重新加载所有技能文件"""
         self.load_all()

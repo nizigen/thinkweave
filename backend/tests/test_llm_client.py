@@ -1,5 +1,7 @@
 """Tests for LLM client — model resolution, MockLLMClient, TokenTracker integration."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.utils.llm_client import (
@@ -68,6 +70,48 @@ class TestModelResolution:
     def test_unknown_role_uses_default(self):
         result = self.client._resolve_model(None, "unknown_role")
         assert result == "gpt-4o"
+
+
+class TestRetryFallbackOverrides:
+    def setup_method(self):
+        self.client = LLMClient.__new__(LLMClient)
+        self.client._clients = {}
+        self.client._tracker = None
+
+    def test_normalize_max_attempts(self):
+        assert self.client._normalize_max_attempts(None) == 3
+        assert self.client._normalize_max_attempts(5) == 5
+        assert self.client._normalize_max_attempts(0) == 1
+
+    def test_resolve_fallback_chain_prefers_override(self):
+        chain = self.client._resolve_fallback_chain(
+            model_name="gpt-4o",
+            default_fallback="deepseek-chat",
+            fallback_models=["deepseek-chat", "gpt-4o", "deepseek-chat"],
+        )
+        assert chain == ["deepseek-chat"]
+
+    @pytest.mark.asyncio
+    async def test_call_with_retry_uses_override_chain(self):
+        self.client._try_model = AsyncMock(
+            side_effect=[
+                (None, RuntimeError("primary fail")),
+                ("ok", None),
+            ]
+        )
+
+        result = await self.client._call_with_retry(
+            "gpt-4o",
+            AsyncMock(),
+            max_retries=2,
+            fallback_models=["deepseek-chat"],
+        )
+
+        assert result == "ok"
+        calls = self.client._try_model.call_args_list
+        assert calls[0].kwargs["max_attempts"] == 2
+        assert calls[0].args[0].model == "gpt-4o"
+        assert calls[1].args[0].model == "deepseek-chat"
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +232,15 @@ class TestLLMClientErrors:
 
         with pytest.raises(LLMUnavailableError, match="OpenAI"):
             await client.embed(["test"])
+
+    def test_placeholder_key_is_treated_as_unconfigured(self):
+        client = LLMClient.__new__(LLMClient)
+        client._clients = {}
+        client._tracker = None
+
+        assert client._is_placeholder_key("sk-xxx") is True
+        assert client._is_placeholder_key("") is True
+        assert client._is_placeholder_key("real-key") is False
 
 
 # ---------------------------------------------------------------------------

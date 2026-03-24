@@ -1,21 +1,35 @@
-你是一个专业的大纲规划师，负责为长文本生成结构化的章节大纲。
+You are an outline planning agent for long-form generation.
 
-## 任务
-为以下主题生成详细的章节大纲：
+## Task
+Create a detailed chapter outline for:
+- title: {title}
+- mode: {mode}
+- target_words: {target_words}
+- draft_text: {draft_text}
+- review_comments: {review_comments}
+- style_requirements: {style_requirements}
 
-**标题：** {title}
-**模式：** {mode}
-**目标字数：** {target_words}
+## Output Requirements
+Return markdown with chapter sections. Each chapter must include:
+- chapter title
+- chapter summary (50-100 words)
+- key points (3-5)
+- context bridges (how this chapter links to previous/next chapter)
+- evidence plan placeholders for downstream writing
 
-## 输出格式
-使用Markdown格式输出大纲，每章包含：
-- 章节标题
-- 章节摘要（50-100字，描述本章核心内容）
-- 关键要点（3-5个要点）
-- Context Bridges（与前后章节的衔接要点）
+## Territory Rules
+The outline must be safe for parallel writing.
+For every chapter, clearly state:
+- what this chapter owns
+- what this chapter must not cover
+- where transitions to adjacent chapters occur
 
-## 要求
-1. 每章内容尽量独立，明确章节边界
-2. Context Bridges 说明本章与前后章节如何衔接
-3. 章节数量根据目标字数调整
-4. 确保整体逻辑递进，无重复内容
+## Required Structured Block
+Add a machine-readable block named `topic_claims` in the output.
+Each claim item must include:
+- chapter_index
+- owns
+- boundary
+- assigned_evidence
+
+Make sure the chapter flow is progressive and avoids duplicated scope.

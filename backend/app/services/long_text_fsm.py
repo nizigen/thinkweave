@@ -6,11 +6,12 @@ import re
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import communicator
 from app.memory.session import SessionMemory
 from app.models.task import Task
 from app.utils.logger import logger
@@ -119,10 +120,12 @@ class LongTextFSM:
         task_id: uuid.UUID,
         state: LongTextState = LongTextState.INIT,
         checkpoint_policy: CheckpointPolicy = CheckpointPolicy.FULL,
+        event_sender: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
         self.task_id = task_id
         self._state = state
         self._checkpoint_policy = checkpoint_policy
+        self._event_sender = event_sender or communicator.send_task_event
         self._review_retry_counts: dict[int, int] = {}
         self._consistency_retry_count: int = 0
         self._completed_chapters: set[int] = set()
@@ -198,6 +201,18 @@ class LongTextFSM:
             expected_old_state=old,
             commit=commit,
         )
+        if self._event_sender is not None:
+            try:
+                await self._event_sender(
+                    task_id=self.task_id,
+                    msg_type="dag_update",
+                    payload={
+                        "from_state": old.value,
+                        "to_state": target.value,
+                    },
+                )
+            except Exception:
+                log.opt(exception=True).warning("failed to emit dag_update event")
 
         if target in (LongTextState.DONE, LongTextState.FAILED):
             await self._cleanup_session_memory()
@@ -466,8 +481,6 @@ async def scan_and_resume_running_tasks(
             )
 
     return fsms
-
-
 
 
 

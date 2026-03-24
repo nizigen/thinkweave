@@ -1,5 +1,10 @@
 # task_plan.md — 任务路线图
 
+> 2026-03-22 同步说明（Aletheia 参考）
+> - 路线保持“SessionMemory 生命周期闭环优先，Knowledge promote 后置”。
+> - provider 口径以本仓库验证为准：`cognee==0.5.5`，默认 `kuzu + lancedb`。
+> - 旧的 `neo4j/qdrant` 默认表述仅作历史上下文，不作当前执行依据。
+
 ## 项目目标
 
 构建层级化多Agent协作编排平台，核心验证：万字长文本生成（技术报告/小说），并行章节内容重复率 < 5%。
@@ -14,8 +19,8 @@
 | 1 | Agent管理模块 | ✅ 完成 | 2026-03-07 |
 | 2 | 任务分解引擎 | ✅ 完成 | 2026-03-09 |
 | 3 | DAG调度引擎 | ✅ 完成 (3.1-3.3) | 2026-03-09 |
-| 4 | 长文本控制 + 记忆层 | 🔜 下一步 | — |
-| 5 | 实时监控 + WebSocket | 待开始 | — |
+| 4 | 长文本控制 + 记忆层 | ✅ 完成 | 2026-03-23 |
+| 5 | 实时监控 + WebSocket | 进行中（5.1-5.4 已完成） | 2026-03-24 |
 | 6 | 结果展示 + 导出 | 待开始 | — |
 | 7 | 系统集成测试 | 待开始 | — |
 
@@ -102,3 +107,35 @@ Step 4.4   Knowledge Graph（跨任务知识积累 + Session→KG promote）
 - [x] Added unit tests for policy payload behavior.
 - [x] Non-DB verification passed for policy subset.
 - [ ] Pending full DB-backed FSM regression when PostgreSQL test service is stable.
+
+## 2026-03-23 Step 4.2 Closure Update
+- [x] Specialized runtime agents upgraded to explicit role contracts inspired by `academic-paper/agents`.
+- [x] `MemoryMiddleware` implemented as the default role-aware memory handoff layer.
+- [x] Default middleware order verified: Logging -> TokenTracking -> Timeout -> ContextSummary -> Memory.
+- [x] Prompt contracts upgraded for outline, writer, reviewer, and consistency roles.
+- [x] Targeted Step 4.2 regression passed (53 tests).
+- [x] Broader adjacent regression passed (85 tests).
+- [x] Ready to move on to the next planned step.
+- [x] Hardened `MemoryMiddleware` against backend read/write failures and capped cached task sessions.
+
+## 2026-03-24 Phase 5 Review-Hardening Update
+- [x] WebSocket origin allowlist moved from hardcoded localhost to `settings.cors_allow_origins`.
+- [x] Ownerless task subscription now fails closed for non-admin users.
+- [x] Query-string token fallback disabled by default; only `Authorization: Bearer` is accepted unless explicitly re-enabled.
+- [x] WebSocket handshake ordering fixed: send `connected` before starting Redis→WS bridge.
+- [x] Bridge now captures the current stream cursor before startup to avoid losing first events emitted during handshake.
+- [x] New subscribers join as pending sockets and are activated only after `connected`, preventing active bridges from racing ahead of the handshake frame.
+- [x] Oversized inbound WS frames now close the connection instead of being ignored.
+- [x] `TaskEventBridge.ensure_started()` / `stop()` made concurrency-safe with async locking.
+- [x] Bridge survives transient Redis read / broadcast failures via bounded backoff retry.
+- [x] Failed `node_update` payload sanitized to `error_code` + generic `error_message`.
+- [x] Phase 5 non-DB verification passed: `test_communicator.py`, `test_agent_core.py`, `test_dag_scheduler.py`, `test_event_bridge.py`, `test_ws_endpoint.py`, `test_ws_manager.py` => `129 passed`.
+- [ ] Pending environment verification: rerun DB-backed `test_long_text_fsm.py` after local PostgreSQL test service recovers.
+
+## 2026-03-24 Step 5.4 Closure Update
+- [x] Added `frontend/src/stores/monitorStore.ts` as the dedicated monitor state store instead of extending `taskStore`.
+- [x] Added `frontend/src/hooks/useTaskWebSocket.ts` with browser-safe `Sec-WebSocket-Protocol` auth, exponential reconnect, and reconnect snapshot resync.
+- [x] Updated `backend/app/routers/ws.py` to accept browser subprotocol auth and echo `agentic-nexus.auth` during handshake.
+- [x] Added frontend test tooling: `vitest@4.1.1`, `@testing-library/react@16.3.2`, `@testing-library/jest-dom@6.9.1`, `jsdom@29.0.1`.
+- [x] Closed review findings around stale snapshot overwrite, stale socket event ingestion, terminal auth close handling, and weak WS rejection assertions.
+- [x] Verification passed: frontend `11 tests`, targeted frontend eslint, backend WS suite `41 passed`.

@@ -22,8 +22,10 @@ class Skill:
     description: str = ""
     applicable_roles: tuple[str, ...] = ()
     applicable_modes: tuple[str, ...] = ("all",)
+    applicable_stages: tuple[str, ...] = ("all",)
     tools: tuple[str, ...] = ()
     model_preference: str | None = None
+    priority: int = 100
 
     # --- Parsed content ---
     content: str = ""           # Markdown body (without frontmatter)

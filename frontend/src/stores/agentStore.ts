@@ -27,10 +27,16 @@ export const useAgentStore = create<AgentState>((set) => ({
     set({ loading: true });
     try {
       const agents = await agentApi.list();
-      set({ agents, loading: false });
-    } catch {
+      set((s) => ({
+        agents,
+        loading: false,
+        selectedAgent: s.selectedAgent
+          ? agents.find((a) => a.id === s.selectedAgent?.id) ?? null
+          : null,
+      }));
+    } catch (err) {
       set({ loading: false });
-      throw new Error('Failed to fetch agents');
+      throw err instanceof Error ? err : new Error('Failed to fetch agents');
     }
   },
 

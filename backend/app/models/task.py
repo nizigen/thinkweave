@@ -1,10 +1,10 @@
-"""Task ORM 模型"""
+﻿"""Task ORM models."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import String, Text, Integer, SmallInteger, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,14 +18,17 @@ class Task(Base):
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     mode: Mapped[str] = mapped_column(String(50), nullable=False)
+    owner_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")
     fsm_state: Mapped[str] = mapped_column(String(50), default="init")
     output_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     depth: Mapped[str] = mapped_column(String(20), default="standard")
     target_words: Mapped[int] = mapped_column(Integer, default=10000)
+    checkpoint_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
     finished_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
@@ -48,7 +51,7 @@ class Outline(Base):
     version: Mapped[int] = mapped_column(SmallInteger, default=1)
     confirmed: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
 
 
@@ -84,5 +87,6 @@ class ChapterReview(Base):
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     passed: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None)
     )
+

@@ -211,6 +211,21 @@ async def xread_latest(
     return messages
 
 
+async def get_latest_stream_id(
+    stream: str,
+    *,
+    r: aioredis.Redis | None = None,
+    default: str = "0-0",
+) -> str:
+    """Return the latest message id in a stream, or default when empty/nonexistent."""
+    cli = r or redis_client
+    entries = await cli.xrevrange(stream, count=1)
+    if not entries:
+        return default
+    mid, _fields = entries[0]
+    return mid
+
+
 # ---------------------------------------------------------------------------
 # Sorted Set — 超时监控
 # ---------------------------------------------------------------------------

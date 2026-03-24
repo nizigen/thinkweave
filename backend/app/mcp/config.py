@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.utils.logger import logger
@@ -27,8 +27,8 @@ class MCPServerConfig:
     """单个MCP服务器的配置"""
     name: str
     command: str
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
+    args: tuple[str, ...] = ()
+    env: tuple[tuple[str, str], ...] = ()
     description: str = ""
 
 
@@ -100,8 +100,8 @@ def load_mcp_config(
             configs[name] = MCPServerConfig(
                 name=name,
                 command=command,
-                args=args,
-                env=safe_env,
+                args=tuple(args),
+                env=tuple(safe_env.items()),
                 description=srv.get("description", ""),
             )
             continue

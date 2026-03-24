@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings
+
+
+_BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class MemoryConfig(BaseSettings):
@@ -21,7 +25,7 @@ class MemoryConfig(BaseSettings):
     memory_namespace_prefix: str = "task"
 
     model_config = {
-        "env_file": ".env",
+        "env_file": _BACKEND_ENV_FILE,
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }

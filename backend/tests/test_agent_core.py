@@ -1,9 +1,9 @@
-﻿"""Tests for Step 3.3 — Agent基类 + 层级Agent + 中间件 + 注册表
+"""Core agent tests for the layered runtime and middleware pipeline.
 
-测试策略：
-  - 使用 MockLLMClient（不调用外部API）
-  - 使用 fakeredis（不依赖真实Redis）
-  - 直接单元测试各组件，不依赖 DB
+Strategy:
+- use a local mock LLM client instead of external APIs
+- keep tests unit-scoped without database dependencies
+- validate middleware order, orchestration, and role dispatching
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from app.utils.token_tracker import TokenTracker
 # ---------------------------------------------------------------------------
 
 class MockLLMClient:
-    """内联 MockLLMClient — 不依赖 conftest 中的完整版本"""
+    """Small in-file mock used by this test module only."""
 
     def __init__(self) -> None:
         self.call_log: list[dict[str, Any]] = []
@@ -47,26 +47,34 @@ class MockLLMClient:
     ) -> str:
         self.call_log.append({"method": "chat", "role": role, "messages": messages})
         if role == "outline":
-            return "# 大纲\n## 第1章 引言\n## 第2章 核心"
+            return "# Outline\n## Chapter 1 Introduction\n## Chapter 2 Core Concepts"
         if role == "writer":
-            return "这是一段模拟章节内容。" * 5
+            return "This is a mock chapter section. " * 5
         if role == "reviewer":
-            return "审查通过，评分85分。"
+            return "Review passed with score 5."
         if role == "consistency":
-            return "一致性检查通过。"
+            return "Consistency check passed."
         if role == "manager":
-            return "管理决策：按计划执行。"
+            return "Manager decision: continue as planned."
         return "mock response"
 
     async def chat_json(
-        self, messages, *, model=None, role=None, schema=None, max_tokens=None,
+        self,
+        messages,
+        *,
+        model=None,
+        role=None,
+        schema=None,
+        max_tokens=None,
+        max_retries=None,
+        fallback_models=None,
     ) -> dict:
         self.call_log.append({"method": "chat_json", "role": role})
         if role == "orchestrator":
             return {
                 "nodes": [
-                    {"id": "n1", "title": "大纲生成", "role": "outline", "depends_on": []},
-                    {"id": "n2", "title": "第1章撰写", "role": "writer", "depends_on": ["n1"]},
+                    {"id": "n1", "title": "Generate outline", "role": "outline", "depends_on": []},
+                    {"id": "n2", "title": "Write chapter 1", "role": "writer", "depends_on": ["n1"]},
                 ]
             }
         return {"result": "mock"}
@@ -81,7 +89,6 @@ class MockLLMClient:
     async def embed(self, texts, **kwargs) -> list[list[float]]:
         return [[0.1] * 10 for _ in texts]
 
-
 @pytest.fixture
 def mock_llm():
     return MockLLMClient()
@@ -93,11 +100,11 @@ def tracker():
 
 
 # ---------------------------------------------------------------------------
-# Helper — 简单的 Worker 子类用于测试 BaseAgent
+# Helper worker subclasses for BaseAgent tests
 # ---------------------------------------------------------------------------
 
 class SimpleTestAgent(BaseAgent):
-    """最简测试 Agent — handle_task 直接返回固定内容"""
+    """Minimal agent that returns a predictable result."""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -109,18 +116,29 @@ class SimpleTestAgent(BaseAgent):
 
 
 class FailingAgent(BaseAgent):
-    """总是失败的 Agent"""
+    """Agent used to exercise error handling."""
 
     async def handle_task(self, ctx: dict[str, Any]) -> str:
         raise RuntimeError("intentional failure")
 
 
 class SlowAgent(BaseAgent):
-    """超时 Agent"""
+    """Agent used to exercise timeout handling."""
 
     async def handle_task(self, ctx: dict[str, Any]) -> str:
         await asyncio.sleep(10)
         return "should not reach"
+
+
+class StaticResultAgent(BaseAgent):
+    """Agent used to test event emission paths in _handle_message."""
+
+    def __init__(self, *, result_text: str, **kwargs):
+        super().__init__(**kwargs)
+        self._result_text = result_text
+
+    async def handle_task(self, ctx: dict[str, Any]) -> str:
+        return self._result_text
 
 
 # ===================================================================
@@ -128,7 +146,7 @@ class SlowAgent(BaseAgent):
 # ===================================================================
 
 class TestLoggingMiddleware:
-    """LoggingMiddleware 日志中间件"""
+    """Logging middleware tests."""
 
     async def test_before_sets_start_time(self, mock_llm):
         agent = SimpleTestAgent(
@@ -150,9 +168,47 @@ class TestLoggingMiddleware:
         result = await mw.after_task(agent, ctx, "hello world")
         assert result == "hello world"
 
+    async def test_before_emits_node_update_event(self, mock_llm):
+        agent = SimpleTestAgent(
+            agent_id=uuid.uuid4(), name="test", role="writer",
+            layer=2, llm_client=mock_llm, middlewares=(),
+        )
+        mw = LoggingMiddleware()
+        with patch("app.agents.middleware.communicator.send_task_event", new_callable=AsyncMock) as mock_event:
+            await mw.before_task(agent, {"title": "test task", "task_id": "t1", "node_id": "n1"})
+        mock_event.assert_awaited_once()
+        assert mock_event.await_args.kwargs["msg_type"] == "node_update"
+        assert mock_event.await_args.kwargs["payload"]["status"] == "running"
+
+    async def test_after_emits_completed_node_update_event(self, mock_llm):
+        agent = SimpleTestAgent(
+            agent_id=uuid.uuid4(), name="test", role="writer",
+            layer=2, llm_client=mock_llm, middlewares=(),
+        )
+        mw = LoggingMiddleware()
+        with patch("app.agents.middleware.communicator.send_task_event", new_callable=AsyncMock) as mock_event:
+            result = await mw.after_task(agent, {"_start_time": 1000.0, "task_id": "t1", "node_id": "n1"}, "hello world")
+        assert result == "hello world"
+        mock_event.assert_awaited_once()
+        assert mock_event.await_args.kwargs["payload"]["status"] == "completed"
+
+    async def test_on_error_emits_failed_node_update_event(self, mock_llm):
+        agent = SimpleTestAgent(
+            agent_id=uuid.uuid4(), name="test", role="writer",
+            layer=2, llm_client=mock_llm, middlewares=(),
+        )
+        mw = LoggingMiddleware()
+        with patch("app.agents.middleware.communicator.send_task_event", new_callable=AsyncMock) as mock_event:
+            await mw.on_error(agent, {"_start_time": 1000.0, "task_id": "t1", "node_id": "n1"}, RuntimeError("boom"))
+        mock_event.assert_awaited_once()
+        assert mock_event.await_args.kwargs["payload"]["status"] == "failed"
+        assert mock_event.await_args.kwargs["payload"]["error_code"] == "agent_execution_failed"
+        assert mock_event.await_args.kwargs["payload"]["error_message"] == "Task execution failed"
+        assert "error" not in mock_event.await_args.kwargs["payload"]
+
 
 class TestTokenTrackingMiddleware:
-    """TokenTrackingMiddleware Token 追踪"""
+    """Token tracking middleware tests."""
 
     async def test_records_usage_when_present(self, mock_llm, tracker):
         agent = SimpleTestAgent(
@@ -198,7 +254,7 @@ class TestTokenTrackingMiddleware:
 
 
 class TestTimeoutMiddleware:
-    """TimeoutMiddleware 超时控制"""
+    """Timeout middleware tests."""
 
     async def test_sets_timeout_in_context(self, mock_llm):
         agent = SimpleTestAgent(
@@ -221,7 +277,7 @@ class TestTimeoutMiddleware:
 
 
 class TestContextSummaryMiddleware:
-    """ContextSummaryMiddleware 上下文压缩"""
+    """Context summary middleware tests."""
 
     async def test_no_compression_for_short_context(self, mock_llm):
         agent = SimpleTestAgent(
@@ -243,7 +299,7 @@ class TestContextSummaryMiddleware:
             layer=2, llm_client=mock_llm, middlewares=(),
         )
         mw = ContextSummaryMiddleware()
-        # 创建超长上下文
+        # ?
         messages = [
             {"role": "system", "content": "system prompt"},
             {"role": "user", "content": "x" * 15000},
@@ -253,7 +309,7 @@ class TestContextSummaryMiddleware:
         ]
         ctx = {"messages": messages}
         result = await mw.before_task(agent, ctx)
-        # 应该被压缩，消息数量减少
+        # ?
         assert len(result["messages"]) < len(messages)
 
 
@@ -262,7 +318,7 @@ class TestContextSummaryMiddleware:
 # ===================================================================
 
 class TestBaseAgent:
-    """BaseAgent 基类测试"""
+    """Base agent tests."""
 
     async def test_process_task_calls_handle_task(self, mock_llm):
         agent = SimpleTestAgent(
@@ -329,13 +385,84 @@ class TestBaseAgent:
         agent.stop()
         assert agent._stop.is_set()
 
+    async def test_handle_message_writer_emits_chapter_preview(self, mock_llm):
+        agent = StaticResultAgent(
+            agent_id=uuid.uuid4(),
+            name="writer-events",
+            role="writer",
+            layer=2,
+            llm_client=mock_llm,
+            middlewares=(),
+            result_text="Paragraph one.\n\nParagraph two.",
+        )
+        envelope = MagicMock()
+        envelope.task_id = "t1"
+        envelope.node_id = "n1"
+        envelope.payload = {"title": "Write chapter", "chapter_index": 1, "chapter_title": "Intro"}
+        with (
+            patch.object(agent, "_publish_heartbeat", new_callable=AsyncMock),
+            patch("app.agents.base_agent.communicator.send_task_result", new_callable=AsyncMock),
+            patch("app.agents.base_agent.communicator.send_task_event", new_callable=AsyncMock) as mock_event,
+        ):
+            await agent._handle_message(envelope)
+
+        assert any(call.kwargs["msg_type"] == "chapter_preview" for call in mock_event.await_args_list)
+
+    async def test_handle_message_reviewer_emits_review_score(self, mock_llm):
+        agent = StaticResultAgent(
+            agent_id=uuid.uuid4(),
+            name="reviewer-events",
+            role="reviewer",
+            layer=2,
+            llm_client=mock_llm,
+            middlewares=(),
+            result_text="Review complete. Score: 85.",
+        )
+        envelope = MagicMock()
+        envelope.task_id = "t1"
+        envelope.node_id = "n1"
+        envelope.payload = {"title": "Review chapter"}
+        with (
+            patch.object(agent, "_publish_heartbeat", new_callable=AsyncMock),
+            patch("app.agents.base_agent.communicator.send_task_result", new_callable=AsyncMock),
+            patch("app.agents.base_agent.communicator.send_task_event", new_callable=AsyncMock) as mock_event,
+        ):
+            await agent._handle_message(envelope)
+
+        review_calls = [call for call in mock_event.await_args_list if call.kwargs["msg_type"] == "review_score"]
+        assert len(review_calls) == 1
+        assert review_calls[0].kwargs["payload"]["score"] == 85
+
+    async def test_handle_message_consistency_emits_consistency_result(self, mock_llm):
+        agent = StaticResultAgent(
+            agent_id=uuid.uuid4(),
+            name="consistency-events",
+            role="consistency",
+            layer=2,
+            llm_client=mock_llm,
+            middlewares=(),
+            result_text="No major consistency issues found.",
+        )
+        envelope = MagicMock()
+        envelope.task_id = "t1"
+        envelope.node_id = "n1"
+        envelope.payload = {"title": "Consistency check"}
+        with (
+            patch.object(agent, "_publish_heartbeat", new_callable=AsyncMock),
+            patch("app.agents.base_agent.communicator.send_task_result", new_callable=AsyncMock),
+            patch("app.agents.base_agent.communicator.send_task_event", new_callable=AsyncMock) as mock_event,
+        ):
+            await agent._handle_message(envelope)
+
+        assert any(call.kwargs["msg_type"] == "consistency_result" for call in mock_event.await_args_list)
+
 
 # ===================================================================
 # Test: AgentRegistry
 # ===================================================================
 
 class TestAgentRegistry:
-    """AgentRegistry Agent注册表"""
+    """Agent registry tests."""
 
     def _make_agent(self, mock_llm, role="writer", name="test"):
         return SimpleTestAgent(
@@ -425,7 +552,7 @@ class TestAgentRegistry:
 # ===================================================================
 
 class TestOrchestratorAgent:
-    """OrchestratorAgent Layer 0 编排Agent"""
+    """Orchestrator agent tests."""
 
     async def test_handle_task_calls_decompose(self, mock_llm):
         agent = OrchestratorAgent(
@@ -437,9 +564,9 @@ class TestOrchestratorAgent:
 
         ctx = {
             "task_id": str(uuid.uuid4()),
-            "title": "写一篇量子计算技术报告",
+            "title": "Write a report on quantum computing",
             "payload": {
-                "title": "写一篇量子计算技术报告",
+                "title": "Write a report on quantum computing",
                 "mode": "report",
                 "depth": "standard",
                 "target_words": 10000,
@@ -448,13 +575,9 @@ class TestOrchestratorAgent:
 
         result = await agent.handle_task(ctx)
 
-        # decompose_task 内部调用 mock_llm.chat_json(role="orchestrator")
-        # 返回 MOCK_DAG_JSON, 序列化为 JSON string
         assert "n1" in result
         assert "n2" in result
         assert "outline" in result
-
-        # 确认 LLM 被调用
         assert any(c["method"] == "chat_json" for c in mock_llm.call_log)
 
 
@@ -463,7 +586,7 @@ class TestOrchestratorAgent:
 # ===================================================================
 
 class TestManagerAgent:
-    """ManagerAgent Layer 1 管理Agent"""
+    """ManagerAgent Layer 1 coordination tests."""
 
     async def test_coordinator_role(self, mock_llm):
         agent = ManagerAgent(
@@ -479,8 +602,8 @@ class TestManagerAgent:
             "task_id": "t1",
             "title": "coordinate subtasks",
             "payload": {
-                "instruction": "检查所有写作Agent的进度",
-                "context": "3个Writer正在并行工作",
+                "instruction": "Check the progress of all writer agents.",
+                "context": "Three writers are working in parallel.",
             },
         }
 
@@ -520,7 +643,7 @@ class TestManagerAgent:
 # ===================================================================
 
 class TestWorkerAgent:
-    """WorkerAgent Layer 2 通用执行Agent"""
+    """WorkerAgent Layer 2 execution tests."""
 
     async def test_handle_task_writer_role(self, mock_llm):
         agent = WorkerAgent(
@@ -532,7 +655,7 @@ class TestWorkerAgent:
         ctx = {
             "task_id": "t1",
             "node_id": "n1",
-            "title": "撰写第1章",
+            "title": "Write chapter 1",
             "agent_role": "writer",
             "payload": {"chapter_index": "1"},
         }
@@ -549,12 +672,12 @@ class TestWorkerAgent:
         ctx = {
             "task_id": "t1",
             "node_id": "n2",
-            "title": "审查第1章",
+            "title": "Review chapter 1",
             "agent_role": "reviewer",
             "payload": {},
         }
         result = await agent.handle_task(ctx)
-        assert "审查" in result
+        assert "Review" in result
 
     async def test_handle_task_outline_role(self, mock_llm):
         agent = WorkerAgent(
@@ -565,15 +688,15 @@ class TestWorkerAgent:
         ctx = {
             "task_id": "t1",
             "node_id": "n3",
-            "title": "生成大纲",
+            "title": "Generate outline",
             "agent_role": "outline",
             "payload": {},
         }
         result = await agent.handle_task(ctx)
-        assert "大纲" in result
+        assert "Outline" in result
 
     async def test_build_user_prompt_fallback(self, mock_llm):
-        """当 Prompt 模板不存在时使用通用格式"""
+        """Falls back to the generic prompt format when a template is missing."""
         agent = WorkerAgent(
             agent_id=uuid.uuid4(), name="generic",
             role="writer", llm_client=mock_llm, middlewares=(),
@@ -597,10 +720,10 @@ class TestWorkerAgent:
 # ===================================================================
 
 class TestMiddlewarePipeline:
-    """中间件管道集成测试"""
+    """Middleware pipeline integration tests."""
 
     async def test_full_pipeline_success(self, mock_llm, tracker):
-        """完整中间件管道 — 成功路径"""
+        """Runs the full default middleware pipeline successfully."""
         agent = SimpleTestAgent(
             agent_id=uuid.uuid4(), name="test", role="writer",
             layer=2, llm_client=mock_llm, token_tracker=tracker,
@@ -614,7 +737,7 @@ class TestMiddlewarePipeline:
         assert "done:test task" in result
 
     async def test_middleware_order(self, mock_llm):
-        """验证中间件执行顺序"""
+        """Executes middlewares in before-order and reverse after-order."""
         order: list[str] = []
 
         class OrderTracker(AgentMiddleware):
@@ -636,11 +759,11 @@ class TestMiddlewarePipeline:
         )
         await agent.process_task({"title": "t", "task_id": "t1"})
 
-        # before: A → B, after: B → A（逆序）
+        # before: A -> B, after: B -> A
         assert order == ["before:A", "before:B", "after:B", "after:A"]
 
     async def test_error_propagates_through_middlewares(self, mock_llm):
-        """异常应该触发所有中间件的 on_error"""
+        """Propagates errors through all middleware on_error hooks."""
         errors: list[str] = []
 
         class ErrorTracker(AgentMiddleware):
@@ -659,12 +782,12 @@ class TestMiddlewarePipeline:
         with pytest.raises(RuntimeError):
             await agent.process_task({"title": "fail", "task_id": "t1"})
 
-        # 两个中间件都应收到 on_error
+        # both middlewares should receive on_error
         assert "A" in errors
         assert "B" in errors
 
     async def test_default_middlewares_count(self):
-        """默认中间件应该有4个"""
+        """Default middleware stack should include role-aware memory integration."""
         assert len(DEFAULT_MIDDLEWARES) == 5
         assert isinstance(DEFAULT_MIDDLEWARES[0], LoggingMiddleware)
         assert isinstance(DEFAULT_MIDDLEWARES[1], TokenTrackingMiddleware)

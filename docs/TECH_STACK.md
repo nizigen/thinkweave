@@ -57,6 +57,10 @@
 | 拖拽排序 | @dnd-kit/sortable | 8.0.0 | 树形节点排序 |
 | 图标 | @ant-design/icons | 5.5.1 | 图标库 |
 | 类型检查 | @types/react | 18.3.11 | React类型定义 |
+| 前端测试 | Vitest | 4.1.1 | Hook/store 单元测试 |
+| React测试工具 | @testing-library/react | 16.3.2 | Hook 渲染与交互断言 |
+| DOM断言扩展 | @testing-library/jest-dom | 6.9.1 | DOM 环境断言扩展 |
+| DOM测试环境 | jsdom | 29.0.1 | 浏览器 API 模拟环境 |
 
 ---
 

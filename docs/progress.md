@@ -38,9 +38,18 @@
 - commit: a58a704
 
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + 基线集成测试
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + 基线集成测试
 进行中：—
-下一步：Step 5.1 WebSocket 后端基础设施（实时监控）
+下一步：Step 5.5 前端 DAG 实时可视化
+
+## Step 5.4 前端 WebSocket 连接层（2026-03-24）
+- 新增 `frontend/src/stores/monitorStore.ts`：维护监控页独立连接状态、任务快照、最近 500 条事件缓存，隔离于 `taskStore`
+- 新增 `frontend/src/hooks/useTaskWebSocket.ts`：接入浏览器可用的 `Sec-WebSocket-Protocol` 鉴权握手，支持指数退避重连与重连后的 REST 全量同步
+- 更新 `backend/app/routers/ws.py`：支持 base64url 编码 token 的 subprotocol 鉴权，并在握手时显式接受 `agentic-nexus.auth`
+- 更新 `frontend/src/pages/Monitor.tsx`：显示连接状态、重连次数和错误提示，作为 Step 5.5/5.6 可视化前的轻量监控入口
+- 新增前端测试栈：`vitest@4.1.1`、`@testing-library/react@16.3.2`、`@testing-library/jest-dom@6.9.1`、`jsdom@29.0.1`
+- 根据双审查补强竞态保护：阻止旧任务快照覆盖、忽略跨任务/过期 socket 事件、对 `1008` 终止性关闭码停止重连并保留明确错误
+- 验证通过：`backend/tests/test_ws_endpoint.py backend/tests/test_ws_manager.py backend/tests/test_event_bridge.py` => `41 passed`；`frontend npm run test` => `11 passed`；Step 5.4 相关前端 eslint 通过
 
 ## 文档更新（2026-03-18）
 - 6 份规范文档 + CLAUDE.md + lessons.md 已融入 cognee Memory Layer 设计
@@ -199,3 +208,40 @@
   - backend/.venv/Scripts/python.exe -m pytest -q tests/test_memory_middleware.py tests/test_agent_core.py tests/test_specialized_agents.py tests/test_agent_prompt_contracts.py -> 53 passed.
   - backend/.venv/Scripts/python.exe -m pytest -q tests/test_review_fixes.py tests/test_llm_client.py tests/test_agents.py tests/test_long_text_fsm.py::TestCheckpoint tests/test_memory_core.py tests/test_task_api.py -> 85 passed.
 - Follow-up hardening: MemoryMiddleware now degrades gracefully on query/store failures and caps in-process cached sessions to avoid unbounded growth in long-lived workers.
+## Step 5.1-5.2 WebSocket 实时桥接（2026-03-24）
+- 验收并收口现有 `app/routers/ws.py` 与 `app/services/ws_manager.py`：WebSocket 握手、鉴权、心跳、路由注册继续保持可用
+- 新增 `app/schemas/ws_event.py`：统一 WebSocket 事件结构，覆盖 `connected` / `node_update` / `log` / `task_done` / `chapter_preview` / `review_score` / `consistency_result` / `dag_update`
+- 新增 `app/services/event_bridge.py`：为每个 `task_id` 维护单例 Redis→WebSocket 桥接协程，兼容现有 `status_update -> node_update` 映射
+- `app/routers/ws.py` 接入桥接生命周期：连接成功后 `ensure_started(task_id)`，最后一个连接断开后 `stop(task_id)`
+- 新增测试 `backend/tests/test_event_bridge.py`，并扩展 `backend/tests/test_ws_endpoint.py`
+- 验证：
+  - `backend/tests/test_event_bridge.py + test_ws_endpoint.py + test_ws_manager.py` => `26 passed`
+  - `backend/tests/test_communicator.py + test_redis_streams.py` => `43 passed`
+## Step 5.3 Agent / FSM 事件发射（2026-03-24）
+- `communicator.py` 新增 `send_task_event()`，统一任务事件发送入口；`send_status_update()` 改为兼容封装
+- `LoggingMiddleware` 现在会在开始/完成/失败时发 `node_update`
+- `BaseAgent` 成功处理后会按角色补发：
+  - writer -> `chapter_preview`
+  - reviewer -> `review_score`
+  - consistency -> `consistency_result`
+- `DAGScheduler` 在任务完成/失败时补发 `task_done`
+- `LongTextFSM.transition()` 默认发 `dag_update`，发送失败不阻塞状态迁移
+- 验证：
+  - `backend/tests/test_communicator.py + test_agent_core.py + test_dag_scheduler.py` => `89 passed`
+  - `backend/tests/test_event_bridge.py + test_ws_endpoint.py + test_ws_manager.py` => `26 passed`
+  - 事件发射目标集 `-k "send_task_event or emits or task_done or dag_update"` => `8 passed`
+
+2026-03-24: Step 5 review-hardening follow-up completed.
+- 修复 WebSocket 授权边界：无 `owner_id` 任务默认拒绝非管理员访问；默认仅接受 `Authorization: Bearer`，query token 回退改为显式配置开关。
+- 修复 WebSocket 来源校验：移除硬编码 localhost，统一改为读取 `settings.cors_allow_origins`，与 HTTP CORS 配置保持一致。
+- 修复握手/时序问题：`connected` 事件改为先于 `event_bridge.ensure_started()` 发送，避免任务事件抢在握手帧之前抵达。
+- 修复 bridge 启动窗口漏事件：连接建立后先读取当前 stream 游标，再以该游标启动 bridge，避免握手后的首批事件被 `$` 跳过。
+- 修复已有 bridge 下的新订阅时序：连接先进入 pending，待 `connected` 发出后再激活到广播集合，避免第二个及后续订阅者先收到业务事件。
+- 修复大消息处理：超出 `MAX_WS_MESSAGE_SIZE` 的客户端消息现在直接关闭连接，不再静默忽略。
+- 修复事件桥稳定性：`TaskEventBridge` 增加并发锁，避免重复启动；读取/广播瞬时失败时按退避重试，不再直接退出。
+- 修复事件暴露：`LoggingMiddleware` 失败事件改为发送安全摘要（`error_code`/`error_message`），不再广播原始异常字符串。
+- 新增回归测试覆盖：ownerless task 拒绝、配置化 origin、Bearer header、握手顺序、超大消息关闭、bridge 并发安全、bridge 瞬时失败恢复、错误载荷脱敏。
+- 定向验证：
+  - `backend/tests/test_agent_core.py + test_event_bridge.py + test_ws_endpoint.py` => `66 passed`
+  - `backend/tests/test_communicator.py + test_agent_core.py + test_dag_scheduler.py + test_event_bridge.py + test_ws_endpoint.py + test_ws_manager.py` => `129 passed`
+  - `backend/tests/test_long_text_fsm.py` 在本机因 PostgreSQL 连接拒绝未纳入本轮通过集，需在测试库可用后补跑。

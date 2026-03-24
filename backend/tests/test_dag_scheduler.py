@@ -1,4 +1,4 @@
-"""Tests for DAG Scheduler — dag_scheduler.py
+﻿"""Tests for DAG Scheduler — dag_scheduler.py
 
 测试策略：
   - 使用 fakeredis 替代真实 Redis
@@ -427,12 +427,15 @@ class TestMarkTask:
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_comm.send_status_update = AsyncMock()
+            mock_comm.send_task_event = AsyncMock()
 
             await scheduler._mark_task_done()
 
         mock_session.execute.assert_called_once()
         mock_session.commit.assert_called_once()
         mock_comm.send_status_update.assert_called_once()
+        mock_comm.send_task_event.assert_called_once()
+        assert mock_comm.send_task_event.await_args.kwargs["msg_type"] == "task_done"
 
     @pytest.mark.asyncio
     async def test_mark_task_failed(self, scheduler: DAGScheduler):
@@ -444,11 +447,14 @@ class TestMarkTask:
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_comm.send_status_update = AsyncMock()
+            mock_comm.send_task_event = AsyncMock()
 
             await scheduler._mark_task_failed("test error")
 
         mock_session.execute.assert_called_once()
         mock_comm.send_status_update.assert_called_once()
+        mock_comm.send_task_event.assert_called_once()
+        assert mock_comm.send_task_event.await_args.kwargs["payload"]["status"] == "failed"
 
 
 # ---------------------------------------------------------------------------

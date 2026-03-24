@@ -9,6 +9,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from app.memory.session import SessionMemory
+from app.services import communicator
 from app.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -31,6 +32,39 @@ class AgentMiddleware(ABC):
 class LoggingMiddleware(AgentMiddleware):
     """Track task start, finish, duration, and failure logging."""
 
+    async def _emit_node_event(
+        self,
+        agent: BaseAgent,
+        ctx: dict[str, Any],
+        *,
+        status: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        task_id = str(ctx.get("task_id", "")).strip()
+        node_id = str(ctx.get("node_id", "")).strip()
+        if not task_id:
+            return
+
+        payload: dict[str, Any] = {
+            "status": status,
+            "title": ctx.get("title", ""),
+            "agent_role": agent.role,
+            "agent_id": str(agent.agent_id),
+        }
+        if extra:
+            payload.update(extra)
+
+        try:
+            await communicator.send_task_event(
+                task_id=task_id,
+                node_id=node_id,
+                from_agent=str(agent.agent_id),
+                msg_type="node_update",
+                payload=payload,
+            )
+        except Exception:
+            logger.opt(exception=True).warning("failed to emit node_update event")
+
     async def before_task(self, agent: BaseAgent, ctx: dict[str, Any]) -> dict[str, Any]:
         current_ctx = {**ctx, "_start_time": time.monotonic()}
         log = logger.bind(
@@ -40,6 +74,7 @@ class LoggingMiddleware(AgentMiddleware):
             node_id=current_ctx.get("node_id", ""),
         )
         log.info("task started: {}", current_ctx.get("title", ""))
+        await self._emit_node_event(agent, current_ctx, status="running")
         return current_ctx
 
     async def after_task(self, agent: BaseAgent, ctx: dict[str, Any], result: str) -> str:
@@ -52,6 +87,12 @@ class LoggingMiddleware(AgentMiddleware):
             elapsed_s=round(elapsed, 2),
         )
         log.info("task completed ({:.2f}s)", elapsed)
+        await self._emit_node_event(
+            agent,
+            ctx,
+            status="completed",
+            extra={"elapsed_s": round(elapsed, 2)},
+        )
         return result
 
     async def on_error(self, agent: BaseAgent, ctx: dict[str, Any], error: Exception) -> None:
@@ -64,6 +105,16 @@ class LoggingMiddleware(AgentMiddleware):
             elapsed_s=round(elapsed, 2),
         )
         log.opt(exception=True).error("task failed ({:.2f}s): {}", elapsed, error)
+        await self._emit_node_event(
+            agent,
+            ctx,
+            status="failed",
+            extra={
+                "elapsed_s": round(elapsed, 2),
+                "error_code": "agent_execution_failed",
+                "error_message": "Task execution failed",
+            },
+        )
 
 
 class TokenTrackingMiddleware(AgentMiddleware):
@@ -163,19 +214,15 @@ class ContextSummaryMiddleware(AgentMiddleware):
 class MemoryMiddleware(AgentMiddleware):
     """Role-aware session memory injection and persistence."""
 
-    _KG_ROLES = frozenset({"outline", "writer"})
-
     def __init__(
         self,
         session_factory: Any | None = None,
         *,
         max_cached_sessions: int = 128,
-        knowledge_graph: Any | None = None,
     ) -> None:
         self._session_factory = session_factory or (lambda task_id: SessionMemory(task_id=str(task_id)))
         self._max_cached_sessions = max(1, max_cached_sessions)
         self._sessions: OrderedDict[str, Any] = OrderedDict()
-        self._knowledge_graph = knowledge_graph
 
     def _get_session(self, task_id: str) -> Any:
         session = self._sessions.get(task_id)
@@ -230,46 +277,28 @@ class MemoryMiddleware(AgentMiddleware):
         metadata["summary"] = result[:500]
         return metadata
 
-    def _build_kg_context(self, agent: BaseAgent, ctx: dict[str, Any]) -> str:
-        """Query KG for outline/writer roles and return context string."""
-        if self._knowledge_graph is None or agent.role not in self._KG_ROLES:
-            return ""
-        query = self._build_query(agent, ctx)
-        try:
-            entries = self._knowledge_graph.query(query, limit=5)
-            if not entries:
-                return ""
-            lines = [f"- [{e.key}] {e.content}" for e in entries]
-            return "\n".join(lines)
-        except Exception:
-            logger.opt(exception=True).warning("KG context query failed")
-            return ""
-
     async def before_task(self, agent: BaseAgent, ctx: dict[str, Any]) -> dict[str, Any]:
         task_id = str(ctx.get("task_id", "")).strip()
-        kg_context = self._build_kg_context(agent, ctx)
-
         if not task_id:
-            return {**ctx, "memory_context": "", "kg_context": kg_context}
+            return {**ctx, "memory_context": ""}
 
         try:
             session = self._get_session(task_id)
             enabled = await session.initialize()
             if not enabled:
-                return {**ctx, "_memory_session": session, "memory_context": "", "kg_context": kg_context}
+                return {**ctx, "_memory_session": session, "memory_context": ""}
 
             rows = await session.query(self._build_query(agent, ctx), limit=5)
             return {
                 **ctx,
                 "_memory_session": session,
                 "memory_context": self._format_rows(rows),
-                "kg_context": kg_context,
             }
         except Exception:
             logger.opt(exception=True).warning(
                 "memory preload failed, continuing without injected memory context"
             )
-            return {**ctx, "memory_context": "", "kg_context": kg_context}
+            return {**ctx, "memory_context": ""}
 
     async def after_task(self, agent: BaseAgent, ctx: dict[str, Any], result: str) -> str:
         try:

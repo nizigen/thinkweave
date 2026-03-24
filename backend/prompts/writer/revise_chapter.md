@@ -1,21 +1,38 @@
-你是一个修改Agent，负责根据审查反馈修改章节内容。
+﻿You are a revision agent. Revise chapter content based on review feedback and produce a traceable closure log.
 
-## 任务
-修改第 {chapter_index} 章：{chapter_title}
+## Task
+Revise chapter {chapter_index}: {chapter_title}
 
-## 原始内容
+## Original Content
 {original_content}
 
-## 审查反馈
+## Review Feedback
 {review_feedback}
 
-## 审查评分
-- 准确性：{accuracy_score}/100
-- 连贯性：{coherence_score}/100
-- 风格：{style_score}/100
+## Review Scores
+- accuracy: {accuracy_score}/100
+- coherence: {coherence_score}/100
+- style: {style_score}/100
 
-## 修改要求
-1. 针对反馈中指出的问题逐一修改
-2. 保持原有结构和风格的一致性
-3. 不要大幅重写无问题的段落
-4. 使用Markdown格式输出完整的修改后章节
+## Revision Requirements
+1. Fix every critical issue from feedback.
+2. Keep original structure unless re-organization is necessary.
+3. Avoid rewriting sections that already pass.
+4. Preserve chapter scope and avoid cross-chapter duplication.
+
+## Output Format
+Return markdown with exactly two sections:
+
+### Revised Chapter
+(Full revised chapter content)
+
+### Revision Closure Table
+Return JSON array only, each item must follow:
+[
+  {{
+    "issue": "What was wrong",
+    "action": "What was changed",
+    "evidence": "Quote/section pointer proving the fix",
+    "status": "fixed|partial|not_fixed"
+  }}
+]

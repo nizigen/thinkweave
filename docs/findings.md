@@ -1,5 +1,16 @@
 # findings.md — 研究发现与技术决策知识库
 
+## 2026-03-22：Aletheia 实施计划借鉴（已纠偏）
+
+- 借鉴点：
+  - 两层记忆推进：SessionMemory 先落地，KnowledgeGraph 后接入。
+  - 在现有运行时流程中挂 memory hooks，而不是扩展过多新编排节点。
+  - 生命周期合同：`initialize -> store/query -> cleanup -> promote handoff`。
+- 本仓库纠偏：
+  - 本地可用基线为 `cognee==0.5.5`。
+  - 默认 provider 目标为 `graph=kuzu`、`vector=lancedb`。
+  - `neo4j/qdrant` 不作为本仓库当前默认 runtime backend。
+
 ## 竞品与参考项目研究
 
 ### 多Agent编排系统（2026-03-06）

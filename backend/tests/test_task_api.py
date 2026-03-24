@@ -7,6 +7,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from app.config import settings
 from app.main import app
 from app.routers.tasks import get_llm_client
 from tests.conftest import MockLLMClient
@@ -18,6 +19,7 @@ VALID_PAYLOAD = {
     "depth": "standard",
     "target_words": 10000,
 }
+AUTH_HEADERS = {"Authorization": "Bearer token-user"}
 
 
 class TestCreateTask:
@@ -28,7 +30,7 @@ class TestCreateTask:
         app.dependency_overrides.pop(get_llm_client, None)
 
     async def test_create_task_success(self, client: AsyncClient, mock_llm: MockLLMClient):
-        resp = await client.post("/api/tasks", json=VALID_PAYLOAD)
+        resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
         assert resp.status_code == 201
         data = resp.json()
 
@@ -48,38 +50,38 @@ class TestCreateTask:
 
     async def test_create_task_with_novel_mode(self, client: AsyncClient):
         payload = {**VALID_PAYLOAD, "mode": "novel", "target_words": 50000}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 201
         assert resp.json()["mode"] == "novel"
 
     async def test_create_task_title_too_short(self, client: AsyncClient):
         payload = {**VALID_PAYLOAD, "title": "short"}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 422
 
     async def test_create_task_invalid_mode(self, client: AsyncClient):
         payload = {**VALID_PAYLOAD, "mode": "invalid"}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 422
 
     async def test_create_task_invalid_depth(self, client: AsyncClient):
         payload = {**VALID_PAYLOAD, "depth": "ultra_deep"}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 422
 
     async def test_create_task_target_words_too_low(self, client: AsyncClient):
         payload = {**VALID_PAYLOAD, "target_words": 100}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 422
 
     async def test_create_task_target_words_too_high(self, client: AsyncClient):
         payload = {**VALID_PAYLOAD, "target_words": 300000}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 422
 
     async def test_create_task_default_values(self, client: AsyncClient):
         payload = {"title": "Default value task title long enough"}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 201
         data = resp.json()
         assert data["mode"] == "report"
@@ -90,7 +92,7 @@ class TestCreateTask:
         self, client: AsyncClient
     ):
         payload = {**VALID_PAYLOAD, "draft_text": "Existing draft content"}
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 201
         assert resp.json()["fsm_state"] == "pre_review_integrity"
 
@@ -101,12 +103,12 @@ class TestCreateTask:
             **VALID_PAYLOAD,
             "review_comments": "Please fix unsupported claims.",
         }
-        resp = await client.post("/api/tasks", json=payload)
+        resp = await client.post("/api/tasks", json=payload, headers=AUTH_HEADERS)
         assert resp.status_code == 201
         assert resp.json()["fsm_state"] == "pre_review_integrity"
 
     async def test_create_task_nodes_have_correct_dependencies(self, client: AsyncClient):
-        resp = await client.post("/api/tasks", json=VALID_PAYLOAD)
+        resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
         assert resp.status_code == 201
         nodes = resp.json()["nodes"]
 
@@ -127,10 +129,10 @@ class TestGetTask:
         app.dependency_overrides.pop(get_llm_client, None)
 
     async def test_get_task_success(self, client: AsyncClient):
-        create_resp = await client.post("/api/tasks", json=VALID_PAYLOAD)
+        create_resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
         task_id = create_resp.json()["id"]
 
-        resp = await client.get(f"/api/tasks/{task_id}")
+        resp = await client.get(f"/api/tasks/{task_id}", headers=AUTH_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == task_id
@@ -139,12 +141,32 @@ class TestGetTask:
 
     async def test_get_task_not_found(self, client: AsyncClient):
         fake_id = str(uuid.uuid4())
-        resp = await client.get(f"/api/tasks/{fake_id}")
+        resp = await client.get(f"/api/tasks/{fake_id}", headers=AUTH_HEADERS)
         assert resp.status_code == 404
 
     async def test_get_task_invalid_uuid(self, client: AsyncClient):
-        resp = await client.get("/api/tasks/not-a-uuid")
+        resp = await client.get("/api/tasks/not-a-uuid", headers=AUTH_HEADERS)
         assert resp.status_code == 422
+
+    async def test_get_task_for_other_user_returns_404(
+        self, client: AsyncClient
+    ):
+        create_resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
+        task_id = create_resp.json()["id"]
+
+        old_tokens = settings.task_auth_tokens
+        old_admins = settings.admin_user_ids
+        settings.task_auth_tokens = f"{old_tokens},token-other:other-user"
+        settings.admin_user_ids = old_admins
+        try:
+            resp = await client.get(
+                f"/api/tasks/{task_id}",
+                headers={"Authorization": "Bearer token-other"},
+            )
+        finally:
+            settings.task_auth_tokens = old_tokens
+            settings.admin_user_ids = old_admins
+        assert resp.status_code == 404
 
 
 class TestListTasks:
@@ -155,22 +177,22 @@ class TestListTasks:
         app.dependency_overrides.pop(get_llm_client, None)
 
     async def test_list_tasks_empty(self, client: AsyncClient):
-        resp = await client.get("/api/tasks")
+        resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
     async def test_list_tasks_after_create(self, client: AsyncClient):
-        create_resp = await client.post("/api/tasks", json=VALID_PAYLOAD)
+        create_resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
         created_id = create_resp.json()["id"]
 
-        resp = await client.get("/api/tasks")
+        resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
         assert resp.status_code == 200
         ids = [t["id"] for t in resp.json()]
         assert created_id in ids
 
     async def test_list_tasks_no_nodes_field(self, client: AsyncClient):
-        await client.post("/api/tasks", json=VALID_PAYLOAD)
-        resp = await client.get("/api/tasks")
+        await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
+        resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
         assert resp.status_code == 200
         for t in resp.json():
             assert "nodes" not in t
@@ -179,14 +201,16 @@ class TestListTasks:
         r1 = await client.post(
             "/api/tasks",
             json={**VALID_PAYLOAD, "title": "First task ordering check"},
+            headers=AUTH_HEADERS,
         )
         r2 = await client.post(
             "/api/tasks",
             json={**VALID_PAYLOAD, "title": "Second task ordering check"},
+            headers=AUTH_HEADERS,
         )
         id1 = r1.json()["id"]
         id2 = r2.json()["id"]
 
-        resp = await client.get("/api/tasks")
+        resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
         ids = [t["id"] for t in resp.json()]
         assert ids.index(id2) < ids.index(id1)

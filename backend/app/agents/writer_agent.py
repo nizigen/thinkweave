@@ -24,6 +24,8 @@ class WriterAgent(WorkerAgent):
             "chapter_description": payload.get("chapter_description", ""),
             "context_bridges": payload.get("context_bridges", ""),
             "memory_context": ctx.get("memory_context", payload.get("memory_context", "")),
+            "topic_claims": payload.get("topic_claims", {}),
+            "assigned_evidence": payload.get("assigned_evidence", []),
             "target_words": payload.get("target_words", ""),
         }
 

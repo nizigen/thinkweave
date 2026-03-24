@@ -115,6 +115,31 @@ async def send_task_result(
 
 
 # ---------------------------------------------------------------------------
+# 发送 — 通用 task event（WebSocket 转发用）
+# ---------------------------------------------------------------------------
+
+async def send_task_event(
+    *,
+    task_id: str | uuid.UUID,
+    msg_type: str,
+    payload: dict[str, Any],
+    node_id: str | uuid.UUID = "",
+    from_agent: str = "system",
+) -> str:
+    """发送通用任务事件到 task events stream。"""
+    stream = task_events_key(task_id)
+
+    envelope = MessageEnvelope(
+        msg_type=msg_type,
+        from_agent=from_agent,
+        task_id=str(task_id),
+        node_id=str(node_id),
+        payload=payload,
+    )
+    return await xadd(stream, envelope)
+
+
+# ---------------------------------------------------------------------------
 # 发送 — 状态更新（WebSocket 转发用）
 # ---------------------------------------------------------------------------
 
@@ -129,20 +154,17 @@ async def send_status_update(
     """
     发送 DAG 节点状态变更事件（供 WebSocket 订阅转发）。
     """
-    stream = task_events_key(task_id)
-
     payload: dict[str, Any] = {"status": status}
     if extra:
         payload.update(extra)
 
-    envelope = MessageEnvelope(
-        msg_type="status_update",
+    return await send_task_event(
+        task_id=task_id,
+        node_id=node_id,
         from_agent=from_agent,
-        task_id=str(task_id),
-        node_id=str(node_id),
+        msg_type="status_update",
         payload=payload,
     )
-    return await xadd(stream, envelope)
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from app.memory.config import MemoryConfig, get_memory_config
@@ -48,6 +47,13 @@ class MemoryAdapter:
             raise RuntimeError("cognee client unavailable while memory is enabled")
         return client
 
+    def _validate_runtime_config(self) -> None:
+        if self.config.enable_backend_access_control:
+            raise RuntimeError(
+                "enable_backend_access_control must be configured before process "
+                "start; MemoryAdapter does not mutate provider runtime config"
+            )
+
     def _resolve_client(self) -> Any | None:
         if not self.enabled:
             return None
@@ -55,14 +61,11 @@ class MemoryAdapter:
             return self._cognee_client
 
         self.ensure_supported_backend_matrix()
+        self._validate_runtime_config()
 
         try:
             import cognee  # type: ignore
 
-            os.environ.setdefault(
-                "ENABLE_BACKEND_ACCESS_CONTROL",
-                str(self.config.enable_backend_access_control).lower(),
-            )
             self._cognee_client = cognee
             return self._cognee_client
         except Exception as exc:  # pragma: no cover

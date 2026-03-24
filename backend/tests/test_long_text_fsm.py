@@ -300,6 +300,19 @@ class TestFSMTransitionExecution:
         assert refreshed.fsm_state == "outline"
 
     @pytest.mark.asyncio
+    async def test_transition_emits_dag_update_when_sender_provided(self):
+        sender = AsyncMock()
+        session = AsyncMock()
+        fsm = LongTextFSM(task_id=uuid.uuid4(), event_sender=sender)
+
+        await fsm.transition(LongTextState.OUTLINE, session=session)
+
+        sender.assert_awaited_once()
+        assert sender.await_args.kwargs["msg_type"] == "dag_update"
+        assert sender.await_args.kwargs["payload"]["from_state"] == "init"
+        assert sender.await_args.kwargs["payload"]["to_state"] == "outline"
+
+    @pytest.mark.asyncio
     async def test_sequential_transitions(self, db_session):
         task = await _create_task(db_session)
         fsm = LongTextFSM(task_id=task.id)

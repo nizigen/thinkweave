@@ -3,7 +3,7 @@
  * Ref: APP_FLOW.md — 旅程2 Agent管理
  * Ref: backend/app/schemas/agent.py — AgentCreate
  */
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Modal, Form, Input, Select, message, Typography } from 'antd';
 import {
   RobotOutlined,
@@ -45,11 +45,13 @@ const LAYER_COLORS: Record<number, string> = {
 interface Props {
   open: boolean;
   onClose: () => void;
+  allowMutations?: boolean;
 }
 
-export default function CreateAgentModal({ open, onClose }: Props) {
+export default function CreateAgentModal({ open, onClose, allowMutations = true }: Props) {
   const [form] = Form.useForm();
   const createAgent = useAgentStore((s) => s.createAgent);
+  const [submitting, setSubmitting] = useState(false);
 
   const selectedRole = Form.useWatch('role', form);
   const selectedLayer = Form.useWatch('layer', form);
@@ -70,6 +72,12 @@ export default function CreateAgentModal({ open, onClose }: Props) {
   );
 
   const handleSubmit = useCallback(async () => {
+    if (!allowMutations) {
+      message.error('Admin permission required');
+      return;
+    }
+    if (submitting) return;
+    setSubmitting(true);
     try {
       const values = await form.validateFields();
       await createAgent({
@@ -86,8 +94,10 @@ export default function CreateAgentModal({ open, onClose }: Props) {
       if (err instanceof Error) {
         message.error(err.message);
       }
+    } finally {
+      setSubmitting(false);
     }
-  }, [form, createAgent, onClose]);
+  }, [form, createAgent, onClose, submitting, allowMutations]);
 
   const handleCancel = useCallback(() => {
     form.resetFields();
@@ -111,7 +121,9 @@ export default function CreateAgentModal({ open, onClose }: Props) {
         body: { padding: 0 },
         mask: { backdropFilter: 'blur(8px)' },
       }}
+      confirmLoading={submitting}
       okButtonProps={{
+        disabled: submitting || !allowMutations,
         size: 'large',
         style: {
           borderRadius: 8,

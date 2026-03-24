@@ -116,6 +116,18 @@ class TestMemoryAdapter:
         with pytest.raises(RuntimeError, match="Unsupported cognee backend"):
             adapter.ensure_supported_backend_matrix()
 
+    def test_runtime_backend_access_control_flag_requires_preconfigured_process(self):
+        adapter = MemoryAdapter(
+            config=MemoryConfig(
+                memory_enabled=True,
+                enable_backend_access_control=True,
+            ),
+            cognee_client=FakeCogneeClient(),
+        )
+
+        with pytest.raises(RuntimeError, match="process start"):
+            adapter._validate_runtime_config()
+
 
 class TestSessionMemory:
     @pytest.mark.asyncio

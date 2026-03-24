@@ -1,4 +1,4 @@
-"""Worker Agent — Layer 2 通用执行层
+﻿"""Worker Agent — Layer 2 通用执行层
 
 简单 Worker：接收子任务，调用 LLM 完成，返回结果。
 具体的写作/审查/一致性逻辑在 Step 4.2 的专用 Agent 中实现。
