@@ -1,8 +1,8 @@
-﻿/**
- * Agent 绠＄悊椤?鈥?涓婚〉闈?
+/**
+ * Agent 管理页面
  * Ref: IMPLEMENTATION_PLAN.md Step 1.2
- * Ref: APP_FLOW.md 鈥?鏃呯▼2 Agent绠＄悊
- * Ref: FRONTEND_GUIDELINES.md 鈥?缁勪欢瑙勮寖 / 鍔ㄦ晥瑙勮寖
+ * Ref: APP_FLOW.md 旅程2 Agent 管理
+ * Ref: FRONTEND_GUIDELINES.md 组件规范 / 动效规范
  */
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
@@ -34,15 +34,15 @@ import AgentDetailDrawer from './agents/AgentDetailDrawer';
 
 const { Title, Text } = Typography;
 
-/* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?Display constants 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
+/* 显示配置 */
 
 const ROLE_CONFIG: Record<string, { label: string; color: string }> = {
-  orchestrator: { label: '缂栨帓', color: '#A855F7' },
-  manager: { label: '绠＄悊', color: '#6366F1' },
-  outline: { label: '澶х翰', color: '#3B82F6' },
-  writer: { label: '鍐欎綔', color: '#10B981' },
-  reviewer: { label: '瀹℃煡', color: '#F59E0B' },
-  consistency: { label: '涓€鑷存€?, color: '#EC4899' },
+  orchestrator: { label: '编排', color: '#A855F7' },
+  manager: { label: '管理', color: '#6366F1' },
+  outline: { label: '大纲', color: '#3B82F6' },
+  writer: { label: '写作', color: '#10B981' },
+  reviewer: { label: '审查', color: '#F59E0B' },
+  consistency: { label: '一致性', color: '#EC4899' },
 };
 
 const LAYER_CONFIG: Record<number, { label: string; color: string }> = {
@@ -51,10 +51,25 @@ const LAYER_CONFIG: Record<number, { label: string; color: string }> = {
   2: { label: 'L2', color: '#06B6D4' },
 };
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  idle: { label: '绌洪棽', color: '#10B981', icon: <CheckCircleFilled style={{ color: '#10B981' }} /> },
-  busy: { label: '蹇欑', color: '#3B82F6', icon: <SyncOutlined spin style={{ color: '#3B82F6' }} /> },
-  offline: { label: '绂荤嚎', color: '#6B7280', icon: <MinusCircleOutlined style={{ color: '#6B7280' }} /> },
+const STATUS_CONFIG: Record<
+  string,
+  { label: string; color: string; icon: React.ReactNode }
+> = {
+  idle: {
+    label: '空闲',
+    color: '#10B981',
+    icon: <CheckCircleFilled style={{ color: '#10B981' }} />,
+  },
+  busy: {
+    label: '忙碌',
+    color: '#3B82F6',
+    icon: <SyncOutlined spin style={{ color: '#3B82F6' }} />,
+  },
+  offline: {
+    label: '离线',
+    color: '#6B7280',
+    icon: <MinusCircleOutlined style={{ color: '#6B7280' }} />,
+  },
 };
 
 const MODEL_COLORS: Record<string, string> = {
@@ -64,21 +79,21 @@ const MODEL_COLORS: Record<string, string> = {
 };
 
 const ROLE_FILTER_OPTIONS = [
-  { value: 'orchestrator', label: '缂栨帓' },
-  { value: 'manager', label: '绠＄悊' },
-  { value: 'outline', label: '澶х翰' },
-  { value: 'writer', label: '鍐欎綔' },
-  { value: 'reviewer', label: '瀹℃煡' },
-  { value: 'consistency', label: '涓€鑷存€? },
+  { value: 'orchestrator', label: '编排' },
+  { value: 'manager', label: '管理' },
+  { value: 'outline', label: '大纲' },
+  { value: 'writer', label: '写作' },
+  { value: 'reviewer', label: '审查' },
+  { value: 'consistency', label: '一致性' },
 ];
 
 const STATUS_FILTER_OPTIONS = [
-  { value: 'idle', label: '绌洪棽' },
-  { value: 'busy', label: '蹇欑' },
-  { value: 'offline', label: '绂荤嚎' },
+  { value: 'idle', label: '空闲' },
+  { value: 'busy', label: '忙碌' },
+  { value: 'offline', label: '离线' },
 ];
 
-/* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?Stats Card 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
+/* 统计卡片 */
 
 interface StatCardProps {
   title: string;
@@ -111,8 +126,16 @@ function StatCard({ title, count, color, icon, delay }: StatCardProps) {
         boxShadow: `0 0 24px ${color}20, inset 0 1px 0 ${color}15`,
       }}
     >
-      {/* 椤堕儴鑹叉潯 */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${color}00, ${color}60, ${color}00)` }} />
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 2,
+          background: `linear-gradient(90deg, ${color}00, ${color}60, ${color}00)`,
+        }}
+      />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text style={{ color: '#CBD5E1', fontSize: 13, fontWeight: 500 }}>{title}</Text>
         <div
@@ -132,7 +155,16 @@ function StatCard({ title, count, color, icon, delay }: StatCardProps) {
           {icon}
         </div>
       </div>
-      <div style={{ fontSize: 36, fontWeight: 700, color: '#F8FAFC', marginTop: 10, lineHeight: 1, letterSpacing: '-0.02em' }}>
+      <div
+        style={{
+          fontSize: 36,
+          fontWeight: 700,
+          color: '#F8FAFC',
+          marginTop: 10,
+          lineHeight: 1,
+          letterSpacing: '-0.02em',
+        }}
+      >
         {count}
       </div>
       <div
@@ -158,11 +190,12 @@ function StatCard({ title, count, color, icon, delay }: StatCardProps) {
   );
 }
 
-/* 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?Main Page 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?*/
+/* 主页面 */
 
 export default function Agents() {
   const canManageAgents = import.meta.env.VITE_AGENT_ADMIN === 'true';
-  const { agents, loading, selectedAgent, fetchAgents, setSelectedAgent } = useAgentStore();
+  const { agents, loading, selectedAgent, fetchAgents, setSelectedAgent } =
+    useAgentStore();
   const [modalOpen, setModalOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -170,10 +203,9 @@ export default function Agents() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    fetchAgents().catch(() => message.error('鍔犺浇 Agent 鍒楄〃澶辫触'));
+    fetchAgents().catch(() => message.error('加载 Agent 列表失败'));
   }, [fetchAgents]);
 
-  /* 鈹€鈹€ Filter logic 鈹€鈹€ */
   const filtered = useMemo(() => {
     let list = agents;
     if (search) {
@@ -187,15 +219,16 @@ export default function Agents() {
     return list;
   }, [agents, search, roleFilter, statusFilter]);
 
-  /* 鈹€鈹€ Stats 鈹€鈹€ */
-  const stats = useMemo(() => ({
-    total: agents.length,
-    idle: agents.filter((a) => a.status === 'idle').length,
-    busy: agents.filter((a) => a.status === 'busy').length,
-    offline: agents.filter((a) => a.status === 'offline').length,
-  }), [agents]);
+  const stats = useMemo(
+    () => ({
+      total: agents.length,
+      idle: agents.filter((a) => a.status === 'idle').length,
+      busy: agents.filter((a) => a.status === 'busy').length,
+      offline: agents.filter((a) => a.status === 'offline').length,
+    }),
+    [agents],
+  );
 
-  /* 鈹€鈹€ Handlers 鈹€鈹€ */
   const openDetail = useCallback(
     (agent: AgentData) => {
       setSelectedAgent(agent);
@@ -209,11 +242,10 @@ export default function Agents() {
     setSelectedAgent(null);
   }, [setSelectedAgent]);
 
-  /* 鈹€鈹€ Table columns 鈹€鈹€ */
   const columns: ColumnsType<AgentData> = useMemo(
     () => [
       {
-        title: '鍚嶇О',
+        title: '名称',
         dataIndex: 'name',
         key: 'name',
         render: (name: string, record: AgentData) => (
@@ -240,7 +272,7 @@ export default function Agents() {
         ),
       },
       {
-        title: '瑙掕壊',
+        title: '角色',
         dataIndex: 'role',
         key: 'role',
         width: 110,
@@ -262,7 +294,7 @@ export default function Agents() {
         },
       },
       {
-        title: '灞傜骇',
+        title: '层级',
         dataIndex: 'layer',
         key: 'layer',
         width: 80,
@@ -286,7 +318,7 @@ export default function Agents() {
         },
       },
       {
-        title: '妯″瀷',
+        title: '模型',
         dataIndex: 'model',
         key: 'model',
         width: 140,
@@ -300,7 +332,7 @@ export default function Agents() {
         },
       },
       {
-        title: '鐘舵€?,
+        title: '状态',
         dataIndex: 'status',
         key: 'status',
         width: 100,
@@ -315,7 +347,7 @@ export default function Agents() {
         },
       },
       {
-        title: '鍒涘缓鏃堕棿',
+        title: '创建时间',
         dataIndex: 'created_at',
         key: 'created_at',
         width: 160,
@@ -330,7 +362,7 @@ export default function Agents() {
         key: 'actions',
         width: 60,
         render: (_: unknown, record: AgentData) => (
-          <Tooltip title="鏌ョ湅璇︽儏">
+          <Tooltip title="查看详情">
             <Button
               type="text"
               size="small"
@@ -340,7 +372,7 @@ export default function Agents() {
                 openDetail(record);
               }}
             >
-              璇︽儏
+              详情
             </Button>
           </Tooltip>
         ),
@@ -351,7 +383,6 @@ export default function Agents() {
 
   return (
     <div style={{ maxWidth: 1200 }}>
-      {/* 鈹€鈹€ Header 鈹€鈹€ */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -365,33 +396,37 @@ export default function Agents() {
       >
         <div>
           <Title level={3} style={{ margin: 0, color: '#F1F5F9' }}>
-            Agent 绠＄悊
+            Agent 管理
           </Title>
           <Text style={{ color: '#94A3B8', fontSize: 14, marginTop: 4, display: 'block' }}>
-            绠＄悊鍜岀洃鎺х郴缁熶腑鐨勬墍鏈?Agent 瀹炰緥
+            管理和监控系统中的所有 Agent 实例
           </Text>
         </div>
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => { if (!canManageAgents) { message.error('Admin permission required'); return; } setModalOpen(true); }}
+          onClick={() => {
+            if (!canManageAgents) {
+              message.error('需要管理员权限');
+              return;
+            }
+            setModalOpen(true);
+          }}
           size="large"
           disabled={!canManageAgents}
           style={{ borderRadius: 8, fontWeight: 500 }}
         >
-          娉ㄥ唽鏂?Agent
+          注册新 Agent
         </Button>
       </motion.div>
 
-      {/* 鈹€鈹€ Stats Cards 鈹€鈹€ */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 24 }}>
-        <StatCard title="鍏ㄩ儴 Agent" count={stats.total} color="#6366F1" icon={<TeamOutlined />} delay={0} />
-        <StatCard title="绌洪棽" count={stats.idle} color="#10B981" icon={<CheckCircleFilled />} delay={0.05} />
-        <StatCard title="蹇欑" count={stats.busy} color="#3B82F6" icon={<SyncOutlined />} delay={0.1} />
-        <StatCard title="绂荤嚎" count={stats.offline} color="#6B7280" icon={<MinusCircleOutlined />} delay={0.15} />
+        <StatCard title="全部 Agent" count={stats.total} color="#6366F1" icon={<TeamOutlined />} delay={0} />
+        <StatCard title="空闲" count={stats.idle} color="#10B981" icon={<CheckCircleFilled />} delay={0.05} />
+        <StatCard title="忙碌" count={stats.busy} color="#3B82F6" icon={<SyncOutlined />} delay={0.1} />
+        <StatCard title="离线" count={stats.offline} color="#6B7280" icon={<MinusCircleOutlined />} delay={0.15} />
       </div>
 
-      {/* 鈹€鈹€ Toolbar 鈹€鈹€ */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -399,7 +434,7 @@ export default function Agents() {
         style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}
       >
         <Input
-          placeholder="鎼滅储 Agent..."
+          placeholder="搜索 Agent..."
           prefix={<SearchOutlined style={{ color: '#475569' }} />}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -407,7 +442,7 @@ export default function Agents() {
           allowClear
         />
         <Select
-          placeholder="瑙掕壊"
+          placeholder="角色"
           options={ROLE_FILTER_OPTIONS}
           value={roleFilter}
           onChange={setRoleFilter}
@@ -415,7 +450,7 @@ export default function Agents() {
           style={{ width: 120 }}
         />
         <Select
-          placeholder="鐘舵€?
+          placeholder="状态"
           options={STATUS_FILTER_OPTIONS}
           value={statusFilter}
           onChange={setStatusFilter}
@@ -423,16 +458,15 @@ export default function Agents() {
           style={{ width: 120 }}
         />
         <div style={{ flex: 1 }} />
-        <Tooltip title="鍒锋柊鍒楄〃">
+        <Tooltip title="刷新列表">
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => fetchAgents().catch(() => message.error('鍒锋柊澶辫触'))}
+            onClick={() => fetchAgents().catch(() => message.error('刷新失败'))}
             loading={loading}
           />
         </Tooltip>
       </motion.div>
 
-      {/* 鈹€鈹€ Table 鈹€鈹€ */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -445,7 +479,7 @@ export default function Agents() {
           loading={loading}
           pagination={{
             pageSize: 10,
-            showTotal: (total) => `鍏?${total} 鏉,
+            showTotal: (total) => `共 ${total} 条`,
             showSizeChanger: false,
           }}
           onRow={(record) => ({
@@ -458,15 +492,21 @@ export default function Agents() {
             border: '1px solid #2A2A3E',
             boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)',
           }}
-          locale={{ emptyText: '鏆傛棤 Agent锛岀偣鍑诲彸涓婅銆屾敞鍐屾柊 Agent銆嶅紑濮? }}
+          locale={{ emptyText: '暂无 Agent，点击右上角“注册新 Agent”开始' }}
         />
       </motion.div>
 
-      {/* 鈹€鈹€ Modal & Drawer 鈹€鈹€ */}
-      <CreateAgentModal open={modalOpen} onClose={() => setModalOpen(false)} allowMutations={canManageAgents} />
-      <AgentDetailDrawer agent={selectedAgent} open={drawerOpen} onClose={closeDrawer} allowMutations={canManageAgents} />
+      <CreateAgentModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        allowMutations={canManageAgents}
+      />
+      <AgentDetailDrawer
+        agent={selectedAgent}
+        open={drawerOpen}
+        onClose={closeDrawer}
+        allowMutations={canManageAgents}
+      />
     </div>
   );
 }
-
-

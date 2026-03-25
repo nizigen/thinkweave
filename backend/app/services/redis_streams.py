@@ -215,15 +215,18 @@ async def get_latest_stream_id(
     stream: str,
     *,
     r: aioredis.Redis | None = None,
-    default: str = "0-0",
 ) -> str:
-    """Return the latest message id in a stream, or default when empty/nonexistent."""
+    """Return the latest message id for *stream*, or ``$`` when empty.
+
+    WebSocket subscribers use this cursor so they start reading only new
+    task events after the connection is established.
+    """
     cli = r or redis_client
     entries = await cli.xrevrange(stream, count=1)
     if not entries:
-        return default
-    mid, _fields = entries[0]
-    return mid
+        return "$"
+    latest_id, _fields = entries[0]
+    return latest_id
 
 
 # ---------------------------------------------------------------------------
