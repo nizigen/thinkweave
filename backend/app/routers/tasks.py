@@ -7,10 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.schemas.task import TaskCreate, TaskDetailRead, TaskRead
+from app.schemas.task import (
+    TaskControlRetryRequest,
+    TaskControlSkipRequest,
+    TaskCreate,
+    TaskDetailRead,
+    TaskRead,
+)
 from app.security.auth import AuthContext, require_auth_context, require_user_id
 from app.security.rate_limit import enforce_task_create_rate_limit
-from app.services import task_service
+from app.services import task_control, task_service
 from app.services.task_decomposer import TaskValidationError
 from app.utils.llm_client import BaseLLMClient, LLMClient
 
@@ -73,3 +79,83 @@ async def get_task(
     if detail is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return detail
+
+
+@router.post("/{task_id}/control/pause", response_model=TaskDetailRead)
+async def pause_task(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.pause_task(
+            session,
+            task_id,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/{task_id}/control/resume", response_model=TaskDetailRead)
+async def resume_task(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.resume_task(
+            session,
+            task_id,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/{task_id}/control/skip", response_model=TaskDetailRead)
+async def skip_node(
+    task_id: uuid.UUID,
+    body: TaskControlSkipRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.skip_node(
+            session,
+            task_id,
+            node_id=body.node_id,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/{task_id}/control/retry", response_model=TaskDetailRead)
+async def retry_node(
+    task_id: uuid.UUID,
+    body: TaskControlRetryRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.retry_node(
+            session,
+            task_id,
+            node_id=body.node_id,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))

@@ -107,6 +107,25 @@ TIMEOUT_WATCH_KEY = "scheduler:timeout_watch"
 READY_NODES_KEY = "scheduler:ready_nodes"
 
 
+def timeout_watch_member(
+    task_id: str | uuid.UUID,
+    node_id: str | uuid.UUID,
+) -> str:
+    """Build a task-scoped timeout watch member."""
+    return f"{task_id}:{node_id}"
+
+
+def parse_timeout_watch_member(member: str) -> tuple[str | None, str]:
+    """Parse a timeout watch member into (task_id, node_id).
+
+    Legacy members may contain only the node id.
+    """
+    task_id, sep, node_id = member.partition(":")
+    if not sep:
+        return None, member
+    return task_id, node_id
+
+
 # ---------------------------------------------------------------------------
 # Consumer Group 管理
 # ---------------------------------------------------------------------------

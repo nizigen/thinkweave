@@ -38,9 +38,24 @@
 - commit: a58a704
 
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + 基线集成测试
-进行中：—
-下一步：Step 5.5 前端 DAG 实时可视化
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试
+进行中：Phase 5 收尾（鉴权模型加固与更强 DAG 渲染增强待后续）
+下一步：Step 6.1 导出服务后端
+
+## Step 5.5 / 5.6 控制塔首版（2026-03-25）
+- 后端新增任务控制链路：`pause/resume/skip/retry` REST API、`task_control.py` 服务、调度器协作暂停/恢复/跳过/重试语义、事件桥接兼容 `node_update/dag_update/log/chapter_preview/review_score/consistency_result`
+- `GET /api/tasks/{id}` 详情扩展为监控恢复快照：节点 `started_at/finished_at/assigned_agent`、`checkpoint_data.control`、`preview_cache`、`review_scores`
+- 前端 `monitorStore` 升级为归一化监控状态：节点映射、控制状态、章节预览、评分、一致性结果、节点选择、事件归并
+- 监控页升级为 Control Tower 首版：`DagViewer`、`ControlToolbar`、`AgentPanel`、`LogStream`、`FsmProgress`、`ChapterPreview`，支持控制命令与回连重同步
+- 根据 Stage 3 code review 修复两处状态同步缺陷：
+  - 控制命令异步响应不再覆盖已切换任务
+  - 快照重建时清空易陈旧的 agent/consistency 派生缓存
+- 验证：
+  - backend: `tests/test_task_control.py tests/test_dag_scheduler.py tests/test_event_bridge.py tests/test_task_api.py tests/test_redis_streams.py` => `156 passed`
+  - frontend: `monitorStore + useTaskWebSocket + Monitor/DagViewer/ControlToolbar` => `20 passed`
+- Stage 3 结果：
+  - code review subagent: `APPROVED`
+  - security review subagent: 无 `CRITICAL/HIGH`；保留 2 个 `MEDIUM` 残留风险，均与现有 token 传递模型有关（`sessionStorage` Bearer token、WebSocket subprotocol 携带可逆 token）
 
 ## Step 5.4 前端 WebSocket 连接层（2026-03-24）
 - 新增 `frontend/src/stores/monitorStore.ts`：维护监控页独立连接状态、任务快照、最近 500 条事件缓存，隔离于 `taskStore`

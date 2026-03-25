@@ -16,6 +16,7 @@ from app.schemas.ws_event import (
     TaskDoneEvent,
     TaskEvent,
 )
+from app.services.task_service import persist_monitor_recovery_event
 from app.services.redis_streams import MessageEnvelope, StreamMessage, task_events_key, xread_latest
 from app.services.ws_manager import ws_manager
 from app.utils.logger import logger
@@ -118,14 +119,20 @@ EVENT_BUILDERS: dict[str, KnownEventFactory] = {
 
 
 def normalize_task_event(message: StreamMessage) -> TaskEvent | None:
-    envelope = MessageEnvelope.from_redis(message.data)
-    builder = EVENT_BUILDERS.get(envelope.msg_type)
-    if builder is None:
-        logger.bind(stream=message.stream, msg_type=envelope.msg_type).warning(
-            "Skipping unsupported task event type"
-        )
+    try:
+        envelope = MessageEnvelope.from_redis(message.data)
+        builder = EVENT_BUILDERS.get(envelope.msg_type)
+        if builder is None:
+            logger.bind(stream=message.stream, msg_type=envelope.msg_type).warning(
+                "Skipping unsupported task event type"
+            )
+            return None
+        return builder(envelope)
+    except Exception:
+        logger.bind(stream=message.stream, message_id=message.message_id).opt(
+            exception=True
+        ).warning("Skipping malformed task event")
         return None
-    return builder(envelope)
 
 
 class TaskEventBridge:
@@ -214,6 +221,28 @@ class TaskEventBridge:
                         latest_id = message.message_id
                         failure_count = 0
                         continue
+
+                    try:
+                        await persist_monitor_recovery_event(
+                            task_id=event.task_id,
+                            node_id=event.node_id,
+                            event_type=event.type,
+                            payload=event.payload,
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        failure_count += 1
+                        delay = self._compute_backoff(failure_count)
+                        logger.bind(
+                            task_id=task_id,
+                            message_id=message.message_id,
+                            delay_s=round(delay, 3),
+                        ).opt(exception=True).warning(
+                            "Task event bridge persistence failed; retrying"
+                        )
+                        await asyncio.sleep(delay)
+                        break
                     try:
                         await self._ws_manager.broadcast(task_id, event.model_dump())
                     except asyncio.CancelledError:

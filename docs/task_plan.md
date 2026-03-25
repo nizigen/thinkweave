@@ -20,7 +20,7 @@
 | 2 | 任务分解引擎 | ✅ 完成 | 2026-03-09 |
 | 3 | DAG调度引擎 | ✅ 完成 (3.1-3.3) | 2026-03-09 |
 | 4 | 长文本控制 + 记忆层 | ✅ 完成 | 2026-03-23 |
-| 5 | 实时监控 + WebSocket | 进行中（5.1-5.4 已完成） | 2026-03-24 |
+| 5 | 实时监控 + WebSocket | 进行中（5.1-5.6 控制塔首版已完成） | 2026-03-25 |
 | 6 | 结果展示 + 导出 | 待开始 | — |
 | 7 | 系统集成测试 | 待开始 | — |
 
@@ -139,3 +139,16 @@ Step 4.4   Knowledge Graph（跨任务知识积累 + Session→KG promote）
 - [x] Added frontend test tooling: `vitest@4.1.1`, `@testing-library/react@16.3.2`, `@testing-library/jest-dom@6.9.1`, `jsdom@29.0.1`.
 - [x] Closed review findings around stale snapshot overwrite, stale socket event ingestion, terminal auth close handling, and weak WS rejection assertions.
 - [x] Verification passed: frontend `11 tests`, targeted frontend eslint, backend WS suite `41 passed`.
+
+## 2026-03-25 Step 5.5 / 5.6 Control Tower Update
+- [x] Added backend task control APIs for `pause/resume/skip/retry` with owner-scoped task visibility checks.
+- [x] Added scheduler cooperation for cooperative pause, safe skip reconciliation, retry wake-up, and stale completion suppression.
+- [x] Persisted monitor recovery data in task detail snapshots (`checkpoint_data.control.preview_cache/review_scores`, node timestamps, assigned agent).
+- [x] Normalized monitor state in `frontend/src/stores/monitorStore.ts` and extended monitor hydration/event reducers.
+- [x] Upgraded `frontend/src/pages/Monitor.tsx` into the Control Tower first version with `DagViewer`, `ControlToolbar`, `AgentPanel`, `LogStream`, `FsmProgress`, and `ChapterPreview`.
+- [x] Closed code-review findings on stale control-response overwrite and stale snapshot-derived caches.
+- [x] Verification passed:
+  - backend targeted control/bridge/scheduler/API lane => `156 passed`
+  - frontend monitor lane => `20 passed`
+- [x] Stage 3 code review subagent => `APPROVED`
+- [ ] Stage 3 residual follow-up: replace JS-readable task token model (`sessionStorage` + WS subprotocol bearer) with cookie or one-time ticket auth to close remaining medium-risk findings.

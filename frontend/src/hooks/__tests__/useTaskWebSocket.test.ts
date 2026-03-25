@@ -98,6 +98,59 @@ describe('useTaskWebSocket', () => {
 
   it('reconnects with exponential backoff and resyncs after reconnect success', async () => {
     sessionStorage.setItem('task_auth_token', 'header-token');
+    getTaskMock.mockReset();
+    getTaskMock
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        title: 'Task',
+        status: 'running',
+        mode: 'report',
+        fsm_state: 'writing',
+        word_count: 10,
+        created_at: '2026-03-24T00:00:00Z',
+        checkpoint_data: {
+          control: {
+            status: 'active',
+            preview_cache: {},
+            review_scores: {},
+          },
+        },
+        nodes: [],
+      })
+      .mockResolvedValueOnce({
+        id: 'task-1',
+        title: 'Task',
+        status: 'running',
+        mode: 'report',
+        fsm_state: 'writing',
+        word_count: 10,
+        created_at: '2026-03-24T00:00:00Z',
+        checkpoint_data: {
+          control: {
+            status: 'paused',
+            preview_cache: {
+              'node-1': { content: 'preview body' },
+            },
+            review_scores: {
+              'node-1': { score: 90 },
+            },
+          },
+        },
+        nodes: [
+          {
+            id: 'node-1',
+            task_id: 'task-1',
+            title: 'Outline',
+            agent_role: 'writer',
+            assigned_agent: 'agent-1',
+            status: 'paused',
+            depends_on: null,
+            retry_count: 0,
+            started_at: null,
+            finished_at: null,
+          },
+        ],
+      });
     renderHook(() => useTaskWebSocket('task-1'));
 
     expect(MockWebSocket.instances).toHaveLength(1);
@@ -133,6 +186,9 @@ describe('useTaskWebSocket', () => {
     expect(useMonitorStore.getState().connectionState).toBe('connected');
     expect(useMonitorStore.getState().reconnectAttempt).toBe(0);
     expect(getTaskMock).toHaveBeenCalledTimes(2);
+    expect(useMonitorStore.getState().nodesById['node-1']?.status).toBe('paused');
+    expect(useMonitorStore.getState().controlState?.status).toBe('paused');
+    expect(useMonitorStore.getState().chapterPreviewByNodeId['node-1']?.content).toBe('preview body');
   });
 
   it('cleans up the socket on unmount', () => {

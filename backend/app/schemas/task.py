@@ -1,6 +1,7 @@
 """Task Pydantic Schema"""
 
 import uuid
+from typing import Any
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
@@ -62,15 +63,27 @@ class TaskNodeRead(BaseModel):
     task_id: uuid.UUID
     title: str
     agent_role: str | None
+    assigned_agent: uuid.UUID | None
     status: str
     depends_on: list[uuid.UUID] | None
     retry_count: int
+    started_at: datetime | None
+    finished_at: datetime | None
 
     model_config = {"from_attributes": True}
 
 
 class TaskDetailRead(TaskRead):
-    nodes: list[TaskNodeRead] = []
+    checkpoint_data: dict[str, Any] = Field(default_factory=dict)
+    nodes: list[TaskNodeRead] = Field(default_factory=list)
+
+
+class TaskControlSkipRequest(BaseModel):
+    node_id: uuid.UUID
+
+
+class TaskControlRetryRequest(BaseModel):
+    node_id: uuid.UUID
 
 
 # ---------------------------------------------------------------------------

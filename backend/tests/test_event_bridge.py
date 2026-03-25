@@ -127,6 +127,80 @@ def test_normalize_unknown_type_returns_none():
     assert normalize_task_event(message) is None
 
 
+def test_normalize_dag_update_preserves_control_payload():
+    from app.services.event_bridge import normalize_task_event
+
+    message = StreamMessage(
+        stream="task:task-1:events",
+        message_id="5-0",
+        data={
+            "msg_id": "m-control-1",
+            "msg_type": "dag_update",
+            "from_agent": "scheduler",
+            "to_agent": "",
+            "task_id": "task-1",
+            "node_id": "",
+            "payload": '{"control":{"status":"paused"}}',
+            "timestamp": "123.0",
+            "ttl": "60",
+        },
+    )
+
+    event = normalize_task_event(message)
+
+    assert event is not None
+    assert event.type == "dag_update"
+    assert event.payload["control"]["status"] == "paused"
+
+
+def test_normalize_log_preserves_control_message():
+    from app.services.event_bridge import normalize_task_event
+
+    message = StreamMessage(
+        stream="task:task-1:events",
+        message_id="6-0",
+        data={
+            "msg_id": "m-control-2",
+            "msg_type": "log",
+            "from_agent": "scheduler",
+            "to_agent": "",
+            "task_id": "task-1",
+            "node_id": "",
+            "payload": '{"message":"retry accepted"}',
+            "timestamp": "123.0",
+            "ttl": "60",
+        },
+    )
+
+    event = normalize_task_event(message)
+
+    assert event is not None
+    assert event.type == "log"
+    assert event.payload["message"] == "retry accepted"
+
+
+def test_normalize_malformed_event_returns_none():
+    from app.services.event_bridge import normalize_task_event
+
+    message = StreamMessage(
+        stream="task:task-1:events",
+        message_id="7-0",
+        data={
+            "msg_id": "m-bad-1",
+            "msg_type": "log",
+            "from_agent": "scheduler",
+            "to_agent": "",
+            "task_id": "task-1",
+            "node_id": "",
+            "payload": "{not-json",
+            "timestamp": "123.0",
+            "ttl": "60",
+        },
+    )
+
+    assert normalize_task_event(message) is None
+
+
 @pytest.mark.asyncio
 async def test_run_broadcasts_normalized_events(ws_manager_mock):
     from app.services.event_bridge import TaskEventBridge
@@ -163,6 +237,59 @@ async def test_run_broadcasts_normalized_events(ws_manager_mock):
     ws_manager_mock.broadcast.assert_awaited_once()
     task_id, payload = ws_manager_mock.broadcast.await_args.args
     assert task_id == "task-1"
+    assert payload["type"] == "node_update"
+
+
+@pytest.mark.asyncio
+async def test_run_skips_malformed_event_and_broadcasts_later_valid_event(ws_manager_mock):
+    from app.services.event_bridge import TaskEventBridge
+
+    reader = AsyncMock(
+        side_effect=[
+            [
+                StreamMessage(
+                    stream="task:task-1:events",
+                    message_id="1-0",
+                    data={
+                        "msg_id": "m-bad-1",
+                        "msg_type": "log",
+                        "from_agent": "writer",
+                        "to_agent": "",
+                        "task_id": "task-1",
+                        "node_id": "node-1",
+                        "payload": "{broken-json",
+                        "timestamp": "123.0",
+                        "ttl": "60",
+                    },
+                ),
+                StreamMessage(
+                    stream="task:task-1:events",
+                    message_id="2-0",
+                    data={
+                        "msg_id": "m-good-1",
+                        "msg_type": "status_update",
+                        "from_agent": "writer",
+                        "to_agent": "",
+                        "task_id": "task-1",
+                        "node_id": "node-1",
+                        "payload": '{"status":"running"}',
+                        "timestamp": "124.0",
+                        "ttl": "60",
+                    },
+                ),
+            ],
+            [],
+        ]
+    )
+
+    states = iter([{"ws-1"}, set()])
+    ws_manager_mock.get_connections.side_effect = lambda task_id: next(states)
+
+    bridge = TaskEventBridge(ws_manager=ws_manager_mock, reader=reader, block_ms=1)
+    await bridge._run("task-1")
+
+    ws_manager_mock.broadcast.assert_awaited_once()
+    _, payload = ws_manager_mock.broadcast.await_args.args
     assert payload["type"] == "node_update"
 
 
@@ -280,4 +407,60 @@ async def test_run_retries_failed_broadcast_without_losing_event(ws_manager_mock
     )
     await bridge._run("task-1")
 
+    assert ws_manager_mock.broadcast.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_run_persists_monitor_recovery_events_before_broadcast(ws_manager_mock):
+    from app.services.event_bridge import TaskEventBridge
+
+    preview_message = StreamMessage(
+        stream="task:task-1:events",
+        message_id="1-0",
+        data={
+            "msg_id": "m-preview",
+            "msg_type": "chapter_preview",
+            "from_agent": "writer",
+            "to_agent": "",
+            "task_id": "task-1",
+            "node_id": "node-1",
+            "payload": '{"content":"preview body"}',
+            "timestamp": "123.0",
+            "ttl": "60",
+        },
+    )
+    review_message = StreamMessage(
+        stream="task:task-1:events",
+        message_id="2-0",
+        data={
+            "msg_id": "m-review",
+            "msg_type": "review_score",
+            "from_agent": "reviewer",
+            "to_agent": "",
+            "task_id": "task-1",
+            "node_id": "node-1",
+            "payload": '{"score":88}',
+            "timestamp": "124.0",
+            "ttl": "60",
+        },
+    )
+
+    reader = AsyncMock(side_effect=[[preview_message, review_message], []])
+    states = iter([{"ws-1"}, {"ws-1"}, set()])
+    ws_manager_mock.get_connections.side_effect = lambda task_id: next(states)
+
+    bridge = TaskEventBridge(ws_manager=ws_manager_mock, reader=reader, block_ms=1)
+
+    from app.services import event_bridge as event_bridge_module
+
+    persist_mock = AsyncMock()
+    original_persist = event_bridge_module.persist_monitor_recovery_event
+    event_bridge_module.persist_monitor_recovery_event = persist_mock
+    try:
+        await bridge._run("task-1")
+    finally:
+        event_bridge_module.persist_monitor_recovery_event = original_persist
+
+    assert persist_mock.await_args_list[0].kwargs["event_type"] == "chapter_preview"
+    assert persist_mock.await_args_list[1].kwargs["event_type"] == "review_score"
     assert ws_manager_mock.broadcast.await_count == 2

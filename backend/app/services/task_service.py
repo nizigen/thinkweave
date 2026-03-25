@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database import async_session_factory
 from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.schemas.task import TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
@@ -14,6 +16,46 @@ from app.services.entry_stage import build_entry_metadata
 from app.services.task_decomposer import TaskValidationError, decompose_task
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
+
+
+def normalize_checkpoint_data(checkpoint_data: dict[str, Any] | None) -> dict[str, Any]:
+    checkpoint = dict(checkpoint_data) if isinstance(checkpoint_data, dict) else {}
+    control = checkpoint.get("control")
+    control_dict = dict(control) if isinstance(control, dict) else {}
+    control_dict.setdefault("status", "active")
+    preview_cache = control_dict.get("preview_cache")
+    control_dict["preview_cache"] = (
+        dict(preview_cache) if isinstance(preview_cache, dict) else {}
+    )
+    review_scores = control_dict.get("review_scores")
+    control_dict["review_scores"] = (
+        dict(review_scores) if isinstance(review_scores, dict) else {}
+    )
+    checkpoint["control"] = control_dict
+    return checkpoint
+
+
+def _apply_monitor_recovery_event(
+    task: Task,
+    *,
+    node_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    checkpoint = normalize_checkpoint_data(task.checkpoint_data)
+    control = checkpoint["control"]
+    if event_type == "chapter_preview":
+        preview_cache = dict(control["preview_cache"])
+        preview_cache[node_id] = dict(payload)
+        control["preview_cache"] = preview_cache
+    elif event_type == "review_score":
+        review_scores = dict(control["review_scores"])
+        review_scores[node_id] = dict(payload)
+        control["review_scores"] = review_scores
+    else:
+        return
+    checkpoint["control"] = control
+    task.checkpoint_data = checkpoint
 
 
 async def create_task(
@@ -97,9 +139,12 @@ async def create_task(
             task_id=n.task_id,
             title=n.title,
             agent_role=n.agent_role,
+            assigned_agent=n.assigned_agent,
             status=n.status,
             depends_on=n.depends_on,
             retry_count=n.retry_count,
+            started_at=n.started_at,
+            finished_at=n.finished_at,
         )
         for n in nodes
     ]
@@ -114,6 +159,7 @@ async def create_task(
         target_words=task.target_words,
         created_at=task.created_at,
         finished_at=task.finished_at,
+        checkpoint_data=normalize_checkpoint_data(task.checkpoint_data),
         nodes=node_reads,
     )
 
@@ -129,7 +175,7 @@ async def get_task_detail(
     task = await session.get(Task, task_id)
     if task is None:
         return None
-    if not _task_visible_to_user(task, user_id=user_id, is_admin=is_admin):
+    if not task_visible_to_user(task, user_id=user_id, is_admin=is_admin):
         return None
 
     result = await session.execute(
@@ -143,12 +189,55 @@ async def get_task_detail(
         TaskNodeRead.model_validate(n) for n in nodes
     ]
     task_read = TaskDetailRead.model_validate(task)
+    task_read.checkpoint_data = normalize_checkpoint_data(task.checkpoint_data)
     task_read.nodes = node_reads
     return task_read
 
 
-def _task_visible_to_user(
-    task: Task,
+async def persist_monitor_recovery_event(
+    *,
+    task_id: str | uuid.UUID,
+    node_id: str | uuid.UUID,
+    event_type: str,
+    payload: dict[str, Any],
+    session: AsyncSession | None = None,
+) -> None:
+    node_key = str(node_id)
+    if event_type not in {"chapter_preview", "review_score"}:
+        return
+
+    try:
+        task_uuid = uuid.UUID(str(task_id))
+    except (TypeError, ValueError, AttributeError):
+        return
+
+    if session is not None:
+        task = await session.get(Task, task_uuid)
+        if task is None:
+            return
+        _apply_monitor_recovery_event(
+            task,
+            node_id=node_key,
+            event_type=event_type,
+            payload=payload,
+        )
+        return
+
+    async with async_session_factory() as inner_session:
+        task = await inner_session.get(Task, task_uuid)
+        if task is None:
+            return
+        _apply_monitor_recovery_event(
+            task,
+            node_id=node_key,
+            event_type=event_type,
+            payload=payload,
+        )
+        await inner_session.commit()
+
+
+def task_visible_to_user(
+    task: Task | Any,
     *,
     user_id: str,
     is_admin: bool,
