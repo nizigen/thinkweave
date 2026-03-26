@@ -15,7 +15,6 @@ import {
   Tag,
   Popconfirm,
   message,
-  DatePicker,
 } from 'antd';
 import type { ColumnsType, TableRowSelection } from 'antd/es/table/interface';
 import {
@@ -30,8 +29,6 @@ import { listTasks, batchDeleteTasks } from '../api/tasks';
 import type { Task } from '../stores/taskStore';
 
 const { Title, Text } = Typography;
-const { RangePicker } = DatePicker;
-
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -87,7 +84,7 @@ export default function History() {
     }
   }, [page, search, statusFilter, modeFilter]);
 
-  useEffect(() => { fetchTasks(page); }, [page, statusFilter, modeFilter]);
+  useEffect(() => { fetchTasks(page); }, [page, statusFilter, modeFilter, fetchTasks]);
 
   const handleSearch = () => { setPage(1); fetchTasks(1); };
 

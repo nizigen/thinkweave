@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     task_auth_tokens: str = ""
     admin_user_ids: str = ""
     task_create_rate_limit_per_minute: int = 100
+    disable_rate_limit: bool = False
 
     @field_validator("debug", mode="before")
     @classmethod

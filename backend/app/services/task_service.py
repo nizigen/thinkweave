@@ -290,9 +290,9 @@ async def batch_delete_tasks(
     from sqlalchemy import delete
     if not ids:
         return 0
-    stmt = delete(Task).where(Task.id.in_(ids))
-    if user_id:
-        stmt = stmt.where(Task.owner_id == user_id)
+    if not user_id:
+        raise ValueError("user_id is required for batch_delete_tasks")
+    stmt = delete(Task).where(Task.id.in_(ids)).where(Task.owner_id == user_id)
     result = await session.execute(stmt)
     await session.commit()
     return result.rowcount

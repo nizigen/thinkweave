@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.database import get_session
 from app.main import app
+from app.security.rate_limit import enforce_task_create_rate_limit
 from app.utils.llm_client import BaseLLMClient
 
 
@@ -182,7 +183,11 @@ async def client(db_session: AsyncSession):
     async def override_get_session():
         yield db_session
 
+    async def noop_rate_limit(_user_id: str = "") -> None:
+        pass
+
     app.dependency_overrides[get_session] = override_get_session
+    app.dependency_overrides[enforce_task_create_rate_limit] = noop_rate_limit
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

@@ -72,7 +72,7 @@ export default function Home() {
     setLoading(true);
     // 请求浏览器通知权限
     if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+      void Notification.requestPermission();
     }
     try {
       const resp = await apiClient.post<Task>('/tasks', values);

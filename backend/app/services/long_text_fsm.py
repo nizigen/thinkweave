@@ -424,7 +424,7 @@ class LongTextFSM:
 
         parts = [node.result for node in nodes if node.result]
         output_text = "\n\n".join(parts)
-        word_count = len(output_text.split()) if output_text else 0
+        word_count = len(re.findall(r'[\u4e00-\u9fff]', output_text)) + len(re.findall(r'[a-zA-Z]+', output_text)) if output_text else 0
 
         await session.execute(
             update(Task)

@@ -3,7 +3,7 @@
 import uuid
 from functools import lru_cache
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -46,8 +46,8 @@ def get_llm_client() -> BaseLLMClient:
 async def list_tasks(
     session: AsyncSession = Depends(get_session),
     user_id: str = Depends(require_user_id),
-    offset: int = 0,
-    limit: int = 20,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=200),
     status: Optional[str] = None,
     mode: Optional[str] = None,
     search: Optional[str] = None,
