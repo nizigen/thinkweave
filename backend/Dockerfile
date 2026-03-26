@@ -17,5 +17,5 @@ RUN uv pip install --system -r requirements.txt
 # 复制应用代码
 COPY . .
 
-# 运行数据库迁移并启动
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# 启动应用；数据库迁移在部署阶段显式执行
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
