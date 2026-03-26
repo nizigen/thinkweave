@@ -149,13 +149,13 @@ class TestTaskAuthorizationBoundary:
 
     def test_task_visibility_scoped_to_owner(self):
         from app.models.task import Task
-        from app.services.task_service import _task_visible_to_user
+        from app.services.task_service import task_visible_to_user
 
         task = Task(title="t", mode="report", owner_id="user-a")
 
-        assert _task_visible_to_user(task, user_id="user-a", is_admin=False) is True
-        assert _task_visible_to_user(task, user_id="user-b", is_admin=False) is False
-        assert _task_visible_to_user(task, user_id="admin", is_admin=True) is True
+        assert task_visible_to_user(task, user_id="user-a", is_admin=False) is True
+        assert task_visible_to_user(task, user_id="user-b", is_admin=False) is False
+        assert task_visible_to_user(task, user_id="admin", is_admin=True) is True
 
 
 # ---------------------------------------------------------------------------

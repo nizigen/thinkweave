@@ -219,10 +219,12 @@ class MemoryMiddleware(AgentMiddleware):
         session_factory: Any | None = None,
         *,
         max_cached_sessions: int = 128,
+        knowledge_graph: Any | None = None,
     ) -> None:
         self._session_factory = session_factory or (lambda task_id: SessionMemory(task_id=str(task_id)))
         self._max_cached_sessions = max(1, max_cached_sessions)
         self._sessions: OrderedDict[str, Any] = OrderedDict()
+        self._knowledge_graph = knowledge_graph
 
     def _get_session(self, task_id: str) -> Any:
         session = self._sessions.get(task_id)
@@ -286,14 +288,30 @@ class MemoryMiddleware(AgentMiddleware):
             session = self._get_session(task_id)
             enabled = await session.initialize()
             if not enabled:
-                return {**ctx, "_memory_session": session, "memory_context": ""}
+                base = {**ctx, "_memory_session": session, "memory_context": ""}
+                if self._knowledge_graph is not None and agent.role in {"outline", "writer"}:
+                    try:
+                        kg_rows = self._knowledge_graph.query(self._build_query(agent, ctx))
+                        base["kg_context"] = "\n".join(e.content for e in kg_rows if e.content)
+                    except Exception:
+                        base["kg_context"] = ""
+                return base
 
             rows = await session.query(self._build_query(agent, ctx), limit=5)
-            return {
+            result_ctx = {
                 **ctx,
                 "_memory_session": session,
                 "memory_context": self._format_rows(rows),
             }
+            if self._knowledge_graph is not None and agent.role in {"outline", "writer"}:
+                try:
+                    kg_rows = self._knowledge_graph.query(self._build_query(agent, ctx))
+                    result_ctx["kg_context"] = "\n".join(
+                        e.content for e in kg_rows if e.content
+                    )
+                except Exception:
+                    result_ctx["kg_context"] = ""
+            return result_ctx
         except Exception:
             logger.opt(exception=True).warning(
                 "memory preload failed, continuing without injected memory context"
