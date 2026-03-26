@@ -26,7 +26,7 @@ class OutlineRead(BaseModel):
 
 
 class OutlineConfirmRequest(BaseModel):
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=500_000)
 
 
 async def _get_task_for_user(task_id: uuid.UUID, user_id: str, db: AsyncSession) -> Task:
@@ -68,7 +68,7 @@ async def confirm_outline(
 ):
     """用户确认（或编辑后确认）大纲，推进 FSM 进入写作阶段"""
     task = await _get_task_for_user(task_id, user_id, db)
-    if task.fsm_state not in ("outline_review", "OUTLINE_REVIEW"):
+    if task.fsm_state != "outline_review":
         raise HTTPException(
             status_code=409,
             detail=f"Task is in state '{task.fsm_state}', cannot confirm outline now",

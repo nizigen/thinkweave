@@ -56,10 +56,16 @@
 - 新增 `tests/test_task_history.py`（13 后端测试）+ `pages/__tests__/History.test.tsx`（9 前端测试），全绿无回归
 - commit: 1ff3d56
 
+## Step 6.4 任务创建页优化（2026-03-26）
+- `Home.tsx` 完整实现：模式选择卡片（报告/小说/自定义）、深度选择（快速/标准/深入）、字数目标自动填充、可选草稿输入、创建成功后跳转 /monitor/:taskId
+- `Outline.tsx` 完整实现：Markdown 编辑器展示大纲、实时预览（WS 轮询 fsm_state=OUTLINE_REVIEW）、确认大纲 API 调用、浏览器 Notification API 任务完成推送
+- 新增 `app/routers/outline.py`：GET /api/tasks/{id}/outline + POST /api/tasks/{id}/outline/confirm，owner 隔离，FSM 状态检查
+- 6 后端测试全绿，commit: 1a03a1e
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1 + Step 6.2 + Step 6.3
-进行中：Phase 6
-下一步：Step 6.4 任务创建页优化
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1-6.4
+进行中：Phase 7
+下一步：Step 7.1 端到端测试用例
 
 ## Step 5.5 / 5.6 控制塔首版（2026-03-25）
 - 后端新增任务控制链路：`pause/resume/skip/retry` REST API、`task_control.py` 服务、调度器协作暂停/恢复/跳过/重试语义、事件桥接兼容 `node_update/dag_update/log/chapter_preview/review_score/consistency_result`

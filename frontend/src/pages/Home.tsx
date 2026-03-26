@@ -207,7 +207,7 @@ export default function Home() {
             step={500}
             style={{ width: '100%', background: '#0D0D14', borderColor: '#2A2A3E' }}
             formatter={(v) => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-            parser={(v) => Number((v ?? '').replace(/,/g, '')) as 500}
+            parser={(v) => Number((v ?? '').replace(/,/g, '')) as unknown as number}
           />
         </Form.Item>
 
