@@ -13,6 +13,7 @@ from app.routers import (
     tasks_router,
     nodes_router,
     export_router,
+    outline_router,
     ws_router,
 )
 from app.utils.logger import logger
@@ -58,6 +59,7 @@ app.include_router(agents_router)
 app.include_router(tasks_router)
 app.include_router(nodes_router)
 app.include_router(export_router)
+app.include_router(outline_router)
 app.include_router(ws_router)
 
 

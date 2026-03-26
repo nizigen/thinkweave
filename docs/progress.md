@@ -48,10 +48,18 @@
 - `Result.tsx` 完整实现：Markdown 渲染（react-markdown + react-syntax-highlighter）、左侧悬浮目录（IntersectionObserver 高亮）、统计卡片（字数/章节/Agent/耗时）、章节审查评分徽章、导出 DOCX/PDF 按钮
 - TS 零错误，前端 20 测试全绿，commit: ae42fb2
 
+## Step 6.3 历史任务页（2026-03-26）
+- 后端扩展 `list_tasks()`：新增 status/mode/search 过滤参数，返回 `TaskListResult{items, total}` 支持分页
+- 新增 `batch_delete_tasks()`：批量删除，owner 隔离
+- `GET /api/tasks` response_model 改为 `TaskListResult`，新增 `DELETE /api/tasks` 批量删除端点
+- 前端 `History.tsx` 完整实现：搜索/状态/模式三重过滤、Ant Design Table 分页、行点击跳转结果页、批量选择+确认删除
+- 新增 `tests/test_task_history.py`（13 后端测试）+ `pages/__tests__/History.test.tsx`（9 前端测试），全绿无回归
+- commit: 1ff3d56
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1 + Step 6.2
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1 + Step 6.2 + Step 6.3
 进行中：Phase 6
-下一步：Step 6.3 历史任务页
+下一步：Step 6.4 任务创建页优化
 
 ## Step 5.5 / 5.6 控制塔首版（2026-03-25）
 - 后端新增任务控制链路：`pause/resume/skip/retry` REST API、`task_control.py` 服务、调度器协作暂停/恢复/跳过/重试语义、事件桥接兼容 `node_update/dag_update/log/chapter_preview/review_score/consistency_result`
