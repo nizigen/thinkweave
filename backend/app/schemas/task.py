@@ -74,6 +74,7 @@ class TaskNodeRead(BaseModel):
 
 
 class TaskDetailRead(TaskRead):
+    output_text: str | None = None
     checkpoint_data: dict[str, Any] = Field(default_factory=dict)
     nodes: list[TaskNodeRead] = Field(default_factory=list)
 

@@ -10,6 +10,7 @@ export interface Task {
   created_at: string;
   depth?: string;
   target_words?: number;
+  output_text?: string | null;
   finished_at?: string | null;
   checkpoint_data?: TaskCheckpointData;
   nodes?: TaskNode[];
