@@ -648,6 +648,14 @@ class TestResume:
 class TestScanAndResume:
     """scan_and_resume_running_tasks() finds and resumes running tasks."""
 
+    @pytest_asyncio.fixture(autouse=True)
+    async def clean_running_tasks(self, db_session):
+        """Clear any running tasks left by previous tests before each scan test."""
+        from sqlalchemy import text
+        await db_session.execute(text("UPDATE tasks SET status='failed' WHERE status='running'"))
+        await db_session.commit()
+        yield
+
     @pytest.mark.asyncio
     async def test_scan_finds_running_tasks(self, db_session):
         await _create_task(db_session, fsm_state="writing", status="running",
