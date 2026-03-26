@@ -280,14 +280,14 @@
 ## Phase 6：结果展示 + 导出（第10-11周）
 
 ### Step 6.1 — 导出服务后端
-- [ ] 实现 `services/exporter.py` 基类 `BaseExporter`（接收 task output_text + metadata，返回 bytes）
-- [ ] 实现 `DocxExporter`（python-docx 1.1.2）：标题页（任务标题+创建时间）、自动目录、章节标题（Heading 1/2）、正文段落、代码块等格式映射
-- [ ] 实现 `PdfExporter`（reportlab 4.2.5）：中文字体支持（注册 SimSun/SimHei）、标题页、章节标题、正文段落、页码页脚
-- [ ] Markdown→结构化内容解析：使用 `markdown` 库解析 output_text，提取标题层级、段落、代码块、列表
-- [ ] 实现 `routers/export.py`：`GET /api/export/{task_id}/docx` 和 `GET /api/export/{task_id}/pdf`，流式文件响应（StreamingResponse）
-- [ ] 导出文件命名规则：`{task_title}_{date}.docx/pdf`，中文文件名 URL 编码
-- [ ] 错误处理：task 不存在返回 404，task 未完成返回 409（Conflict）
-- [ ] 单元测试：mock task 数据，验证 DOCX/PDF 生成和格式正确性
+- [x] 实现 `services/exporter.py` 基类 `BaseExporter`（接收 task output_text + metadata，返回 bytes）
+- [x] 实现 `DocxExporter`（python-docx 1.1.2）：标题页（任务标题+创建时间）、自动目录、章节标题（Heading 1/2）、正文段落、代码块等格式映射
+- [x] 实现 `PdfExporter`（reportlab 4.2.5）：中文字体支持（注册 SimSun/SimHei）、标题页、章节标题、正文段落、页码页脚
+- [x] Markdown→结构化内容解析：使用 `markdown` 库解析 output_text，提取标题层级、段落、代码块、列表
+- [x] 实现 `routers/export.py`：`GET /api/export/{task_id}/docx` 和 `GET /api/export/{task_id}/pdf`，流式文件响应（StreamingResponse）
+- [x] 导出文件命名规则：`{task_title}_{date}.docx/pdf`，中文文件名 URL 编码
+- [x] 错误处理：task 不存在返回 404，task 未完成返回 409（Conflict）
+- [x] 单元测试：mock task 数据，验证 DOCX/PDF 生成和格式正确性
 
 ### Step 6.2 — 前端结果展示页
 - [ ] 实现 `pages/TaskResult.tsx` 页面：从 `GET /api/tasks/{id}/result` 获取完成的任务数据

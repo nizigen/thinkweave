@@ -37,10 +37,16 @@
 - PostgreSQL: localhost:15432，Redis: localhost:6379，均正常
 - commit: a58a704
 
+## Step 6.1 导出服务后端（2026-03-26）
+- 新增 `app/services/exporter.py`：BaseExporter 抽象基类 + DocxExporter（python-docx） + PdfExporter（reportlab + STSong-Light CID 字体中文支持）+ parse_markdown_blocks（标题/代码块/段落解析）
+- 新增 `app/routers/export.py`：GET /api/export/{task_id}/docx|pdf，StreamingResponse，RFC 5987 中文文件名编码，404/409 错误处理
+- 新增 `tests/test_exporter.py`：16 测试全绿，三插件双审查通过（无 CRITICAL/HIGH）
+- commit: 6bffd04
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试
-进行中：Phase 5 收尾（鉴权模型加固与更强 DAG 渲染增强待后续）
-下一步：Step 6.1 导出服务后端
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1
+进行中：Phase 6
+下一步：Step 6.2 前端结果展示页
 
 ## Step 5.5 / 5.6 控制塔首版（2026-03-25）
 - 后端新增任务控制链路：`pause/resume/skip/retry` REST API、`task_control.py` 服务、调度器协作暂停/恢复/跳过/重试语义、事件桥接兼容 `node_update/dag_update/log/chapter_preview/review_score/consistency_result`
