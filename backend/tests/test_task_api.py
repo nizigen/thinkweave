@@ -303,7 +303,9 @@ class TestListTasks:
     async def test_list_tasks_empty(self, client: AsyncClient):
         resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        body = resp.json()
+        assert "items" in body and "total" in body
+        assert isinstance(body["items"], list)
 
     async def test_list_tasks_after_create(self, client: AsyncClient):
         create_resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
@@ -311,14 +313,14 @@ class TestListTasks:
 
         resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
         assert resp.status_code == 200
-        ids = [t["id"] for t in resp.json()]
+        ids = [t["id"] for t in resp.json()["items"]]
         assert created_id in ids
 
     async def test_list_tasks_no_nodes_field(self, client: AsyncClient):
         await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
         resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
         assert resp.status_code == 200
-        for t in resp.json():
+        for t in resp.json()["items"]:
             assert "nodes" not in t
 
     async def test_list_tasks_ordered_newest_first(self, client: AsyncClient):
@@ -336,7 +338,7 @@ class TestListTasks:
         id2 = r2.json()["id"]
 
         resp = await client.get("/api/tasks", headers=AUTH_HEADERS)
-        ids = [t["id"] for t in resp.json()]
+        ids = [t["id"] for t in resp.json()["items"]]
         assert ids.index(id2) < ids.index(id1)
 
 

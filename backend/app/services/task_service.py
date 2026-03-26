@@ -257,12 +257,42 @@ async def list_tasks(
     user_id: str = "",
     offset: int = 0,
     limit: int = 50,
-) -> list[TaskRead]:
-    """Return tasks ordered by creation time (newest first), with pagination."""
-    stmt = select(Task).order_by(Task.created_at.desc())
+    status: str | None = None,
+    mode: str | None = None,
+    search: str | None = None,
+) -> tuple[list[TaskRead], int]:
+    """Return tasks ordered by creation time (newest first), with filters and total count."""
+    from sqlalchemy import func, select as sa_select
+    stmt = sa_select(Task).order_by(Task.created_at.desc())
     if user_id:
         stmt = stmt.where(Task.owner_id == user_id)
-    stmt = stmt.offset(offset).limit(limit)
-    result = await session.execute(stmt)
+    if status:
+        stmt = stmt.where(Task.status == status)
+    if mode:
+        stmt = stmt.where(Task.mode == mode)
+    if search:
+        stmt = stmt.where(Task.title.ilike(f"%{search}%"))
+    count_stmt = sa_select(func.count()).select_from(stmt.subquery())
+    total_result = await session.execute(count_stmt)
+    total = total_result.scalar_one()
+    result = await session.execute(stmt.offset(offset).limit(limit))
     tasks = result.scalars().all()
-    return [TaskRead.model_validate(t) for t in tasks]
+    return [TaskRead.model_validate(t) for t in tasks], total
+
+
+async def batch_delete_tasks(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    ids: list[uuid.UUID],
+) -> int:
+    """Delete tasks by id list scoped to user. Returns deleted count."""
+    from sqlalchemy import delete
+    if not ids:
+        return 0
+    stmt = delete(Task).where(Task.id.in_(ids))
+    if user_id:
+        stmt = stmt.where(Task.owner_id == user_id)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount

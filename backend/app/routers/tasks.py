@@ -7,11 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
+from typing import Optional
+
 from app.schemas.task import (
+    BatchDeleteRequest,
+    BatchDeleteResult,
     TaskControlRetryRequest,
     TaskControlSkipRequest,
     TaskCreate,
     TaskDetailRead,
+    TaskListResult,
     TaskRead,
 )
 from app.security.auth import AuthContext, require_auth_context, require_user_id
@@ -37,15 +42,42 @@ def get_llm_client() -> BaseLLMClient:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("", response_model=list[TaskRead])
+@router.get("", response_model=TaskListResult)
 async def list_tasks(
     session: AsyncSession = Depends(get_session),
     user_id: str = Depends(require_user_id),
     offset: int = 0,
-    limit: int = 50,
+    limit: int = 20,
+    status: Optional[str] = None,
+    mode: Optional[str] = None,
+    search: Optional[str] = None,
 ):
-    """获取历史任务列表（分页）"""
-    return await task_service.list_tasks(session, user_id=user_id, offset=offset, limit=min(limit, 200))
+    """获取历史任务列表（分页 + 过滤）"""
+    items, total = await task_service.list_tasks(
+        session,
+        user_id=user_id,
+        offset=offset,
+        limit=min(limit, 200),
+        status=status,
+        mode=mode,
+        search=search,
+    )
+    return TaskListResult(items=items, total=total)
+
+
+@router.delete("", response_model=BatchDeleteResult)
+async def batch_delete_tasks(
+    body: BatchDeleteRequest,
+    session: AsyncSession = Depends(get_session),
+    user_id: str = Depends(require_user_id),
+):
+    """批量删除任务（仅删除属于当前用户的任务）"""
+    deleted = await task_service.batch_delete_tasks(
+        session,
+        user_id=user_id,
+        ids=body.ids,
+    )
+    return BatchDeleteResult(deleted_count=deleted)
 
 
 @router.post("", response_model=TaskDetailRead, status_code=201)

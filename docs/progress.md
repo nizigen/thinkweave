@@ -43,10 +43,15 @@
 - 新增 `tests/test_exporter.py`：16 测试全绿，三插件双审查通过（无 CRITICAL/HIGH）
 - commit: 6bffd04
 
+## Step 6.2 前端结果展示页（2026-03-26）
+- `TaskDetailRead` 补充 `output_text` 字段，`taskStore.Task` 同步更新
+- `Result.tsx` 完整实现：Markdown 渲染（react-markdown + react-syntax-highlighter）、左侧悬浮目录（IntersectionObserver 高亮）、统计卡片（字数/章节/Agent/耗时）、章节审查评分徽章、导出 DOCX/PDF 按钮
+- TS 零错误，前端 20 测试全绿，commit: ae42fb2
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1
+已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1 + Step 6.2
 进行中：Phase 6
-下一步：Step 6.2 前端结果展示页
+下一步：Step 6.3 历史任务页
 
 ## Step 5.5 / 5.6 控制塔首版（2026-03-25）
 - 后端新增任务控制链路：`pause/resume/skip/retry` REST API、`task_control.py` 服务、调度器协作暂停/恢复/跳过/重试语义、事件桥接兼容 `node_update/dag_update/log/chapter_preview/review_score/consistency_result`

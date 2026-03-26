@@ -118,6 +118,19 @@ class DAGSchema(BaseModel):
 # Input Validation Result
 # ---------------------------------------------------------------------------
 
+class TaskListResult(BaseModel):
+    items: list["TaskRead"]
+    total: int
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class BatchDeleteResult(BaseModel):
+    deleted_count: int
+
+
 class ValidationResult(BaseModel):
     ok: bool
     issues: list[str] = Field(default_factory=list)
