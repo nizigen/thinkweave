@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.database import get_session as get_db
 from app.models.task import Task
+from app.security.auth import require_user_id
 from app.services.exporter import DocxExporter, PdfExporter, ExportNotReadyError
 
 router = APIRouter(prefix="/api/export", tags=["export"])
@@ -35,6 +36,7 @@ async def _get_completed_task(task_id: uuid.UUID, db: AsyncSession) -> Task:
 async def export_docx(
     task_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    _user_id: str = Depends(require_user_id),
 ) -> StreamingResponse:
     task = await _get_completed_task(task_id, db)
     try:
@@ -54,6 +56,7 @@ async def export_docx(
 async def export_pdf(
     task_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    _user_id: str = Depends(require_user_id),
 ) -> StreamingResponse:
     task = await _get_completed_task(task_id, db)
     try:

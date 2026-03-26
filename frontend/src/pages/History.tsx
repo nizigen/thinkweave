@@ -121,7 +121,7 @@ export default function History() {
         <Button
           type="link"
           style={{ padding: 0, color: '#F1F5F9', fontWeight: 500 }}
-          onClick={() => navigate(`/tasks/${record.id}/result`)}
+          onClick={() => navigate(`/result/${record.id}`)}
           icon={<FileTextOutlined style={{ color: '#6366F1' }} />}
         >
           {text}
@@ -204,7 +204,7 @@ export default function History() {
           size="small"
           type="link"
           style={{ color: '#6366F1' }}
-          onClick={() => navigate(`/tasks/${record.id}/result`)}
+          onClick={() => navigate(`/result/${record.id}`)}
         >
           查看
         </Button>
@@ -315,7 +315,7 @@ export default function History() {
           style: { marginTop: 16 },
         }}
         onRow={(record) => ({
-          onClick: () => navigate(`/tasks/${record.id}/result`),
+          onClick: () => navigate(`/result/${record.id}`),
           style: { cursor: 'pointer' },
         })}
         style={{
