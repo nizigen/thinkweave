@@ -62,10 +62,17 @@
 - 新增 `app/routers/outline.py`：GET /api/tasks/{id}/outline + POST /api/tasks/{id}/outline/confirm，owner 隔离，FSM 状态检查
 - 6 后端测试全绿，commit: 1a03a1e
 
+## Step 7.1-7.4 系统集成测试 + 收尾（2026-03-26）
+- Step 7.1 E2E 测试：15 用例覆盖技术报告/大纲确认/草稿续写/小说/自定义完整流程，commit: 503580b
+- Step 7.2 故障恢复边界测试：13 用例覆盖 LLM 降级/FSM 恢复/审查重试上限/一致性重试上限，commit: d75b874
+- Step 7.3 WebSocket 集成测试：10 用例覆盖断线重连/多客户端/1000 消息压力/DAG 回退，commit: 28962eb
+- Step 7.4 导出文件验证：15 用例覆盖 DOCX ZIP 结构/标题层级/中文字符/PDF 魔法字节，commit: 07a76c3
+- 全代码库双审查修复（多个 commit），后端 644 passed，前端 29 passed，0 failed
+
 ## 当前状态
-已完成：Phase 0-2 + Step 3.1-3.3 + Step 4.1 + Step 4.1a + Step 4.1b + Step 4.2 + Step 4.3 + Step 4.4 + Step 5.1 + Step 5.2 + Step 5.3 + Step 5.4 + Step 5.5/5.6 控制塔首版 + 基线集成测试 + Step 6.1-6.4
-进行中：Phase 7
-下一步：Step 7.1 端到端测试用例
+已完成：Phase 0-7 全部完成
+进行中：无
+下一步：项目收尾 / 部署准备
 
 ## Step 5.5 / 5.6 控制塔首版（2026-03-25）
 - 后端新增任务控制链路：`pause/resume/skip/retry` REST API、`task_control.py` 服务、调度器协作暂停/恢复/跳过/重试语义、事件桥接兼容 `node_update/dag_update/log/chapter_preview/review_score/consistency_result`
