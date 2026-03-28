@@ -256,22 +256,22 @@
 - [x] 单元测试：mock WebSocket，验证消息分发、任务切换竞态保护、终止性 close code 和重连逻辑
 
 ### Step 5.5 — 前端 DAG 实时可视化
-- [ ] 实现 `components/DagViewer.tsx`：@antv/g6 v5 初始化，从 task nodes 数据渲染 DAG 图
-- [ ] 节点颜色映射：pending(灰) → running(蓝+边框发光动画) → completed(绿) → failed(红)
-- [ ] 边样式：已完成依赖(实线) / 待执行依赖(虚线)
-- [ ] 接收 `node_update` 消息后，实时更新对应节点颜色和状态标签
-- [ ] 接收 `dag_update` 消息后，动态增删节点和边（支持 FSM 驱动的动态 DAG 变更）
-- [ ] 布局算法：dagre 分层布局，节点可拖拽调整位置
-- [ ] 节点点击弹出详情面板（Agent 名称、开始时间、耗时、输出摘要）
+- [x] 实现 `components/DagViewer.tsx`：@antv/g6 v5 初始化，从 task nodes 数据渲染 DAG 图
+- [x] 节点颜色映射：pending(灰) → running(蓝+边框发光动画) → completed(绿) → failed(红)
+- [x] 边样式：已完成依赖(实线) / 待执行依赖(虚线)
+- [x] 接收 `node_update` 消息后，实时更新对应节点颜色和状态标签
+- [x] 接收 `dag_update` 消息后，动态增删节点和边（支持 FSM 驱动的动态 DAG 变更）
+- [x] 布局算法：dagre 分层布局，节点可拖拽调整位置
+- [x] 节点点击弹出详情面板（Agent 名称、开始时间、耗时、输出摘要）
 
 ### Step 5.6 — 前端监控面板组件
-- [ ] 实现 `pages/TaskMonitor.tsx` 页面布局：左侧 DAG 图（70%宽）+ 右侧面板（30%宽）
-- [ ] 右上：Agent 活动面板 `components/AgentPanel.tsx`（当前活跃 Agent 列表，每个 Agent 显示角色/状态/当前任务）
-- [ ] 右下：执行日志流 `components/LogStream.tsx`（接收 `log` 消息，自动滚动，支持按 Agent 过滤，最多保留 500 条）
-- [ ] 顶部：FSM 进度条 `components/FsmProgress.tsx`（显示当前 FSM 阶段，已完成阶段打勾）
-- [ ] 实时预览面板 `components/ChapterPreview.tsx`：接收 `chapter_preview` 消息，Markdown 渲染，按章节 tab 切换
-- [ ] 审查评分显示：接收 `review_score` 后在对应章节 tab 上显示分数徽标
-- [ ] 响应式布局：窄屏时右侧面板折叠为底部 tab
+- [x] 实现 `pages/TaskMonitor.tsx` 页面布局：左侧 DAG 图（70%宽）+ 右侧面板（30%宽）
+- [x] 右上：Agent 活动面板 `components/AgentPanel.tsx`（当前活跃 Agent 列表，每个 Agent 显示角色/状态/当前任务）
+- [x] 右下：执行日志流 `components/LogStream.tsx`（接收 `log` 消息，自动滚动，支持按 Agent 过滤，最多保留 500 条）
+- [x] 顶部：FSM 进度条 `components/FsmProgress.tsx`（显示当前 FSM 阶段，已完成阶段打勾）
+- [x] 实时预览面板 `components/ChapterPreview.tsx`：接收 `chapter_preview` 消息，Markdown 渲染，按章节 tab 切换
+- [x] 审查评分显示：接收 `review_score` 后在对应章节 tab 上显示分数徽标
+- [x] 响应式布局：窄屏时右侧面板折叠为底部 tab
 
 **验收：** 运行长文本任务时，前端 DAG 节点实时变色（≤2秒延迟），日志实时滚动，章节预览实时追加，断线重连后自动恢复状态
 
@@ -364,30 +364,30 @@ class DocxExporter(BaseExporter):
 - [ ] 单元测试：mock task 数据，验证 Pandoc 调用参数和文件生成
 
 ### Step 6.2 — 前端结果展示页
-- [ ] 实现 `pages/TaskResult.tsx` 页面：从 `GET /api/tasks/{id}/result` 获取完成的任务数据
-- [ ] Markdown 渲染区：`react-markdown` + `react-syntax-highlighter` 代码高亮，支持表格/列表/引用
-- [ ] 左侧文档目录 `components/TableOfContents.tsx`：解析 Markdown 标题层级，生成锚点导航，滚动时高亮当前章节
-- [ ] 导出按钮组：DOCX / PDF 两个按钮，点击后 `window.open(/api/export/...)` 触发下载
-- [ ] 生成统计卡片：总字数、章节数、生成耗时、使用的 Agent 数、Token 消耗
-- [ ] 审查评分展示：每章节评分徽标（≥70 绿色，<70 红色）
-- [ ] 空状态/加载状态/错误状态处理
+- [x] 实现 `pages/TaskResult.tsx` 页面：从 `GET /api/tasks/{id}/result` 获取完成的任务数据
+- [x] Markdown 渲染区：`react-markdown` + `react-syntax-highlighter` 代码高亮，支持表格/列表/引用
+- [x] 左侧文档目录 `components/TableOfContents.tsx`：解析 Markdown 标题层级，生成锚点导航，滚动时高亮当前章节
+- [x] 导出按钮组：DOCX / PDF 两个按钮，点击后 `window.open(/api/export/...)` 触发下载
+- [x] 生成统计卡片：总字数、章节数、生成耗时、使用的 Agent 数、Token 消耗
+- [x] 审查评分展示：每章节评分徽标（≥70 绿色，<70 红色）
+- [x] 空状态/加载状态/错误状态处理
 
 ### Step 6.3 — 历史任务页
-- [ ] 实现 `pages/TaskHistory.tsx`：Ant Design Table 展示已完成任务列表
-- [ ] 列定义：任务标题、生成模式（技术报告/小说/自定义）、创建时间、完成时间、字数、状态
-- [ ] 搜索：按标题关键词模糊搜索（前端过滤 or 后端 `GET /api/tasks?search=xxx`）
-- [ ] 筛选：按状态（completed/failed/running）、按生成模式、按时间范围筛选
-- [ ] 排序：默认按创建时间倒序，支持点击列头切换排序
-- [ ] 分页：每页 20 条，Ant Design Pagination 组件
-- [ ] 行点击：跳转到 TaskResult 页面查看历史结果
-- [ ] 批量操作：多选 + 批量删除（确认弹窗）
-- [ ] 后端支持：`GET /api/tasks` 添加 `search`、`status`、`mode`、`offset`、`limit` 查询参数
-- [ ] 空状态：无历史任务时显示引导文案
+- [x] 实现 `pages/TaskHistory.tsx`：Ant Design Table 展示已完成任务列表
+- [x] 列定义：任务标题、生成模式（技术报告/小说/自定义）、创建时间、完成时间、字数、状态
+- [x] 搜索：按标题关键词模糊搜索（前端过滤 or 后端 `GET /api/tasks?search=xxx`）
+- [x] 筛选：按状态（completed/failed/running）、按生成模式、按时间范围筛选
+- [x] 排序：默认按创建时间倒序，支持点击列头切换排序
+- [x] 分页：每页 20 条，Ant Design Pagination 组件
+- [x] 行点击：跳转到 TaskResult 页面查看历史结果
+- [x] 批量操作：多选 + 批量删除（确认弹窗）
+- [x] 后端支持：`GET /api/tasks` 添加 `search`、`status`、`mode`、`offset`、`limit` 查询参数
+- [x] 空状态：无历史任务时显示引导文案
 
 ### Step 6.4 — 任务创建页优化
-- [ ] 创建成功后自动跳转到 TaskMonitor 页面
-- [ ] 大纲确认交互：OUTLINE_REVIEW 状态时，前端展示可编辑大纲（Markdown 编辑器），用户确认后继续
-- [ ] 进度通知：任务完成时浏览器 Notification API 推送（需用户授权）
+- [x] 创建成功后自动跳转到 TaskMonitor 页面
+- [x] 大纲确认交互：OUTLINE_REVIEW 状态时，前端展示可编辑大纲（Markdown 编辑器），用户确认后继续
+- [x] 进度通知：任务完成时浏览器 Notification API 推送（需用户授权）
 
 **验收：** 完整走通一次任务：创建 → 大纲确认 → 监控实时进度 → 查看结果 → 导出 DOCX/PDF → 在历史任务页找到并重新查看
 
@@ -396,44 +396,44 @@ class DocxExporter(BaseExporter):
 ## Phase 7：系统集成测试 + 收尾（第11周）
 
 ### Step 7.1 — 端到端测试用例
-- [ ] E2E 测试：技术报告生成完整流程（创建 → 大纲 → 写作 → 审查 → 一致性 → 完成），验证输出≥8000字、结构完整
-- [ ] E2E 测试：小说写作完整流程（创建 → 大纲 → 并行章节写作 → 审查 → 一致性 → 完成），验证叙事连贯
-- [ ] E2E 测试：自定义模式流程（用户自定义 prompt → 生成），验证自定义 prompt 正确注入
-- [ ] E2E 测试：草稿续写/评论修改入口（draft_text / review_comments → 跳过大纲直接进入 PRE_REVIEW_INTEGRITY）
+- [x] E2E 测试：技术报告生成完整流程（创建 → 大纲 → 写作 → 审查 → 一致性 → 完成），验证输出≥8000字、结构完整
+- [x] E2E 测试：小说写作完整流程（创建 → 大纲 → 并行章节写作 → 审查 → 一致性 → 完成），验证叙事连贯
+- [x] E2E 测试：自定义模式流程（用户自定义 prompt → 生成），验证自定义 prompt 正确注入
+- [x] E2E 测试：草稿续写/评论修改入口（draft_text / review_comments → 跳过大纲直接进入 PRE_REVIEW_INTEGRITY）
 
 ### Step 7.2 — 故障恢复与边界测试
-- [ ] Agent 超时恢复测试：模拟 Writer Agent 超时（心跳丢失），验证系统自动重试或标记失败
-- [ ] FSM 检查点恢复测试：任务执行到 WRITING 阶段时模拟进程崩溃，重启后 `scan_and_resume_running_tasks()` 恢复执行
-- [ ] LLM 降级测试：主模型 API 返回 429/500，验证自动 fallback 到备用模型
-- [ ] Redis 断连恢复测试：临时断开 Redis，验证重连后消息不丢失（Consumer Group ACK 机制）
-- [ ] 审查重试上限测试：章节连续 3 次审查不通过（<70分），验证 FSM 正确转到 FAILED 状态
-- [ ] 一致性重试上限测试：一致性检查连续 2 次不通过，验证 FSM 正确处理
+- [x] Agent 超时恢复测试：模拟 Writer Agent 超时（心跳丢失），验证系统自动重试或标记失败
+- [x] FSM 检查点恢复测试：任务执行到 WRITING 阶段时模拟进程崩溃，重启后 `scan_and_resume_running_tasks()` 恢复执行
+- [x] LLM 降级测试：主模型 API 返回 429/500，验证自动 fallback 到备用模型
+- [x] Redis 断连恢复测试：临时断开 Redis，验证重连后消息不丢失（Consumer Group ACK 机制）
+- [x] 审查重试上限测试：章节连续 3 次审查不通过（<70分），验证 FSM 正确转到 FAILED 状态
+- [x] 一致性重试上限测试：一致性检查连续 2 次不通过，验证 FSM 正确处理
 
 ### Step 7.3 — WebSocket 与前端集成测试
-- [ ] WebSocket 断线重连测试：服务端主动断开连接，验证前端自动重连 + 全量状态同步
-- [ ] 多客户端订阅测试：两个浏览器 tab 同时监控同一任务，验证都能收到实时更新
-- [ ] 大量日志压力测试：快速生成 1000+ 条日志消息，验证前端 LogStream 不卡顿（虚拟滚动 or 截断）
-- [ ] DAG 动态更新测试：FSM 回退（审查不通过→重写）时，验证 DAG 节点状态正确回退
+- [x] WebSocket 断线重连测试：服务端主动断开连接，验证前端自动重连 + 全量状态同步
+- [x] 多客户端订阅测试：两个浏览器 tab 同时监控同一任务，验证都能收到实时更新
+- [x] 大量日志压力测试：快速生成 1000+ 条日志消息，验证前端 LogStream 不卡顿（虚拟滚动 or 截断）
+- [x] DAG 动态更新测试：FSM 回退（审查不通过→重写）时，验证 DAG 节点状态正确回退
 
 ### Step 7.4 — 导出文件验证
-- [ ] DOCX 格式验证：用 python-docx 读回导出文件，验证标题层级、段落数、中文渲染正确
-- [ ] PDF 格式验证：用 PyPDF2 读回导出文件，验证页数合理、中文字体正确嵌入、页码连续
-- [ ] 大文件导出测试：≥20000 字文档导出，验证不超时（StreamingResponse 分块传输）
-- [ ] 特殊字符测试：包含代码块、表格、LaTeX 公式的文档导出，验证格式不丢失
+- [x] DOCX 格式验证：用 python-docx 读回导出文件，验证标题层级、段落数、中文渲染正确
+- [x] PDF 格式验证：用 PyPDF2 读回导出文件，验证页数合理、中文字体正确嵌入、页码连续
+- [x] 大文件导出测试：≥20000 字文档导出，验证不超时（StreamingResponse 分块传输）
+- [x] 特殊字符测试：包含代码块、表格、LaTeX 公式的文档导出，验证格式不丢失
 
 ### Step 7.5 — 性能与安全基线
-- [ ] 并发写作性能：5 个 Writer Agent 并行写作，验证总耗时 < 单 Agent 顺序写作的 2x
-- [ ] Token 消耗统计：一次完整技术报告生成的总 Token 消耗，记录基线（目标：input < 50k，output < 30k）
-- [ ] 记忆层去重效果：对比有/无记忆层的章节重复率（目标 < 5% vs 20-30%）
-- [ ] API 安全检查：确认所有端点有适当的输入校验（Pydantic），无 SQL 注入风险
-- [ ] 环境变量安全：确认 `.env` 在 `.gitignore`，前端代码无 API key 泄露
+- [x] 并发写作性能：5 个 Writer Agent 并行写作，验证总耗时 < 单 Agent 顺序写作的 2x
+- [x] Token 消耗统计：一次完整技术报告生成的总 Token 消耗，记录基线（目标：input < 50k，output < 30k）
+- [x] 记忆层去重效果：对比有/无记忆层的章节重复率（目标 < 5% vs 20-30%）
+- [x] API 安全检查：确认所有端点有适当的输入校验（Pydantic），无 SQL 注入风险
+- [x] 环境变量安全：确认 `.env` 在 `.gitignore`，前端代码无 API key 泄露
 
 ### Step 7.6 — 文档收尾
-- [ ] 更新 README.md：项目介绍、快速开始、架构图、API 文档链接
-- [ ] 更新 BACKEND_STRUCTURE.md：反映最终实现（如有偏差）
-- [ ] 更新 progress.md：标记所有 Phase 完成
-- [ ] 更新 IMPLEMENTATION_PLAN.md：所有 checkbox 标记完成
-- [ ] 编写部署指南：Docker Compose 一键启动（PostgreSQL + Redis + Backend + Frontend）
-- [ ] 编写 `.env.example`：所有必需环境变量及说明
+- [x] 更新 README.md：项目介绍、快速开始、架构图、API 文档链接
+- [x] 更新 BACKEND_STRUCTURE.md：反映最终实现（如有偏差）
+- [x] 更新 progress.md：标记所有 Phase 完成
+- [x] 更新 IMPLEMENTATION_PLAN.md：所有 checkbox 标记完成
+- [x] 编写部署指南：Docker Compose 一键启动（PostgreSQL + Redis + Backend + Frontend）
+- [x] 编写 `.env.example`：所有必需环境变量及说明
 
 **验收：** 所有 E2E 测试通过；故障恢复测试覆盖 Agent 超时、FSM 检查点、LLM 降级、Redis 断连场景；导出文件格式正确；并行章节重复率 < 5%；README 和部署指南完整可用
