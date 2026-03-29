@@ -279,15 +279,89 @@
 
 ## Phase 6：结果展示 + 导出（第10-11周）
 
-### Step 6.1 — 导出服务后端
-- [x] 实现 `services/exporter.py` 基类 `BaseExporter`（接收 task output_text + metadata，返回 bytes）
-- [x] 实现 `DocxExporter`（python-docx 1.1.2）：标题页（任务标题+创建时间）、自动目录、章节标题（Heading 1/2）、正文段落、代码块等格式映射
-- [x] 实现 `PdfExporter`（reportlab 4.2.5）：中文字体支持（注册 SimSun/SimHei）、标题页、章节标题、正文段落、页码页脚
-- [x] Markdown→结构化内容解析：使用 `markdown` 库解析 output_text，提取标题层级、段落、代码块、列表
-- [x] 实现 `routers/export.py`：`GET /api/export/{task_id}/docx` 和 `GET /api/export/{task_id}/pdf`，流式文件响应（StreamingResponse）
-- [x] 导出文件命名规则：`{task_title}_{date}.docx/pdf`，中文文件名 URL 编码
-- [x] 错误处理：task 不存在返回 404，task 未完成返回 409（Conflict）
-- [x] 单元测试：mock task 数据，验证 DOCX/PDF 生成和格式正确性
+### Step 6.1 — 导出服务后端（高质量排版方案）
+
+> **方案决策（2026-03-30）**：放弃 reportlab/python-docx 自行排版方案，改用 **Pandoc + XeLaTeX** 流水线。
+> 原因：reportlab 的中文排版质量差（字体嵌入、行距、标题层级均需大量手工调整），python-docx 样式控制繁琐。
+> Pandoc + XeLaTeX 可输出出版级 PDF，Pandoc + reference.docx 可输出完全符合 Word 样式规范的 DOCX。
+
+#### 依赖安装
+```bash
+apt-get install -y pandoc texlive-xetex texlive-fonts-recommended texlive-lang-chinese fonts-noto-cjk
+```
+
+#### PDF 输出（XeLaTeX 引擎）
+- 字体：正文 Noto Serif CJK SC，标题 Noto Sans CJK SC
+- 行距 1.5，页边距 2.5cm，A4 纸
+- 自动生成目录（`\tableofcontents`）
+- 代码块语法高亮（minted 宏包）
+- 彩色超链接
+- 页眉页脚：章节名 + 页码
+
+```python
+# services/exporter.py
+import subprocess, tempfile, os
+
+class PdfExporter(BaseExporter):
+    def export(self, title: str, markdown_text: str) -> bytes:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md_path = os.path.join(tmpdir, 'input.md')
+            pdf_path = os.path.join(tmpdir, 'output.pdf')
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.write(f'---\ntitle: "{title}"\nauthor: "Hierarch"\ndate: "{date.today()}"\n---\n\n')
+                f.write(markdown_text)
+            subprocess.run([
+                'pandoc', md_path, '-o', pdf_path,
+                '--pdf-engine=xelatex',
+                '-V', 'mainfont=Noto Serif CJK SC',
+                '-V', 'sansfont=Noto Sans CJK SC',
+                '-V', 'monofont=Noto Sans Mono CJK SC',
+                '-V', 'fontsize=12pt',
+                '-V', 'geometry:margin=2.5cm',
+                '-V', 'linestretch=1.5',
+                '-V', 'colorlinks=true',
+                '-V', 'linkcolor=NavyBlue',
+                '--toc', '--toc-depth=3',
+                '--highlight-style=tango',
+            ], check=True)
+            with open(pdf_path, 'rb') as f:
+                return f.read()
+```
+
+#### DOCX 输出（reference.docx 模板）
+- 通过自定义 `reference.docx` 控制所有样式（字体/颜色/标题层级/页眉页脚）
+- 正文字体：微软雅黑 / Noto Sans CJK SC，12pt
+- 标题：加粗，蓝色（#2E4057），自动编号
+- 代码块：等宽字体，灰色背景
+
+```python
+class DocxExporter(BaseExporter):
+    REFERENCE_DOCX = 'assets/reference.docx'  # 预制模板
+    def export(self, title: str, markdown_text: str) -> bytes:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            md_path = os.path.join(tmpdir, 'input.md')
+            docx_path = os.path.join(tmpdir, 'output.docx')
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.write(markdown_text)
+            subprocess.run([
+                'pandoc', md_path, '-o', docx_path,
+                f'--reference-doc={self.REFERENCE_DOCX}',
+                '--toc',
+            ], check=True)
+            with open(docx_path, 'rb') as f:
+                return f.read()
+```
+
+#### 实施步骤
+- [ ] 安装 pandoc + texlive-xetex + fonts-noto-cjk
+- [ ] 实现 `services/exporter.py` 基类 `BaseExporter`
+- [ ] 实现 `PdfExporter`（Pandoc + XeLaTeX，Noto CJK 字体）
+- [ ] 实现 `DocxExporter`（Pandoc + reference.docx 模板）
+- [ ] 制作 `assets/reference.docx` 样式模板（标题/正文/代码块样式）
+- [ ] 实现 `routers/export.py`：`GET /api/export/{task_id}/docx` 和 `GET /api/export/{task_id}/pdf`
+- [ ] 导出文件命名规则：`{task_title}_{date}.docx/pdf`，中文文件名 URL 编码
+- [ ] 错误处理：task 不存在 404，task 未完成 409
+- [ ] 单元测试：mock task 数据，验证 Pandoc 调用参数和文件生成
 
 ### Step 6.2 — 前端结果展示页
 - [ ] 实现 `pages/TaskResult.tsx` 页面：从 `GET /api/tasks/{id}/result` 获取完成的任务数据
