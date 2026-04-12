@@ -6,7 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
-from app.schemas.agent import AgentCreate, AgentRead, AgentStatusUpdate
+from app.schemas.agent import (
+    AgentCreate,
+    AgentRead,
+    AgentStatusUpdate,
+    ModelOptionRead,
+    RolePresetRead,
+    SkillOptionRead,
+    ToolOptionRead,
+)
 from app.security.auth import require_admin_user_id
 from app.services import agent_manager
 
@@ -28,6 +36,34 @@ async def create_agent(
     _user_id: str = Depends(require_admin_user_id),
 ):
     return await agent_manager.create_agent(session, agent_in)
+
+
+@router.get("/model-options", response_model=list[ModelOptionRead])
+async def list_agent_model_options(
+    _user_id: str = Depends(require_admin_user_id),
+):
+    return agent_manager.list_agent_model_options()
+
+
+@router.get("/role-presets", response_model=list[RolePresetRead])
+async def list_agent_role_presets(
+    _user_id: str = Depends(require_admin_user_id),
+):
+    return agent_manager.list_agent_role_presets()
+
+
+@router.get("/skills", response_model=list[SkillOptionRead])
+async def list_agent_skill_options(
+    _user_id: str = Depends(require_admin_user_id),
+):
+    return agent_manager.list_agent_skill_options()
+
+
+@router.get("/tool-options", response_model=list[ToolOptionRead])
+async def list_agent_tool_options(
+    _user_id: str = Depends(require_admin_user_id),
+):
+    return agent_manager.list_agent_tool_options()
 
 
 @router.get("/{agent_id}", response_model=AgentRead)

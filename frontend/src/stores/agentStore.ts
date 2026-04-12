@@ -4,14 +4,29 @@
  */
 import { create } from 'zustand';
 import { agentApi } from '../api/agents';
-import type { AgentData, AgentCreatePayload } from '../api/agents';
+import type {
+  AgentData,
+  AgentCreatePayload,
+  ModelOptionData,
+  RolePresetData,
+  SkillOptionData,
+  ToolOptionData,
+} from '../api/agents';
 
 interface AgentState {
   agents: AgentData[];
+  modelOptions: ModelOptionData[];
+  rolePresets: RolePresetData[];
+  skillOptions: SkillOptionData[];
+  toolOptions: ToolOptionData[];
   loading: boolean;
   selectedAgent: AgentData | null;
 
   fetchAgents: () => Promise<void>;
+  fetchModelOptions: () => Promise<void>;
+  fetchRolePresets: () => Promise<void>;
+  fetchSkillOptions: () => Promise<void>;
+  fetchToolOptions: () => Promise<void>;
   createAgent: (payload: AgentCreatePayload) => Promise<AgentData>;
   updateAgentStatus: (id: string, status: 'idle' | 'busy' | 'offline') => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;
@@ -20,6 +35,10 @@ interface AgentState {
 
 export const useAgentStore = create<AgentState>((set) => ({
   agents: [],
+  modelOptions: [],
+  rolePresets: [],
+  skillOptions: [],
+  toolOptions: [],
   loading: false,
   selectedAgent: null,
 
@@ -44,6 +63,26 @@ export const useAgentStore = create<AgentState>((set) => ({
     const agent = await agentApi.create(payload);
     set((s) => ({ agents: [...s.agents, agent] }));
     return agent;
+  },
+
+  fetchModelOptions: async () => {
+    const modelOptions = await agentApi.listModelOptions();
+    set({ modelOptions });
+  },
+
+  fetchRolePresets: async () => {
+    const rolePresets = await agentApi.listRolePresets();
+    set({ rolePresets });
+  },
+
+  fetchSkillOptions: async () => {
+    const skillOptions = await agentApi.listSkillOptions();
+    set({ skillOptions });
+  },
+
+  fetchToolOptions: async () => {
+    const toolOptions = await agentApi.listToolOptions();
+    set({ toolOptions });
   },
 
   updateAgentStatus: async (id, status) => {

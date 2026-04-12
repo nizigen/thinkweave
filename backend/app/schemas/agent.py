@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from app.config import settings
 
 
 class AgentConfig(BaseModel):
@@ -21,6 +22,7 @@ class AgentConfig(BaseModel):
     max_tool_iterations: int = Field(default=1, ge=1, le=50)
 
     fallback_models: list[str] = Field(default_factory=list)
+    skill_allowlist: list[str] = Field(default_factory=list)
     tool_allowlist: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
@@ -30,7 +32,8 @@ class AgentCreate(BaseModel):
     role: str
     layer: int
     capabilities: str | None = None
-    model: str = "gpt-4o"
+    model: str | None = Field(default=settings.default_model)
+    custom_model: str | None = None
     agent_config: AgentConfig | None = None
 
 
@@ -50,3 +53,45 @@ class AgentRead(BaseModel):
 
 class AgentStatusUpdate(BaseModel):
     status: Literal["idle", "busy", "offline"]
+
+
+class ModelOptionRead(BaseModel):
+    value: str
+    label: str
+    description: str = ""
+    provider: str = ""
+
+
+class SkillOptionRead(BaseModel):
+    name: str
+    skill_type: str
+    description: str = ""
+    applicable_roles: list[str] = Field(default_factory=list)
+    applicable_modes: list[str] = Field(default_factory=list)
+    applicable_stages: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    model_preference: str | None = None
+    priority: int = 100
+    source_path: str = ""
+
+
+class ToolOptionRead(BaseModel):
+    name: str
+    description: str = ""
+    server_name: str = ""
+
+
+class RolePresetConfigRead(BaseModel):
+    skill_allowlist: list[str] = Field(default_factory=list)
+    tool_allowlist: list[str] = Field(default_factory=list)
+    max_tool_iterations: int = Field(default=1, ge=1, le=50)
+
+
+class RolePresetRead(BaseModel):
+    role: str
+    layer: int
+    label: str
+    description: str = ""
+    icon: str = ""
+    default_model: str
+    agent_config: RolePresetConfigRead

@@ -3,8 +3,8 @@
  * Ref: APP_FLOW.md — 旅程2 Agent管理
  * Ref: backend/app/schemas/agent.py — AgentCreate
  */
-import { useCallback, useMemo, useState } from 'react';
-import { Modal, Form, Input, Select, message, Typography } from 'antd';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { App as AntdApp, Modal, Form, Input, InputNumber, Select, Typography } from 'antd';
 import {
   RobotOutlined,
 } from '@ant-design/icons';
@@ -15,25 +15,19 @@ const { TextArea } = Input;
 const { Text } = Typography;
 
 /* ── Role → Layer/Model 自动推荐 ── */
-const ROLE_OPTIONS = [
-  { value: 'orchestrator', label: '编排 (Orchestrator)', layer: 0, model: 'gpt-4o', icon: '🎯', desc: '任务分解与全局协调' },
-  { value: 'manager', label: '管理 (Manager)', layer: 1, model: 'deepseek-v3.2', icon: '📋', desc: '资源调度与策略管理' },
-  { value: 'outline', label: '大纲 (Outline)', layer: 2, model: 'gpt-4o', icon: '🗂️', desc: '结构规划与章节设计' },
-  { value: 'writer', label: '写作 (Writer)', layer: 2, model: 'deepseek-v3.2', icon: '✍️', desc: '内容撰写与创作' },
-  { value: 'reviewer', label: '审查 (Reviewer)', layer: 2, model: 'gpt-4o', icon: '🔍', desc: '质量评分与反馈' },
-  { value: 'consistency', label: '一致性 (Consistency)', layer: 2, model: 'gpt-4o', icon: '🔗', desc: '跨章节一致性检查' },
+const FALLBACK_ROLE_OPTIONS = [
+  { value: 'orchestrator', label: '编排 (Orchestrator)', layer: 0, icon: '🎯', desc: '任务分解与全局协调' },
+  { value: 'manager', label: '管理 (Manager)', layer: 1, icon: '📋', desc: '资源调度与策略管理' },
+  { value: 'outline', label: '大纲 (Outline)', layer: 2, icon: '🗂️', desc: '结构规划与章节设计' },
+  { value: 'writer', label: '写作 (Writer)', layer: 2, icon: '✍️', desc: '内容撰写与创作' },
+  { value: 'reviewer', label: '审查 (Reviewer)', layer: 2, icon: '🔍', desc: '质量评分与反馈' },
+  { value: 'consistency', label: '一致性 (Consistency)', layer: 2, icon: '🔗', desc: '跨章节一致性检查' },
 ];
 
 const LAYER_OPTIONS = [
   { value: 0, label: 'L0 — 编排层' },
   { value: 1, label: 'L1 — 管理层' },
   { value: 2, label: 'L2 — 执行层' },
-];
-
-const MODEL_OPTIONS = [
-  { value: 'gpt-4o', label: 'GPT-4o' },
-  { value: 'deepseek-v3.2', label: 'DeepSeek-V3.2' },
-  { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
 ];
 
 const LAYER_COLORS: Record<number, string> = {
@@ -49,26 +43,121 @@ interface Props {
 }
 
 export default function CreateAgentModal({ open, onClose, allowMutations = true }: Props) {
+  const { message } = AntdApp.useApp();
   const [form] = Form.useForm();
   const createAgent = useAgentStore((s) => s.createAgent);
+  const modelOptions = useAgentStore((s) => s.modelOptions);
+  const rolePresets = useAgentStore((s) => s.rolePresets);
+  const skillOptions = useAgentStore((s) => s.skillOptions);
+  const toolOptions = useAgentStore((s) => s.toolOptions);
+  const fetchModelOptions = useAgentStore((s) => s.fetchModelOptions);
+  const fetchRolePresets = useAgentStore((s) => s.fetchRolePresets);
+  const fetchSkillOptions = useAgentStore((s) => s.fetchSkillOptions);
+  const fetchToolOptions = useAgentStore((s) => s.fetchToolOptions);
   const [submitting, setSubmitting] = useState(false);
 
   const selectedRole = Form.useWatch('role', form);
   const selectedLayer = Form.useWatch('layer', form);
+  const selectedModel = Form.useWatch('model', form);
+
+  const roleOptions = useMemo(
+    () =>
+      rolePresets.length > 0
+        ? rolePresets.map((preset) => ({
+            value: preset.role,
+            label: preset.label,
+            layer: preset.layer,
+            icon: preset.icon || '🤖',
+            desc: preset.description || '',
+          }))
+        : FALLBACK_ROLE_OPTIONS,
+    [rolePresets],
+  );
+
+  const rolePresetMap = useMemo(
+    () => new Map(rolePresets.map((preset) => [preset.role, preset])),
+    [rolePresets],
+  );
 
   const rolePreset = useMemo(
-    () => ROLE_OPTIONS.find((r) => r.value === selectedRole),
-    [selectedRole],
+    () => roleOptions.find((r) => r.value === selectedRole),
+    [roleOptions, selectedRole],
   );
+
+  const modelSelectOptions = useMemo(
+    () => [
+      ...modelOptions.map((option) => ({
+        value: option.value,
+        label: `${option.label}${option.provider ? ` (${option.provider})` : ''}`,
+      })),
+      { value: '__custom__', label: '自定义模型' },
+    ],
+    [modelOptions],
+  );
+
+  const skillSelectOptions = useMemo(
+    () =>
+      skillOptions.map((option) => ({
+        value: option.name,
+        label: `${option.name} · ${option.skill_type}`,
+      })),
+    [skillOptions],
+  );
+
+  const toolSelectOptions = useMemo(
+    () =>
+      toolOptions.map((option) => ({
+        value: option.name,
+        label: option.server_name
+          ? `${option.name} (${option.server_name})`
+          : option.name,
+      })),
+    [toolOptions],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    fetchModelOptions().catch(() => {
+      message.error('加载模型选项失败');
+    });
+    fetchRolePresets().catch(() => {
+      message.error('加载角色预设失败');
+    });
+    fetchSkillOptions().catch(() => {
+      message.error('加载技能选项失败');
+    });
+    fetchToolOptions().catch(() => {
+      message.error('加载 MCP 工具选项失败');
+    });
+  }, [open, fetchModelOptions, fetchRolePresets, fetchSkillOptions, fetchToolOptions, message]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (selectedModel) return;
+    if (modelOptions.length === 0) return;
+    form.setFieldValue('model', modelOptions[0].value);
+  }, [open, selectedModel, modelOptions, form]);
 
   const handleRoleChange = useCallback(
     (role: string) => {
-      const preset = ROLE_OPTIONS.find((r) => r.value === role);
+      const preset = roleOptions.find((r) => r.value === role);
+      const roleDefaults = rolePresetMap.get(role);
       if (preset) {
-        form.setFieldsValue({ layer: preset.layer, model: preset.model });
+        form.setFieldsValue({
+          layer: preset.layer,
+          ...(roleDefaults
+            ? {
+                agent_config: {
+                  skill_allowlist: roleDefaults.agent_config.skill_allowlist,
+                  tool_allowlist: roleDefaults.agent_config.tool_allowlist,
+                  max_tool_iterations: roleDefaults.agent_config.max_tool_iterations,
+                },
+              }
+            : {}),
+        });
       }
     },
-    [form],
+    [form, roleOptions, rolePresetMap],
   );
 
   const handleSubmit = useCallback(async () => {
@@ -80,12 +169,40 @@ export default function CreateAgentModal({ open, onClose, allowMutations = true 
     setSubmitting(true);
     try {
       const values = await form.validateFields();
+      const rawConfig = values.agent_config ?? {};
+      const skillAllowlist = Array.isArray(rawConfig.skill_allowlist)
+        ? rawConfig.skill_allowlist
+            .map((item: unknown) => String(item ?? '').trim())
+            .filter(Boolean)
+        : [];
+      const toolAllowlist = Array.isArray(rawConfig.tool_allowlist)
+        ? rawConfig.tool_allowlist
+            .map((item: unknown) => String(item ?? '').trim())
+            .filter(Boolean)
+        : [];
+      const rawIterations = Number(rawConfig.max_tool_iterations);
+      const maxToolIterations = Number.isFinite(rawIterations) && rawIterations >= 1
+        ? Math.floor(rawIterations)
+        : undefined;
+      const agentConfig =
+        skillAllowlist.length > 0 || toolAllowlist.length > 0 || maxToolIterations
+          ? {
+              ...(skillAllowlist.length > 0 ? { skill_allowlist: skillAllowlist } : {}),
+              ...(toolAllowlist.length > 0 ? { tool_allowlist: toolAllowlist } : {}),
+              ...(maxToolIterations ? { max_tool_iterations: maxToolIterations } : {}),
+            }
+          : undefined;
       await createAgent({
         name: values.name,
         role: values.role,
         layer: values.layer,
-        model: values.model,
+        model: values.model === '__custom__' ? undefined : String(values.model ?? '').trim(),
+        custom_model:
+          values.model === '__custom__'
+            ? String(values.custom_model ?? '').trim()
+            : undefined,
         capabilities: values.capabilities || null,
+        agent_config: agentConfig,
       });
       message.success(`Agent "${values.name}" 注册成功`);
       form.resetFields();
@@ -260,7 +377,12 @@ export default function CreateAgentModal({ open, onClose, allowMutations = true 
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ layer: 2, model: 'gpt-4o' }}
+          initialValues={{
+            layer: 2,
+            model: undefined,
+            custom_model: '',
+            agent_config: { max_tool_iterations: 1, skill_allowlist: [], tool_allowlist: [] },
+          }}
           requiredMark="optional"
         >
           <Form.Item
@@ -279,7 +401,7 @@ export default function CreateAgentModal({ open, onClose, allowMutations = true 
             >
               <Select
                 placeholder="选择角色"
-                options={ROLE_OPTIONS}
+                options={roleOptions}
                 onChange={handleRoleChange}
               />
             </Form.Item>
@@ -298,8 +420,26 @@ export default function CreateAgentModal({ open, onClose, allowMutations = true 
             label="LLM 模型"
             rules={[{ required: true, message: '请选择模型' }]}
           >
-            <Select options={MODEL_OPTIONS} />
+            <Select
+              placeholder="选择模型"
+              options={modelSelectOptions}
+              optionFilterProp="label"
+              showSearch
+            />
           </Form.Item>
+
+          {selectedModel === '__custom__' ? (
+            <Form.Item
+              name="custom_model"
+              label="自定义模型名"
+              rules={[
+                { required: true, message: '请输入自定义模型名' },
+                { max: 100, message: '模型名最多 100 个字符' },
+              ]}
+            >
+              <Input placeholder="例如：openrouter/anthropic/claude-sonnet-4" />
+            </Form.Item>
+          ) : null}
 
           <Form.Item name="capabilities" label="能力描述">
             <TextArea
@@ -309,6 +449,40 @@ export default function CreateAgentModal({ open, onClose, allowMutations = true 
               showCount
             />
           </Form.Item>
+
+          <div style={{ marginTop: 8, padding: '12px 14px', border: '1px solid #1E1E2E', borderRadius: 8, background: '#0F172A22' }}>
+            <Text style={{ color: '#CBD5E1', fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 12 }}>
+              技能与 MCP 注入
+            </Text>
+
+            <Form.Item name={['agent_config', 'skill_allowlist']} label="Skill 注入白名单">
+              <Select
+                mode="multiple"
+                placeholder="选择一个或多个 Skill（可留空使用自动匹配）"
+                options={skillSelectOptions}
+                optionFilterProp="label"
+                showSearch
+              />
+            </Form.Item>
+
+            <Form.Item name={['agent_config', 'tool_allowlist']} label="MCP 工具白名单">
+              <Select
+                mode="tags"
+                placeholder="选择或输入 MCP 工具名，例如 web_fetch"
+                options={toolSelectOptions}
+                optionFilterProp="label"
+                showSearch
+              />
+            </Form.Item>
+
+            <Form.Item
+              name={['agent_config', 'max_tool_iterations']}
+              label="MCP 最大迭代次数"
+              tooltip="单次任务中工具调用循环最大轮数"
+            >
+              <InputNumber min={1} max={50} style={{ width: '100%' }} />
+            </Form.Item>
+          </div>
         </Form>
       </div>
     </Modal>

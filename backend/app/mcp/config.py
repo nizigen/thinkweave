@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,7 @@ _BLOCKED_ENV_VARS = frozenset({
 
 # Shell元字符检测（用于参数校验）
 _SHELL_META_RE = re.compile(r"[;&|`$(){}]")
+_ENV_REF_RE = re.compile(r"^\$(?:\{(?P<braced>[A-Z0-9_]+)\}|(?P<bare>[A-Z0-9_]+))$")
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,17 @@ class MCPServerConfig:
     args: tuple[str, ...] = ()
     env: tuple[tuple[str, str], ...] = ()
     description: str = ""
+
+
+def _resolve_env_value(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    candidate = value.strip()
+    match = _ENV_REF_RE.match(candidate)
+    if not match:
+        return value
+    env_key = match.group("braced") or match.group("bare") or ""
+    return os.getenv(env_key, "")
 
 
 def load_mcp_config(
@@ -89,9 +102,16 @@ def load_mcp_config(
         else:
             # Filter dangerous env vars
             raw_env = srv.get("env", {})
+            if not isinstance(raw_env, dict):
+                logger.warning(
+                    f"Skipping MCP server '{name}': env must be a mapping"
+                )
+                raw_env = {}
+
             safe_env = {
-                k: v for k, v in raw_env.items()
-                if k.upper() not in _BLOCKED_ENV_VARS
+                k: _resolve_env_value(v)
+                for k, v in raw_env.items()
+                if isinstance(k, str) and k.upper() not in _BLOCKED_ENV_VARS
             }
             if len(safe_env) < len(raw_env):
                 blocked = set(raw_env) - set(safe_env)
