@@ -13,7 +13,7 @@ from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.schemas.task import TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
 from app.services.entry_stage import build_entry_metadata
-from app.services.task_decomposer import TaskValidationError, decompose_task
+from app.services.task_decomposer import decompose_task
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
 

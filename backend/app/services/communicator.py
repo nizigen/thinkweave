@@ -9,12 +9,10 @@
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.models.message import Message

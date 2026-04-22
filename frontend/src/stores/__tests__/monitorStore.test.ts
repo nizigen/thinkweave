@@ -34,7 +34,7 @@ describe('monitorStore', () => {
     const state = useMonitorStore.getState();
     expect(state.events).toHaveLength(500);
     expect(state.events[0]?.node_id).toBe('node-20');
-    expect(state.events.at(-1)?.node_id).toBe('node-519');
+    expect(state.events[state.events.length - 1]?.node_id).toBe('node-519');
   });
 
   it('ignores events for a different active task', () => {

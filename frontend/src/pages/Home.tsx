@@ -8,7 +8,6 @@ import { useState } from 'react';
 import {
   Form,
   Input,
-  Select,
   InputNumber,
   Button,
   Typography,
@@ -201,13 +200,13 @@ export default function Home() {
           name="target_words"
           label={<Text style={{ color: '#CBD5E1' }}>目标字数</Text>}
         >
-          <InputNumber
+          <InputNumber<number>
             min={500}
             max={200000}
             step={500}
             style={{ width: '100%', background: '#0D0D14', borderColor: '#2A2A3E' }}
             formatter={(v) => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-            parser={(v) => Number((v ?? '').replace(/,/g, '')) as unknown as number}
+            parser={(v) => Number((v ?? '').replace(/,/g, ''))}
           />
         </Form.Item>
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any
 
 from app.agents.base_agent import BaseAgent
 from app.utils.logger import logger

@@ -214,7 +214,7 @@ export default function CreateAgentModal({ open, onClose, allowMutations = true 
     } finally {
       setSubmitting(false);
     }
-  }, [form, createAgent, onClose, submitting, allowMutations]);
+  }, [form, createAgent, onClose, submitting, allowMutations, message]);
 
   const handleCancel = useCallback(() => {
     form.resetFields();

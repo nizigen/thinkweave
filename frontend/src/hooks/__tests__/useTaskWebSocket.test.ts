@@ -157,7 +157,7 @@ describe('useTaskWebSocket', () => {
     expect(getTaskMock).toHaveBeenCalledTimes(1);
 
     act(() => {
-      MockWebSocket.instances[0]?.onclose?.();
+      MockWebSocket.instances[0]?.onclose?.({} as CloseEvent);
     });
 
     expect(useMonitorStore.getState().connectionState).toBe('disconnected');
