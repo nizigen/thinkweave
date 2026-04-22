@@ -23,7 +23,13 @@ from app.security.auth import AuthContext, require_auth_context, require_user_id
 from app.security.rate_limit import enforce_task_create_rate_limit
 from app.services import task_control, task_service
 from app.services.task_decomposer import TaskValidationError
-from app.utils.llm_client import BaseLLMClient, LLMClient
+from app.config import settings
+from app.utils.llm_client import (
+    BaseLLMClient,
+    DebugMockLLMClient,
+    LLMClient,
+    LLMUnavailableError,
+)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -35,6 +41,8 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 @lru_cache(maxsize=1)
 def get_llm_client() -> BaseLLMClient:
     """Return a LLM client instance. Override via app.dependency_overrides in tests."""
+    if settings.mock_llm_enabled:
+        return DebugMockLLMClient()
     return LLMClient()
 
 
@@ -93,6 +101,8 @@ async def create_task(
         return await task_service.create_task(session, task_in, llm_client, owner_id=user_id)
     except TaskValidationError as e:
         raise HTTPException(status_code=422, detail=e.issues)
+    except LLMUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"LLM service unavailable: {e}")
 
 
 @router.get("/{task_id}", response_model=TaskDetailRead)

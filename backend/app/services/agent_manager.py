@@ -145,9 +145,8 @@ def _normalize_preset_allowlist(
     candidates: list[str],
     available: set[str],
 ) -> list[str]:
-    if not available:
-        return list(candidates)
-    return [name for name in candidates if name in available]
+    # Keep preset defaults stable even when runtime skill/tool discovery is incomplete.
+    return list(candidates)
 
 
 def _get_available_skill_names() -> set[str]:

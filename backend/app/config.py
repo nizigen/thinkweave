@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     admin_user_ids: str = ""
     task_create_rate_limit_per_minute: int = 100
     disable_rate_limit: bool = False
+    mock_llm_enabled: bool = False
 
     @field_validator("debug", mode="before")
     @classmethod
@@ -76,3 +77,51 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def resolve_model_choice(
+    model: str | None,
+    custom_model: str | None,
+    default_model: str,
+) -> str:
+    """Resolve the stored model name from optional predefined/custom inputs."""
+    custom = str(custom_model or "").strip()
+    if custom:
+        return custom
+    selected = str(model or "").strip()
+    if selected:
+        return selected
+    fallback = str(default_model or "").strip()
+    return fallback or settings.default_model
+
+
+def available_model_options(extra_models: list[str] | None = None) -> list[dict[str, str]]:
+    """Return selectable model options for the agent management UI."""
+    known_models = [
+        settings.default_model,
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-5.2",
+        "deepseek-v3.2",
+        "deepseek-chat",
+    ]
+    if extra_models:
+        known_models.extend(extra_models)
+
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw_name in known_models:
+        name = str(raw_name or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        provider = "deepseek" if name.startswith("deepseek") else "openai"
+        options.append(
+            {
+                "value": name,
+                "label": name,
+                "description": "",
+                "provider": provider,
+            }
+        )
+    return options

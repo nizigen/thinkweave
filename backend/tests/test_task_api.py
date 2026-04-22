@@ -195,6 +195,46 @@ class TestCreateTask:
             assert len(wn["depends_on"]) > 0
 
 
+class TestCreateTaskWithRuntimeLlmSelection:
+    async def test_create_task_uses_debug_mock_llm_when_enabled(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        app.dependency_overrides.pop(get_llm_client, None)
+        get_llm_client.cache_clear()
+        monkeypatch.setattr(settings, "mock_llm_enabled", True)
+        monkeypatch.setattr(settings, "openai_api_key", "sk-xxx")
+        monkeypatch.setattr(settings, "deepseek_api_key", "sk-xxx")
+
+        resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["status"] == "pending"
+        assert len(data["nodes"]) == 3
+
+        get_llm_client.cache_clear()
+
+    async def test_create_task_returns_503_when_llm_unavailable_without_mock_mode(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        app.dependency_overrides.pop(get_llm_client, None)
+        get_llm_client.cache_clear()
+        monkeypatch.setattr(settings, "mock_llm_enabled", False)
+        monkeypatch.setattr(settings, "openai_api_key", "sk-xxx")
+        monkeypatch.setattr(settings, "deepseek_api_key", "sk-xxx")
+
+        resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
+
+        assert resp.status_code == 503
+        assert "LLM service unavailable" in resp.json()["detail"]
+
+        get_llm_client.cache_clear()
+
+
 class TestGetTask:
     @pytest.fixture(autouse=True)
     def _override_llm(self, mock_llm: MockLLMClient):

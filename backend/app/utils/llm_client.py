@@ -160,6 +160,7 @@ class LLMClient(BaseLLMClient):
     def __init__(self, tracker: Any = None) -> None:
         self._clients: dict[str, AsyncOpenAI] = {}
         self._tracker = tracker  # Optional TokenTracker
+        self._allow_build_clients = True
 
     @staticmethod
     def _is_placeholder_key(value: str) -> bool:
@@ -200,11 +201,15 @@ class LLMClient(BaseLLMClient):
         return settings.default_model
 
     def _get_client(self, provider: str) -> AsyncOpenAI:
-        client = self._clients.get(provider)
+        clients = getattr(self, "_clients", {})
+        client = clients.get(provider)
         if client is not None:
             return client
+        if not getattr(self, "_allow_build_clients", False):
+            raise LLMUnavailableError(f"Provider '{provider}' not configured")
         client = self._build_client(provider)
-        self._clients[provider] = client
+        clients[provider] = client
+        self._clients = clients
         return client
 
     # -- Usage logging ------------------------------------------------------
@@ -563,3 +568,93 @@ class LLMClient(BaseLLMClient):
             total_tokens=resp.usage.total_tokens,
         ).info("Embedding usage")
         return [item.embedding for item in resp.data]
+
+
+class DebugMockLLMClient(BaseLLMClient):
+    """Built-in mock LLM for debug/test runtime mode without external APIs."""
+
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.7,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
+    ) -> str:
+        if role == "outline":
+            return "# 大纲\n## 第1章 引言\n## 第2章 核心概念\n## 第3章 总结"
+        if role == "writer":
+            return "这是一段模拟生成的章节内容，用于测试。" * 5
+        if role == "reviewer":
+            return "审查通过，评分85分。"
+        if role == "consistency":
+            return "一致性检查通过，无问题。"
+        return "mock response"
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float = 0.7,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
+    ) -> AsyncIterator[str]:
+        for chunk in ("这是", "一段", "流式", "输出", "测试。"):
+            yield chunk
+
+    async def chat_json(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        schema: type | None = None,
+        max_tokens: int | None = None,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
+    ) -> dict:
+        if role == "orchestrator":
+            return {
+                "nodes": [
+                    {"id": "n1", "title": "大纲生成", "role": "outline", "depends_on": []},
+                    {"id": "n2", "title": "第1章撰写", "role": "writer", "depends_on": ["n1"]},
+                    {"id": "n3", "title": "第2章撰写", "role": "writer", "depends_on": ["n1"]},
+                ]
+            }
+        if role == "reviewer":
+            return {
+                "score": 85,
+                "accuracy_score": 90,
+                "coherence_score": 80,
+                "style_score": 85,
+                "feedback": "内容结构清晰，论述完整。",
+                "pass": True,
+            }
+        return {"result": "mock"}
+
+    async def chat_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        role: str | None = None,
+        max_tokens: int | None = None,
+        max_retries: int | None = None,
+        fallback_models: list[str] | None = None,
+    ) -> dict:
+        return {"type": "text", "content": "mock tool response"}
+
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+    ) -> list[list[float]]:
+        return [[0.1] * settings.embedding_dimensions for _ in texts]
