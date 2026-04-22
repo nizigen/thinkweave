@@ -85,3 +85,4 @@ async def test_create_task_uses_pre_review_integrity_for_draft_entry(
     )
     assert task_row.checkpoint_data["entry_stage"] == "pre_review_integrity"
     assert task_row.checkpoint_data["entry_inputs"]["has_draft_text"] is True
+    assert task_row.checkpoint_data["routing_snapshot"]["required_roles"] == ["outline"]

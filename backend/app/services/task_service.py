@@ -9,9 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
+from app.models.agent import Agent
 from app.models.task import Task
 from app.models.task_node import TaskNode
-from app.schemas.task import TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
+from app.schemas.task import DAGSchema, TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
 from app.services.checkpoint_control import normalize_checkpoint_data
 from app.services.entry_stage import build_entry_metadata
 from app.services.task_decomposer import decompose_task
@@ -43,6 +44,60 @@ def _apply_monitor_recovery_event(
         return
     checkpoint["control"] = control
     task.checkpoint_data = checkpoint
+
+
+async def _build_routing_snapshot(
+    session: AsyncSession,
+    *,
+    dag: DAGSchema,
+) -> dict[str, Any] | None:
+    """Capture required/available roles for diagnostics and operator visibility."""
+    required_roles = sorted(
+        {
+            str(node.role).strip()
+            for node in dag.nodes
+            if str(node.role).strip()
+        }
+    )
+    if not required_roles:
+        return None
+
+    # Unit-test fakes may not implement execute(); keep create_task lightweight there.
+    if not hasattr(session, "execute"):
+        return {
+            "required_roles": required_roles,
+            "available_roles": [],
+            "missing_roles": required_roles,
+        }
+
+    try:
+        result = await session.execute(
+            select(Agent.role)
+            .where(Agent.status.in_(("idle", "busy")))
+            .distinct()
+        )
+        available_roles = sorted(
+            {
+                str(role).strip()
+                for role in result.scalars().all()
+                if str(role).strip()
+            }
+        )
+    except Exception:
+        logger.opt(exception=True).warning("failed to build routing snapshot")
+        return {
+            "required_roles": required_roles,
+            "available_roles": [],
+            "missing_roles": required_roles,
+        }
+
+    available_set = set(available_roles)
+    missing_roles = sorted(role for role in required_roles if role not in available_set)
+    return {
+        "required_roles": required_roles,
+        "available_roles": available_roles,
+        "missing_roles": missing_roles,
+    }
 
 
 async def create_task(
@@ -88,6 +143,20 @@ async def create_task(
         target_words=task_in.target_words,
         llm_client=llm_client,
     )
+    routing_snapshot = await _build_routing_snapshot(session, dag=dag)
+    if routing_snapshot is not None:
+        checkpoint = (
+            dict(task.checkpoint_data)
+            if isinstance(task.checkpoint_data, dict)
+            else {}
+        )
+        checkpoint["routing_snapshot"] = routing_snapshot
+        task.checkpoint_data = checkpoint
+        if routing_snapshot.get("missing_roles"):
+            logger.bind(task_id=str(task.id)).warning(
+                "task created with missing agent roles: {}",
+                routing_snapshot["missing_roles"],
+            )
 
     # Map DAG string IDs to database UUID primary keys.
     id_map: dict[str, uuid.UUID] = {}
