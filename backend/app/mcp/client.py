@@ -29,6 +29,9 @@ class MCPClientManager:
 
     async def start(self) -> None:
         """Load config and connect all servers."""
+        if self._connected:
+            await self.stop()
+        self.registry = MCPToolRegistry()
         self._configs = load_mcp_config(self._config_path)
 
         for name, config in self._configs.items():

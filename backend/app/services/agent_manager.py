@@ -143,7 +143,6 @@ _AUTO_APPLY_PRESET_ROLES = frozenset({"outline", "writer", "reviewer", "consiste
 
 def _normalize_preset_allowlist(
     candidates: list[str],
-    available: set[str],
 ) -> list[str]:
     # Keep preset defaults stable even when runtime skill/tool discovery is incomplete.
     return list(candidates)
@@ -162,14 +161,6 @@ def _get_available_tool_names() -> set[str]:
     return {tool.name for tool in client.registry.list_tools()}
 
 
-def _resolve_role_preset(role: str) -> dict[str, object] | None:
-    return _resolve_role_preset_with_available(
-        role=role,
-        available_skills=_get_available_skill_names(),
-        available_tools=_get_available_tool_names(),
-    )
-
-
 def _resolve_role_preset_with_available(
     *,
     role: str,
@@ -184,11 +175,9 @@ def _resolve_role_preset_with_available(
 
     skill_allowlist = _normalize_preset_allowlist(
         list(preset.get("skill_allowlist", [])),
-        available_skills,
     )
     tool_allowlist = _normalize_preset_allowlist(
         list(preset.get("tool_allowlist", [])),
-        available_tools,
     )
     max_iterations = int(preset.get("max_tool_iterations", 1))
 
