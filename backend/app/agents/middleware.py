@@ -329,9 +329,9 @@ class MemoryMiddleware(AgentMiddleware):
                 if not task_id:
                     return result
                 session = self._get_session(task_id)
-                enabled = await session.initialize()
-                if not enabled:
-                    return result
+            enabled = await session.initialize()
+            if not enabled:
+                return result
 
             metadata = self._build_store_metadata(agent, ctx, result)
             await session.store(result, metadata=metadata)

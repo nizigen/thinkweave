@@ -22,6 +22,9 @@ class _SimpleAgent(BaseAgent):
 
 
 class _StubSessionDisabled:
+    def __init__(self):
+        self.store_calls = 0
+
     async def initialize(self):
         return False
 
@@ -29,6 +32,7 @@ class _StubSessionDisabled:
         return []
 
     async def store(self, content: str, metadata=None):
+        self.store_calls += 1
         return None
 
     async def store_territory_map(self, content: str):
@@ -59,7 +63,8 @@ class _StubSessionEnabled:
 
 @pytest.mark.asyncio
 async def test_memory_middleware_disabled_mode_sets_empty_memory_context():
-    mw = MemoryMiddleware(session_factory=lambda _tid: _StubSessionDisabled())
+    stub = _StubSessionDisabled()
+    mw = MemoryMiddleware(session_factory=lambda _tid: stub)
     agent = _SimpleAgent(
         agent_id=uuid.uuid4(),
         name="test",
@@ -71,6 +76,10 @@ async def test_memory_middleware_disabled_mode_sets_empty_memory_context():
     ctx = {"task_id": "t1", "title": "chapter one"}
     result = await mw.before_task(agent, ctx)
     assert result["memory_context"] == ""
+
+    after = await mw.after_task(agent, result, "ignored result")
+    assert after == "ignored result"
+    assert stub.store_calls == 0
 
 
 @pytest.mark.asyncio
