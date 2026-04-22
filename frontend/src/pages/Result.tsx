@@ -18,8 +18,6 @@ import {
   TeamOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { Components } from 'react-markdown';
 import { getTask } from '../api/tasks';
 import type { Task } from '../stores/taskStore';
@@ -111,9 +109,20 @@ function MarkdownRenderer({ content }: { content: string }) {
       const match = /language-(\w+)/.exec(className ?? '');
       if (match) {
         return (
-          <SyntaxHighlighter style={vscDarkPlus} language={match[1]} PreTag="div" customStyle={{ borderRadius: 8, fontSize: 13, margin: '12px 0', border: '1px solid #2A2A3E' }}>
-            {String(children).replace(/\n$/, '')}
-          </SyntaxHighlighter>
+          <pre
+            style={{
+              background: '#0D0D14',
+              color: '#CBD5E1',
+              borderRadius: 8,
+              fontSize: 13,
+              margin: '12px 0',
+              border: '1px solid #2A2A3E',
+              padding: '12px 14px',
+              overflowX: 'auto',
+            }}
+          >
+            <code className={className}>{String(children).replace(/\n$/, '')}</code>
+          </pre>
         );
       }
       return <code style={{ background: '#1A1A26', color: '#A5B4FC', padding: '2px 6px', borderRadius: 4, fontSize: '0.875em', fontFamily: "'JetBrains Mono', monospace" }} {...props}>{children}</code>;
