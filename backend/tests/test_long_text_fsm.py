@@ -599,6 +599,25 @@ class TestResume:
         assert fsm.consistency_retry_count == 1
 
     @pytest.mark.asyncio
+    async def test_resume_restores_checkpoint_policy(self, db_session):
+        task = await _create_task(
+            db_session,
+            fsm_state="consistency",
+            status="running",
+            checkpoint_data={
+                "fsm_state": "consistency",
+                "checkpoint_policy": "mandatory",
+                "completed_chapters": [0],
+                "review_retry_count": {"0": 1},
+                "consistency_retry_count": 1,
+            },
+        )
+
+        fsm = await LongTextFSM.resume(task_id=task.id, session=db_session)
+        cp = fsm.get_checkpoint_data()
+        assert cp["checkpoint_policy"] == "mandatory"
+
+    @pytest.mark.asyncio
     async def test_resume_without_checkpoint_data(self, db_session):
         """Resume a task that has no checkpoint and use fsm_state from the DB."""
         task = await _create_task(

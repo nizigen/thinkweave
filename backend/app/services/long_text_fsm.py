@@ -322,9 +322,22 @@ class LongTextFSM:
             raise ValueError(f"Task {task_id} not found")
 
         state = LongTextState(task.fsm_state)
-        fsm = cls(task_id=task_id, state=state)
-
         cp = task.checkpoint_data if isinstance(task.checkpoint_data, dict) else {}
+        checkpoint_policy = CheckpointPolicy.FULL
+        if cp:
+            try:
+                checkpoint_policy = CheckpointPolicy(
+                    str(cp.get("checkpoint_policy", CheckpointPolicy.FULL.value))
+                )
+            except ValueError:
+                checkpoint_policy = CheckpointPolicy.FULL
+
+        fsm = cls(
+            task_id=task_id,
+            state=state,
+            checkpoint_policy=checkpoint_policy,
+        )
+
         if cp:
             completed = cp.get("completed_chapters", [])
             if isinstance(completed, list):
