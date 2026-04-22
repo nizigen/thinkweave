@@ -12,27 +12,11 @@ from app.database import async_session_factory
 from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.schemas.task import TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
+from app.services.checkpoint_control import normalize_checkpoint_data
 from app.services.entry_stage import build_entry_metadata
 from app.services.task_decomposer import decompose_task
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
-
-
-def normalize_checkpoint_data(checkpoint_data: dict[str, Any] | None) -> dict[str, Any]:
-    checkpoint = dict(checkpoint_data) if isinstance(checkpoint_data, dict) else {}
-    control = checkpoint.get("control")
-    control_dict = dict(control) if isinstance(control, dict) else {}
-    control_dict.setdefault("status", "active")
-    preview_cache = control_dict.get("preview_cache")
-    control_dict["preview_cache"] = (
-        dict(preview_cache) if isinstance(preview_cache, dict) else {}
-    )
-    review_scores = control_dict.get("review_scores")
-    control_dict["review_scores"] = (
-        dict(review_scores) if isinstance(review_scores, dict) else {}
-    )
-    checkpoint["control"] = control_dict
-    return checkpoint
 
 
 def _apply_monitor_recovery_event(
@@ -42,7 +26,10 @@ def _apply_monitor_recovery_event(
     event_type: str,
     payload: dict[str, Any],
 ) -> None:
-    checkpoint = normalize_checkpoint_data(task.checkpoint_data)
+    checkpoint = normalize_checkpoint_data(
+        task.checkpoint_data,
+        ensure_control_maps=True,
+    )
     control = checkpoint["control"]
     if event_type == "chapter_preview":
         preview_cache = dict(control["preview_cache"])
@@ -159,7 +146,10 @@ async def create_task(
         target_words=task.target_words,
         created_at=task.created_at,
         finished_at=task.finished_at,
-        checkpoint_data=normalize_checkpoint_data(task.checkpoint_data),
+        checkpoint_data=normalize_checkpoint_data(
+            task.checkpoint_data,
+            ensure_control_maps=True,
+        ),
         nodes=node_reads,
     )
 
@@ -189,7 +179,10 @@ async def get_task_detail(
         TaskNodeRead.model_validate(n) for n in nodes
     ]
     task_read = TaskDetailRead.model_validate(task)
-    task_read.checkpoint_data = normalize_checkpoint_data(task.checkpoint_data)
+    task_read.checkpoint_data = normalize_checkpoint_data(
+        task.checkpoint_data,
+        ensure_control_maps=True,
+    )
     task_read.nodes = node_reads
     return task_read
 

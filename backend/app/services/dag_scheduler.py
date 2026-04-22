@@ -24,6 +24,7 @@ from app.database import async_session_factory
 from app.models.agent import Agent
 from app.models.task import Task
 from app.models.task_node import TaskNode
+from app.services.checkpoint_control import normalize_checkpoint_data
 from app.services import communicator
 from app.services.redis_streams import (
     add_timeout_watch,
@@ -384,20 +385,15 @@ class DAGScheduler:
 
     @staticmethod
     def _read_control_status(task: Task) -> str:
-        checkpoint_data = getattr(task, "checkpoint_data", None)
-        if not isinstance(checkpoint_data, dict):
-            return CONTROL_ACTIVE
-        control = checkpoint_data.get("control")
-        if not isinstance(control, dict):
-            return CONTROL_ACTIVE
+        control = normalize_checkpoint_data(
+            getattr(task, "checkpoint_data", None),
+        )["control"]
         return str(control.get("status") or CONTROL_ACTIVE)
 
     @staticmethod
     def _write_control_status(task: Task, status: str) -> None:
-        checkpoint_data = getattr(task, "checkpoint_data", None)
-        checkpoint = dict(checkpoint_data) if isinstance(checkpoint_data, dict) else {}
-        control = checkpoint.get("control")
-        control_dict = dict(control) if isinstance(control, dict) else {}
+        checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+        control_dict = checkpoint["control"]
         control_dict["status"] = status
         checkpoint["control"] = control_dict
         task.checkpoint_data = checkpoint

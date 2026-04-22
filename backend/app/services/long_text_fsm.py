@@ -277,6 +277,22 @@ class LongTextFSM:
             "consistency_retry_count": self._consistency_retry_count,
         }
 
+    @staticmethod
+    def _natural_title_key(title: str) -> list[Any]:
+        """Natural sort key so 'Chapter 10' appears after 'Chapter 9'."""
+        return [
+            int(token) if token.isdigit() else token.lower()
+            for token in re.split(r"(\d+)", title or "")
+        ]
+
+    @staticmethod
+    def _count_words(text: str) -> int:
+        if not text:
+            return 0
+        han_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+        latin_count = len(re.findall(r"[a-zA-Z]+", text))
+        return han_count + latin_count
+
     async def checkpoint(
         self,
         *,
@@ -308,7 +324,7 @@ class LongTextFSM:
         state = LongTextState(task.fsm_state)
         fsm = cls(task_id=task_id, state=state)
 
-        cp = task.checkpoint_data
+        cp = task.checkpoint_data if isinstance(task.checkpoint_data, dict) else {}
         if cp:
             fsm._completed_chapters = set(cp.get("completed_chapters", []))
             fsm._review_retry_counts = {
@@ -379,10 +395,7 @@ class LongTextFSM:
             update(Task)
             .where(Task.id == self.task_id)
             .values(
-                checkpoint_data={
-                    **self.get_checkpoint_data(),
-                    "session_memory_namespace": memory.namespace,
-                }
+                checkpoint_data=self.get_checkpoint_data()
             )
         )
         await session.execute(stmt)
@@ -417,14 +430,11 @@ class LongTextFSM:
             .where(TaskNode.result.is_not(None))
         )
         nodes = list(result.scalars().all())
-        # Natural sort: split numeric tokens so "Chapter 10" sorts after "Chapter 9".
-        def _natural_key(n: Any) -> list[Any]:
-            return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", n.title or "")]
-        nodes.sort(key=_natural_key)
+        nodes.sort(key=lambda node: self._natural_title_key(node.title or ""))
 
         parts = [node.result for node in nodes if node.result]
         output_text = "\n\n".join(parts)
-        word_count = len(re.findall(r'[\u4e00-\u9fff]', output_text)) + len(re.findall(r'[a-zA-Z]+', output_text)) if output_text else 0
+        word_count = self._count_words(output_text)
 
         await session.execute(
             update(Task)
@@ -481,6 +491,5 @@ async def scan_and_resume_running_tasks(
             )
 
     return fsms
-
 
 

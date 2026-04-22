@@ -13,6 +13,7 @@ from app.models.agent import Agent
 from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.schemas.task import TaskDetailRead
+from app.services.checkpoint_control import ensure_task_control
 from app.services import communicator, task_service
 from app.services.dag_scheduler import get_scheduler
 from app.services.redis_streams import remove_timeout_watch, timeout_watch_member
@@ -32,15 +33,7 @@ class TaskControlNotFoundError(Exception):
 
 
 def _ensure_checkpoint_and_control(task: Any) -> dict[str, Any]:
-    raw_checkpoint = getattr(task, "checkpoint_data", None)
-    checkpoint = dict(raw_checkpoint) if isinstance(raw_checkpoint, dict) else {}
-    raw_control = checkpoint.get("control")
-    control = dict(raw_control) if isinstance(raw_control, dict) else {}
-    if not control.get("status"):
-        control["status"] = "active"
-    checkpoint["control"] = control
-    task.checkpoint_data = checkpoint
-    return control
+    return ensure_task_control(task)
 
 
 def _merge_control_update(

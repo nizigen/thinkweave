@@ -278,6 +278,22 @@ class MemoryMiddleware(AgentMiddleware):
         metadata["summary"] = result[:500]
         return metadata
 
+    def _inject_kg_context(
+        self,
+        *,
+        agent: BaseAgent,
+        ctx: dict[str, Any],
+        target: dict[str, Any],
+    ) -> None:
+        if self._knowledge_graph is None or agent.role not in {"outline", "writer"}:
+            return
+
+        try:
+            kg_rows = self._knowledge_graph.query(self._build_query(agent, ctx))
+            target["kg_context"] = "\n".join(e.content for e in kg_rows if e.content)
+        except Exception:
+            target["kg_context"] = ""
+
     async def before_task(self, agent: BaseAgent, ctx: dict[str, Any]) -> dict[str, Any]:
         task_id = str(ctx.get("task_id", "")).strip()
         if not task_id:
@@ -288,12 +304,7 @@ class MemoryMiddleware(AgentMiddleware):
             enabled = await session.initialize()
             if not enabled:
                 base = {**ctx, "_memory_session": session, "memory_context": ""}
-                if self._knowledge_graph is not None and agent.role in {"outline", "writer"}:
-                    try:
-                        kg_rows = self._knowledge_graph.query(self._build_query(agent, ctx))
-                        base["kg_context"] = "\n".join(e.content for e in kg_rows if e.content)
-                    except Exception:
-                        base["kg_context"] = ""
+                self._inject_kg_context(agent=agent, ctx=ctx, target=base)
                 return base
 
             rows = await session.query(self._build_query(agent, ctx), limit=5)
@@ -302,14 +313,7 @@ class MemoryMiddleware(AgentMiddleware):
                 "_memory_session": session,
                 "memory_context": self._format_rows(rows),
             }
-            if self._knowledge_graph is not None and agent.role in {"outline", "writer"}:
-                try:
-                    kg_rows = self._knowledge_graph.query(self._build_query(agent, ctx))
-                    result_ctx["kg_context"] = "\n".join(
-                        e.content for e in kg_rows if e.content
-                    )
-                except Exception:
-                    result_ctx["kg_context"] = ""
+            self._inject_kg_context(agent=agent, ctx=ctx, target=result_ctx)
             return result_ctx
         except Exception:
             logger.opt(exception=True).warning(
