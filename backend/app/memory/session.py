@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.memory.adapter import MemoryAdapter
 from app.memory.config import get_memory_config
+from app.utils.logger import logger
 
 if TYPE_CHECKING:
     from app.memory.knowledge.graph import KnowledgeGraph
@@ -33,14 +34,17 @@ class SessionMemory:
         self._initialized = True
         return self.adapter.enabled
 
+    async def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            await self.initialize()
+
     async def store(
         self,
         content: str,
         *,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if not self._initialized:
-            await self.initialize()
+        await self._ensure_initialized()
         await self.adapter.add(
             content,
             namespace=self.namespace,
@@ -54,8 +58,7 @@ class SessionMemory:
         *,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        if not self._initialized:
-            await self.initialize()
+        await self._ensure_initialized()
         return await self.adapter.search(
             query,
             namespace=self.namespace,
@@ -63,8 +66,7 @@ class SessionMemory:
         )
 
     async def store_territory_map(self, content: str) -> dict[str, Any]:
-        if not self._initialized:
-            await self.initialize()
+        await self._ensure_initialized()
         return await self.adapter.cognify(content, namespace=self.namespace)
 
     async def cleanup(
@@ -91,7 +93,11 @@ class SessionMemory:
                 entries = [
                     {
                         "key": str(
-                            r.get("metadata", {}).get("node_id")
+                            (
+                                r.get("metadata", {})
+                                if isinstance(r.get("metadata"), dict)
+                                else {}
+                            ).get("node_id")
                             or r.get("id")
                             # stable hash of content as fallback — dedup-safe across runs
                             or hashlib.sha1(
@@ -99,14 +105,19 @@ class SessionMemory:
                             ).hexdigest()[:12]
                         ),
                         "content": str(r.get("content") or ""),
-                        "credibility": float(r.get("metadata", {}).get("credibility", 0.75)),
+                        "credibility": float(
+                            (
+                                r.get("metadata", {})
+                                if isinstance(r.get("metadata"), dict)
+                                else {}
+                            ).get("credibility", 0.75)
+                        ),
                         "source_task_id": self.task_id,
                     }
                     for r in rows
                 ]
                 promotion_count = await promote_session(entries, kg)
             except Exception:
-                from app.utils.logger import logger
                 logger.opt(exception=True).warning("KG promotion failed during session cleanup")
 
         result = {
