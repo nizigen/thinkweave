@@ -326,13 +326,28 @@ class LongTextFSM:
 
         cp = task.checkpoint_data if isinstance(task.checkpoint_data, dict) else {}
         if cp:
-            fsm._completed_chapters = set(cp.get("completed_chapters", []))
-            fsm._review_retry_counts = {
-                int(k): v
-                for k, v in cp.get("review_retry_count", {}).items()
-            }
-            fsm._consistency_retry_count = cp.get("consistency_retry_count", 0)
-            fsm.session_memory_namespace = cp.get("session_memory_namespace", "")
+            completed = cp.get("completed_chapters", [])
+            if isinstance(completed, list):
+                normalized_completed: set[int] = set()
+                for item in completed:
+                    try:
+                        normalized_completed.add(int(item))
+                    except (TypeError, ValueError):
+                        continue
+                fsm._completed_chapters = normalized_completed
+
+            retry_count = cp.get("review_retry_count", {})
+            if isinstance(retry_count, dict):
+                fsm._review_retry_counts = {
+                    int(k): int(v)
+                    for k, v in retry_count.items()
+                }
+
+            try:
+                fsm._consistency_retry_count = int(cp.get("consistency_retry_count", 0))
+            except (TypeError, ValueError):
+                fsm._consistency_retry_count = 0
+            fsm.session_memory_namespace = str(cp.get("session_memory_namespace", "") or "")
 
         log = logger.bind(task_id=str(task_id))
         log.info("FSM resumed at state={}", state.value)
@@ -391,18 +406,7 @@ class LongTextFSM:
         await memory.initialize()
         self.session_memory_namespace = memory.namespace
 
-        stmt = (
-            update(Task)
-            .where(Task.id == self.task_id)
-            .values(
-                checkpoint_data=self.get_checkpoint_data()
-            )
-        )
-        await session.execute(stmt)
-        if commit:
-            await session.commit()
-        else:
-            await session.flush()
+        await self._persist_and_checkpoint(session, commit=commit)
 
         logger.bind(task_id=str(self.task_id)).info(
             "Session memory initialized: namespace={}", memory.namespace
@@ -491,5 +495,3 @@ async def scan_and_resume_running_tasks(
             )
 
     return fsms
-
-
