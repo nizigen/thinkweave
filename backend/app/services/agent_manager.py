@@ -148,25 +148,7 @@ def _normalize_preset_allowlist(
     return list(candidates)
 
 
-def _get_available_skill_names() -> set[str]:
-    loader = SkillLoader()
-    loader.load_all()
-    return set(loader.skills.keys())
-
-
-def _get_available_tool_names() -> set[str]:
-    client = get_runtime_mcp_client()
-    if client is None:
-        return set()
-    return {tool.name for tool in client.registry.list_tools()}
-
-
-def _resolve_role_preset_with_available(
-    *,
-    role: str,
-    available_skills: set[str],
-    available_tools: set[str],
-) -> dict[str, object] | None:
+def _resolve_role_preset(role: str) -> dict[str, object] | None:
     raw = _ROLE_PRESET_CATALOG.get(role)
     if raw is None:
         return None
@@ -195,11 +177,7 @@ def _resolve_role_preset_with_available(
 def _build_default_agent_config(role: str) -> dict[str, object] | None:
     if role not in _AUTO_APPLY_PRESET_ROLES:
         return None
-    preset = _resolve_role_preset_with_available(
-        role=role,
-        available_skills=_get_available_skill_names(),
-        available_tools=_get_available_tool_names(),
-    )
+    preset = _resolve_role_preset(role)
     if preset is None:
         return None
     config = preset.get("agent_config")
@@ -282,15 +260,9 @@ def list_agent_model_options() -> list[dict[str, str]]:
 
 
 def list_agent_role_presets() -> list[dict[str, object]]:
-    available_skills = _get_available_skill_names()
-    available_tools = _get_available_tool_names()
     presets: list[dict[str, object]] = []
     for role in _ROLE_PRESET_ORDER:
-        preset = _resolve_role_preset_with_available(
-            role=role,
-            available_skills=available_skills,
-            available_tools=available_tools,
-        )
+        preset = _resolve_role_preset(role)
         if preset is None:
             continue
         presets.append(
