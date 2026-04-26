@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import uuid as _uuid
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from app.utils.logger import logger
 router = APIRouter(tags=["websocket"])
 
 MAX_WS_MESSAGE_SIZE = 1024  # 1 KB — pong messages are tiny
+MONITOR_CONTRACT_VERSION = "stage-observability-v1"
 
 
 async def get_task_exists(task_id: str, session: AsyncSession) -> Task | None:
@@ -85,11 +87,21 @@ def _resolve_ws_token(websocket: WebSocket, query_token: str) -> tuple[str, str 
     return "", None
 
 
-def _is_allowed_ws_origin(origin: str) -> bool:
+def _is_allowed_ws_origin(origin: str, host: str) -> bool:
     if not origin:
         return True
     allowed_origins = settings.cors_origins
-    return "*" in allowed_origins or origin in allowed_origins
+    if "*" in allowed_origins or origin in allowed_origins:
+        return True
+
+    # Allow same-origin WS handshakes so local direct mode and tunnels work
+    # without requiring dynamic domains in static CORS allow-lists.
+    try:
+        origin_host = urlparse(origin).netloc.strip().lower()
+    except Exception:
+        origin_host = ""
+    request_host = (host or "").strip().lower()
+    return bool(origin_host and request_host and origin_host == request_host)
 
 
 async def get_task_event_cursor(task_id: str) -> str:
@@ -111,7 +123,8 @@ async def websocket_task(
 
     # --- Origin validation (CSWSH protection) ---
     origin = websocket.headers.get("origin", "")
-    if not _is_allowed_ws_origin(origin):
+    host = websocket.headers.get("host", "")
+    if not _is_allowed_ws_origin(origin, host):
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -171,7 +184,17 @@ async def websocket_task(
 
         log = logger.bind(task_id=task_id, user_id=user_id)
         log.info("WS client connected")
-        await websocket.send_text(json.dumps(ConnectedEvent(task_id=task_id).model_dump()))
+        await websocket.send_text(
+            json.dumps(
+                ConnectedEvent(
+                    task_id=task_id,
+                    payload={
+                        "monitor_contract_version": MONITOR_CONTRACT_VERSION,
+                        "start_from_id": start_from_id,
+                    },
+                ).model_dump()
+            )
+        )
         ws_manager.activate(task_id, websocket)
         await event_bridge.ensure_started(task_id, start_from_id=start_from_id)
         heartbeat_task = asyncio.create_task(

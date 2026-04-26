@@ -1,7 +1,7 @@
 """Task Pydantic Schema"""
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 VALID_MODES = {"report", "novel", "custom"}
 VALID_DEPTHS = {"quick", "standard", "deep"}
-VALID_AGENT_ROLES = {"outline", "writer", "reviewer", "consistency"}
+VALID_AGENT_ROLES = {"outline", "researcher", "writer", "reviewer", "consistency"}
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +52,7 @@ class TaskRead(BaseModel):
     word_count: int
     depth: str
     target_words: int
+    error_message: str | None = None
     created_at: datetime
     finished_at: datetime | None
 
@@ -65,10 +66,17 @@ class TaskNodeRead(BaseModel):
     agent_role: str | None
     assigned_agent: uuid.UUID | None
     status: str
-    depends_on: list[uuid.UUID] | None
+    depends_on: list[uuid.UUID] = Field(default_factory=list)
     retry_count: int
     started_at: datetime | None
     finished_at: datetime | None
+    required_capabilities: list[str] = Field(default_factory=list)
+    preferred_agents: list[str] = Field(default_factory=list)
+    routing_mode: Literal["auto", "capability_first", "strict_bind"] = "auto"
+    routing_reason: str | None = None
+    routing_status: str | None = None
+    stage_code: str = "QA"
+    stage_name: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -77,6 +85,9 @@ class TaskDetailRead(TaskRead):
     output_text: str | None = None
     checkpoint_data: dict[str, Any] = Field(default_factory=dict)
     nodes: list[TaskNodeRead] = Field(default_factory=list)
+    blocking_reason: str | None = None
+    node_status_summary: dict[str, int] = Field(default_factory=dict)
+    stage_progress: dict[str, int] = Field(default_factory=dict)
 
 
 class TaskControlSkipRequest(BaseModel):
@@ -96,17 +107,38 @@ class DAGNodeSchema(BaseModel):
     """单个DAG节点的schema — 用于校验LLM返回的JSON"""
     id: str = Field(..., min_length=1, max_length=50)
     title: str = Field(..., min_length=1, max_length=500)
-    role: str
+    role: str | None = None
     depends_on: list[str] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
+    preferred_agents: list[str] = Field(default_factory=list)
+    routing_mode: Literal["auto", "capability_first", "strict_bind"] = "auto"
 
     @field_validator("role")
     @classmethod
-    def validate_role(cls, v: str) -> str:
+    def validate_role(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         if v not in VALID_AGENT_ROLES:
             raise ValueError(
                 f"Invalid role '{v}', must be one of {VALID_AGENT_ROLES}"
             )
         return v
+
+    @field_validator("required_capabilities", "preferred_agents")
+    @classmethod
+    def normalize_string_list(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in v:
+            token = str(item or "").strip()
+            if not token:
+                continue
+            key = token.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(token)
+        return out
 
 
 class DAGSchema(BaseModel):

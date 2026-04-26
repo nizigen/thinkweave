@@ -128,6 +128,11 @@ class TestReportE2EFlow:
         detail = resp.json()
         assert "nodes" in detail
         assert len(detail["nodes"]) > 0
+        assert "node_status_summary" in detail
+        assert "stage_progress" in detail
+        first_node = detail["nodes"][0]
+        assert "stage_code" in first_node
+        assert "stage_name" in first_node
 
     async def test_report_task_visible_in_history(self, client: AsyncClient):
         """创建后任务出现在历史列表中"""
