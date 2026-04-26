@@ -19,6 +19,7 @@ from app.config import settings
 from app.database import get_session
 from app.main import app
 from app.security.rate_limit import enforce_task_create_rate_limit
+from app.services.dag_scheduler import stop_all_schedulers
 from app.utils.llm_client import BaseLLMClient
 
 
@@ -174,6 +175,12 @@ async def db_session():
         await session.rollback()
 
     await test_engine.dispose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _cleanup_scheduler_tasks():
+    yield
+    await stop_all_schedulers()
 
 
 @pytest_asyncio.fixture
