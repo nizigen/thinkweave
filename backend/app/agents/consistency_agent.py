@@ -16,12 +16,21 @@ class ConsistencyAgent(WorkerAgent):
         super().__init__(**kwargs)
 
     async def handle_task(self, ctx: dict[str, Any]) -> str:
+        incoming_role = str(ctx.get("agent_role") or "consistency").strip().lower()
+        if incoming_role != "consistency":
+            return await super().handle_task(ctx)
         payload = dict(ctx.get("payload", {}))
         normalized_payload = {
+            "depth": payload.get("depth", ""),
+            "target_words": payload.get("target_words", ""),
             "chapters_summary": payload.get("chapters_summary", ""),
-            "full_text": payload.get("full_text", ""),
+            "full_text": payload.get("full_text", payload.get("full_draft", "")),
             "topic_claims": payload.get("topic_claims", []),
             "chapter_metadata": payload.get("chapter_metadata", []),
+            "source_policy": payload.get("source_policy", ""),
+            "research_keywords": payload.get("research_keywords", ""),
+            "evidence_pool_summary": payload.get("evidence_pool_summary", ""),
+            "evidence_pool_markdown": payload.get("evidence_pool_markdown", ""),
         }
 
         return await super().handle_task(

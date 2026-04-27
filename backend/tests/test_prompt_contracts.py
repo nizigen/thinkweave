@@ -24,6 +24,7 @@ def test_consistency_check_claims_prompt_contract():
             "verified|weak|unverifiable",
             '"claims": [',
             '"status": "verified|weak|unverifiable"',
+            "默认正文语言为简体中文",
         ],
     )
 
@@ -40,10 +41,15 @@ def test_reviewer_prompt_contract():
         overlap_findings="none",
         topic_claims="",
         assigned_evidence="",
+        source_policy="",
+        research_protocol="",
+        research_keywords="",
+        evidence_pool_summary="",
+        evidence_pool_markdown="",
     )
     _assert_contains_all(
         content,
-        ['"must_fix": [', '"strongest_counterargument":', "pass=true only when score >= 70"],
+        ['"must_fix": [', '"strongest_counterargument":', "score >= 70"],
     )
 
 
@@ -62,5 +68,5 @@ def test_revise_prompt_contract():
     )
     _assert_contains_all(
         content,
-        ['### Revision Closure Table', '"issue":', '"action":', '"evidence":', '"status": "fixed|partial|not_fixed"'],
+        ["## Revision Closure Table", '"issue":', '"action":', '"evidence":', '"status": "fixed|partial|not_fixed"'],
     )

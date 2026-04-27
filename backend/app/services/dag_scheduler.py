@@ -27,7 +27,14 @@ from app.models.agent import Agent
 from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.services.checkpoint_control import normalize_checkpoint_data
-from app.services.writer_output import extract_writer_markdown, is_valid_writer_output_text
+from app.services.evidence_pool import (
+    evidence_pool_file_path,
+    evidence_pool_markdown,
+    evidence_pool_seeds,
+    normalize_evidence_ledger,
+)
+from app.services.node_schema import has_valid_schema_for_role
+from app.services.writer_output import extract_writer_markdown
 from app.services.stage_contracts import (
     SCHEMA_VERSION,
     get_stage_contract,
@@ -55,10 +62,12 @@ from app.utils.logger import logger
 # ---------------------------------------------------------------------------
 
 MAX_RETRIES = 3
-MIN_TARGET_WORD_RATIO = 0.9
+# Strict length gate: output must reach target_words (KonrunsGPT-style hard gate).
+MIN_TARGET_WORD_RATIO = 1.0
 AUTO_EXPANSION_MAX_WAVES = 3
 MAX_CONSISTENCY_REPAIR_WAVES = 2
 QUICK_REPAIR_TARGET_WORDS_MAX = 2000
+DEFAULT_NODE_WORD_FLOOR = 300
 
 # 节点状态常量
 STATUS_PENDING = "pending"
@@ -237,13 +246,38 @@ def _normalize_repair_targets(raw: Any) -> list[int]:
     return out
 
 
+def _normalize_repair_priority(raw: Any) -> list[int]:
+    out: list[int] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                candidate = item.get("chapter_index")
+            else:
+                candidate = item
+            try:
+                value = int(candidate)
+            except Exception:
+                continue
+            if value <= 0 or value in out:
+                continue
+            out.append(value)
+    return out
+
+
 def _looks_like_review_or_consistency_json(text: str) -> bool:
     parsed = _parse_json_object(text)
     if not parsed:
         return False
     keys = {str(k).lower() for k in parsed.keys()}
     review_markers = {"score", "must_fix", "strongest_counterargument", "non_overlap_score"}
-    consistency_markers = {"style_conflicts", "claim_conflicts", "duplicate_coverage", "repair_targets"}
+    consistency_markers = {
+        "style_conflicts",
+        "claim_conflicts",
+        "duplicate_coverage",
+        "repair_targets",
+        "repair_priority",
+        "severity_summary",
+    }
     return bool(keys & review_markers) or bool(keys & consistency_markers)
 
 
@@ -252,30 +286,19 @@ def _looks_like_consistency_json(text: str) -> bool:
     if not parsed:
         return False
     keys = {str(k).lower() for k in parsed.keys()}
-    consistency_markers = {"style_conflicts", "claim_conflicts", "duplicate_coverage", "repair_targets"}
+    consistency_markers = {
+        "style_conflicts",
+        "claim_conflicts",
+        "duplicate_coverage",
+        "repair_targets",
+        "repair_priority",
+        "severity_summary",
+    }
     return bool(keys & consistency_markers)
 
 
 def _is_invalid_output_for_role(role: str | None, content: str) -> bool:
-    role_name = str(role or "").strip().lower()
-    text = (content or "").strip()
-    if not text:
-        return True
-    if role_name == "writer":
-        return not is_valid_writer_output_text(text)
-    if role_name == "reviewer":
-        parsed = _parse_json_object(text)
-        if not parsed:
-            return True
-        required = {"score", "must_fix", "feedback", "pass"}
-        return not required.issubset({str(k).lower() for k in parsed.keys()})
-    if role_name == "consistency":
-        parsed = _parse_json_object(text)
-        if not parsed:
-            return True
-        required = {"pass", "style_conflicts", "claim_conflicts", "repair_targets"}
-        return not required.issubset({str(k).lower() for k in parsed.keys()})
-    return False
+    return not has_valid_schema_for_role(role, content)
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +370,8 @@ class DAGScheduler:
                 if await self._all_nodes_terminal():
                     if await self._has_failed_nodes():
                         log.error("DAG completed with failed nodes")
-                        await self._mark_task_failed("DAG completed with failed nodes")
+                        failed_reason = await self._build_failed_nodes_reason()
+                        await self._mark_task_failed(failed_reason)
                     else:
                         log.info("DAG completed — all nodes done")
                         terminal = await self._mark_task_done()
@@ -358,6 +382,14 @@ class DAGScheduler:
                 # 4. 检查是否死锁（没有 running 也没有 ready）
                 if not dispatched and not self._running_nodes:
                     if not await self._control_blocks_deadlock() and await self._has_undone_nodes():
+                        rescued = await self._skip_blocked_pending_nodes()
+                        if rescued > 0:
+                            log.warning(
+                                "deadlock rescue applied: skipped {} blocked pending nodes",
+                                rescued,
+                            )
+                            self._schedule_event.set()
+                            continue
                         log.error("DAG deadlocked — no running/ready nodes remain")
                         await self._mark_task_failed("DAG deadlock: unreachable nodes")
                         break
@@ -489,7 +521,8 @@ class DAGScheduler:
                 .values(status=AGENT_IDLE)
             )
 
-            new_retry = node.retry_count + 1
+            force_permanent_failure = str(error or "").startswith("BUDGET_EXCEEDED:")
+            new_retry = MAX_RETRIES if force_permanent_failure else (node.retry_count + 1)
             if new_retry < MAX_RETRIES:
                 # 重试：回到 ready 队列
                 await session.execute(
@@ -1222,13 +1255,34 @@ class DAGScheduler:
             ensure_ascii=False,
             indent=2,
         )
+        payload["planned_words"] = 0
+        payload["word_floor"] = DEFAULT_NODE_WORD_FLOOR
+        payload["word_ceiling"] = DEFAULT_NODE_WORD_FLOOR
 
         task = await session.get(Task, self.task_id)
+        evidence_pool_block: dict[str, Any] = {}
         if task is not None:
             payload["mode"] = task.mode
             payload["depth"] = task.depth
             payload["target_words"] = int(task.target_words or 0)
+            checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+            raw_evidence_pool = checkpoint.get("evidence_pool")
+            if isinstance(raw_evidence_pool, dict):
+                evidence_pool_block = raw_evidence_pool
         source_policy = _build_source_policy(payload.get("mode", ""))
+        pool_summary = evidence_pool_block.get("summary", {})
+        pool_markdown = str(evidence_pool_block.get("markdown", "") or "").strip()
+        payload["evidence_pool_seeds"] = json.dumps(
+            evidence_pool_seeds(payload.get("mode", "")),
+            ensure_ascii=False,
+            indent=2,
+        )
+        payload["evidence_pool_summary"] = json.dumps(
+            pool_summary if isinstance(pool_summary, dict) else {},
+            ensure_ascii=False,
+            indent=2,
+        )
+        payload["evidence_pool_markdown"] = pool_markdown
 
         chapter_index, chapter_title = self._parse_chapter_meta(node_title)
         if chapter_index is not None:
@@ -1245,6 +1299,17 @@ class DAGScheduler:
             payload["title"] = node_title
             payload["source_policy"] = json.dumps(source_policy, ensure_ascii=False, indent=2)
             payload["research_keywords"] = ", ".join(payload.get("research_keywords", []))
+            await self._upsert_node_budget_ledger(
+                session=session,
+                task=task,
+                node_id=node_id,
+                stage_code=stage_code,
+                node_role=node_role,
+                node_title=node_title,
+                planned_words=int(payload.get("planned_words", 0)),
+                word_floor=int(payload.get("word_floor", DEFAULT_NODE_WORD_FLOOR)),
+                word_ceiling=int(payload.get("word_ceiling", DEFAULT_NODE_WORD_FLOOR)),
+            )
             logger.bind(
                 task_id=str(self.task_id),
                 node_id=str(node_id),
@@ -1262,6 +1327,17 @@ class DAGScheduler:
             payload["title"] = node_title
             payload["source_policy"] = json.dumps(source_policy, ensure_ascii=False, indent=2)
             payload["research_keywords"] = ", ".join(payload.get("research_keywords", []))
+            await self._upsert_node_budget_ledger(
+                session=session,
+                task=task,
+                node_id=node_id,
+                stage_code=stage_code,
+                node_role=node_role,
+                node_title=node_title,
+                planned_words=int(payload.get("planned_words", 0)),
+                word_floor=int(payload.get("word_floor", DEFAULT_NODE_WORD_FLOOR)),
+                word_ceiling=int(payload.get("word_ceiling", DEFAULT_NODE_WORD_FLOOR)),
+            )
             logger.bind(
                 task_id=str(self.task_id),
                 node_id=str(node_id),
@@ -1277,30 +1353,41 @@ class DAGScheduler:
             payload["target_words"] = int(task.target_words or 0)
 
         if node_role == "writer":
-            target_words = int(payload.get("target_words") or 0)
-            budget_hint = _extract_word_budget_hint(node_title)
-            budget_hint_locked = False
-            if budget_hint is not None:
-                payload["target_words"] = budget_hint
-                target_words = budget_hint
-                budget_hint_locked = True
+            task_target_words = int(payload.get("target_words") or 0)
             is_expansion_pass = self._is_expansion_writer_title(node_title)
+            is_assembly_editor = "Assembly编辑收敛" in (node_title or "")
             payload["is_expansion_pass"] = is_expansion_pass
-            if target_words > 0:
-                chapter_budget = max(500, target_words // writer_count)
-                if is_expansion_pass:
-                    if budget_hint_locked:
-                        payload["target_words"] = target_words
-                    elif chapter_index is not None:
-                        payload["target_words"] = max(450, min(2200, chapter_budget // 2))
-                    else:
-                        payload["target_words"] = max(2500, min(12000, int(target_words * 0.75)))
-                else:
-                    payload["target_words"] = chapter_budget
+            payload["is_assembly_editor"] = is_assembly_editor
+            planned_words, word_floor, word_ceiling = self._derive_writer_word_budget(
+                node_title=node_title,
+                chapter_index=chapter_index,
+                task_target_words=task_target_words,
+                writer_count=writer_count,
+            )
+            if planned_words > 0:
+                payload["target_words"] = planned_words
+            payload["planned_words"] = planned_words
+            payload["word_floor"] = word_floor
+            payload["word_ceiling"] = word_ceiling
             payload.setdefault(
                 "chapter_description",
                 f"Focus on chapter scope: {chapter_title or node_title}",
             )
+            if is_assembly_editor:
+                full_draft = "\n\n".join(
+                    content
+                    for title, content in writer_nodes
+                    if content and "Assembly编辑收敛" not in (title or "")
+                )
+                payload["chapter_description"] = (
+                    "Run full-manuscript assembly editing: terminology normalization, "
+                    "duplicate collapse, transitions, and conclusion convergence."
+                )
+                payload["chapter_content"] = full_draft
+                payload["topic_claims"] = {
+                    "global": "Unify cross-chapter terminology and remove duplication.",
+                    "boundary": "Do not invent unsupported claims.",
+                }
             if is_expansion_pass:
                 payload["chapter_description"] = (
                     f"Expand chapter depth and evidence for: {chapter_title or node_title}"
@@ -1347,6 +1434,17 @@ class DAGScheduler:
                 indent=2,
             )
             payload["research_keywords"] = ", ".join(payload.get("research_keywords", []))
+            await self._upsert_node_budget_ledger(
+                session=session,
+                task=task,
+                node_id=node_id,
+                stage_code=stage_code,
+                node_role=node_role,
+                node_title=node_title,
+                planned_words=planned_words,
+                word_floor=word_floor,
+                word_ceiling=word_ceiling,
+            )
             logger.bind(
                 task_id=str(self.task_id),
                 node_id=str(node_id),
@@ -1377,6 +1475,17 @@ class DAGScheduler:
                 ensure_ascii=False,
                 indent=2,
             )
+            await self._upsert_node_budget_ledger(
+                session=session,
+                task=task,
+                node_id=node_id,
+                stage_code=stage_code,
+                node_role=node_role,
+                node_title=node_title,
+                planned_words=int(payload.get("planned_words", 0)),
+                word_floor=int(payload.get("word_floor", DEFAULT_NODE_WORD_FLOOR)),
+                word_ceiling=int(payload.get("word_ceiling", DEFAULT_NODE_WORD_FLOOR)),
+            )
             logger.bind(
                 task_id=str(self.task_id),
                 node_id=str(node_id),
@@ -1391,6 +1500,11 @@ class DAGScheduler:
                 result for _, result in writer_nodes if result
             )
             payload["full_text"] = full_text
+            payload["key_fragments"] = "\n\n".join(
+                f"- {title}: {result[:420]}"
+                for title, result in writer_nodes
+                if result
+            )
             payload["chapters_summary"] = "\n\n".join(
                 f"- {title}: {result[:260]}"
                 for title, result in writer_nodes
@@ -1406,8 +1520,27 @@ class DAGScheduler:
                 }
                 for title, result in writer_nodes
             ]
+            consistency_target = int(payload.get("target_words") or 0)
+            if consistency_target > 0:
+                payload["planned_words"] = consistency_target
+                payload["word_floor"] = max(1500, int(consistency_target * 0.8))
+                payload["word_ceiling"] = max(
+                    payload["word_floor"],
+                    int(max(1, consistency_target) * 1.2),
+                )
             payload["source_policy"] = json.dumps(source_policy, ensure_ascii=False, indent=2)
             payload["research_keywords"] = ", ".join(payload.get("research_keywords", []))
+            await self._upsert_node_budget_ledger(
+                session=session,
+                task=task,
+                node_id=node_id,
+                stage_code=stage_code,
+                node_role=node_role,
+                node_title=node_title,
+                planned_words=int(payload.get("planned_words", 0)),
+                word_floor=int(payload.get("word_floor", DEFAULT_NODE_WORD_FLOOR)),
+                word_ceiling=int(payload.get("word_ceiling", DEFAULT_NODE_WORD_FLOOR)),
+            )
             logger.bind(
                 task_id=str(self.task_id),
                 node_id=str(node_id),
@@ -1425,6 +1558,10 @@ class DAGScheduler:
         if not text:
             return None, ""
         match = re.search(r"第\s*(\d+)\s*章[:：]?\s*(.*)", text)
+        if not match:
+            match = re.search(r"(?i)\bchapter\s*(\d+)\b[:：\-]?\s*(.*)", text)
+        if not match:
+            match = re.search(r"(?i)\bch(?:apter)?\.?\s*(\d+)\b[:：\-]?\s*(.*)", text)
         if not match:
             return None, text
         chapter_index = int(match.group(1))
@@ -1447,6 +1584,95 @@ class DAGScheduler:
     def _primary_writer_count(cls, writer_nodes: list[tuple[str, str]]) -> int:
         primary = [title for title, _ in writer_nodes if cls._is_primary_writer_title(title)]
         return max(1, len(primary) if primary else len(writer_nodes))
+
+    @classmethod
+    def _derive_writer_word_budget(
+        cls,
+        *,
+        node_title: str,
+        chapter_index: int | None,
+        task_target_words: int,
+        writer_count: int,
+    ) -> tuple[int, int, int]:
+        target_words = max(0, int(task_target_words or 0))
+        if target_words <= 0:
+            return 0, DEFAULT_NODE_WORD_FLOOR, DEFAULT_NODE_WORD_FLOOR
+
+        budget_hint = _extract_word_budget_hint(node_title)
+        is_expansion = cls._is_expansion_writer_title(node_title)
+        chapter_budget = max(500, target_words // max(1, writer_count))
+
+        if budget_hint is not None:
+            planned_words = budget_hint
+        elif is_expansion:
+            if chapter_index is not None:
+                planned_words = max(450, min(2200, chapter_budget // 2))
+            else:
+                planned_words = max(2500, min(12000, int(target_words * 0.75)))
+        else:
+            planned_words = chapter_budget
+
+        # Keep per-node floor attainable under real model output limits.
+        if "全稿扩写" in (node_title or ""):
+            floor = max(500, min(1500, int(planned_words * 0.22)))
+        elif is_expansion:
+            floor = max(220, min(900, int(planned_words * 0.12)))
+        else:
+            floor = max(280, min(1200, int(planned_words * 0.15)))
+        ceiling = max(floor, int(max(1, planned_words) * 1.35))
+        return planned_words, floor, ceiling
+
+    async def _upsert_node_budget_ledger(
+        self,
+        *,
+        session: AsyncSession,
+        task: Task | None,
+        node_id: uuid.UUID,
+        stage_code: str,
+        node_role: str,
+        node_title: str,
+        planned_words: int,
+        word_floor: int,
+        word_ceiling: int,
+    ) -> None:
+        if task is None:
+            return
+        checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+        raw_ledger = checkpoint.get("node_budget_ledger")
+        ledger = raw_ledger if isinstance(raw_ledger, dict) else {}
+        ledger[str(node_id)] = {
+            "stage_code": stage_code,
+            "role": node_role,
+            "title": node_title,
+            "planned_words": int(max(0, planned_words)),
+            "word_floor": int(max(DEFAULT_NODE_WORD_FLOOR, word_floor)),
+            "word_ceiling": int(max(DEFAULT_NODE_WORD_FLOOR, word_ceiling)),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        checkpoint["node_budget_ledger"] = ledger
+        task.checkpoint_data = checkpoint
+
+    async def _lookup_node_budget_floor(
+        self,
+        *,
+        session: AsyncSession,
+        node_id: uuid.UUID,
+    ) -> int | None:
+        task = await session.get(Task, self.task_id)
+        if task is None:
+            return None
+        checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+        ledger = checkpoint.get("node_budget_ledger")
+        if not isinstance(ledger, dict):
+            return None
+        entry = ledger.get(str(node_id))
+        if not isinstance(entry, dict):
+            return None
+        try:
+            floor = int(entry.get("word_floor"))
+        except Exception:
+            return None
+        return max(DEFAULT_NODE_WORD_FLOOR, floor)
 
     async def _load_outline_result(self, session: AsyncSession) -> str:
         result = await session.execute(
@@ -1626,6 +1852,7 @@ class DAGScheduler:
                     if node_role == "writer":
                         valid_length, observed_units, min_units = await self._validate_writer_output_length(
                             session=session,
+                            node_id=node_id,
                             node_title=node_title,
                             output=output,
                         )
@@ -1657,17 +1884,63 @@ class DAGScheduler:
                     if node_role == "consistency":
                         parsed = _parse_json_object(output)
                         if isinstance(parsed, dict) and parsed.get("pass") is False:
+                            if not self._consistency_has_actionable_issues(parsed):
+                                logger.bind(
+                                    task_id=str(self.task_id),
+                                    node_id=str(node_id),
+                                ).warning(
+                                    "consistency pass=false but no actionable issues; treating as converged"
+                                )
+                                await self.on_node_completed(
+                                    node_id=node_id,
+                                    result=output,
+                                    agent_id=agent_id,
+                                )
+                                continue
                             repair_targets = _normalize_repair_targets(parsed.get("repair_targets"))
-                            if repair_targets:
+                            if not repair_targets:
+                                repair_targets = await self._infer_consistency_repair_targets(
+                                    session=session
+                                )
+                                if repair_targets:
+                                    logger.bind(
+                                        task_id=str(self.task_id),
+                                        node_id=str(node_id),
+                                        repair_targets=repair_targets,
+                                    ).warning(
+                                        "consistency pass=false but repair_targets empty; inferred fallback targets"
+                                    )
+                            allowed, budget_targets, budget_report = await self._consume_consistency_repair_budget(
+                                session=session,
+                                parsed=parsed,
+                                fallback_targets=repair_targets,
+                            )
+                            if not allowed:
+                                await self.on_node_failed(
+                                    node_id=node_id,
+                                    error=(
+                                        "BUDGET_EXCEEDED:"
+                                        + json.dumps(
+                                            {
+                                                "reason": "consistency_repair_budget_exhausted",
+                                                "report": budget_report or {},
+                                            },
+                                            ensure_ascii=False,
+                                        )
+                                    ),
+                                    agent_id=agent_id,
+                                )
+                                continue
+                            if budget_targets:
                                 injected = await self._inject_consistency_repair_wave(
                                     session=session,
-                                    repair_targets=repair_targets,
+                                    repair_targets=budget_targets,
                                 )
                                 if injected:
                                     logger.bind(
                                         task_id=str(self.task_id),
                                         node_id=str(node_id),
-                                        repair_targets=repair_targets,
+                                        repair_targets=budget_targets,
                                     ).warning(
                                         "consistency failed; injected targeted repair wave"
                                     )
@@ -1678,6 +1951,24 @@ class DAGScheduler:
                                     )
                                     continue
                             if node_retry_count >= (MAX_RETRIES - 1):
+                                if await self._should_soften_consistency_failure(session=session):
+                                    await self._record_consistency_soft_failure(
+                                        session=session,
+                                        parsed=parsed,
+                                    )
+                                    await session.commit()
+                                    logger.bind(
+                                        task_id=str(self.task_id),
+                                        node_id=str(node_id),
+                                    ).warning(
+                                        "consistency pass=false after max retries, but softened for long-form target"
+                                    )
+                                    await self.on_node_completed(
+                                        node_id=node_id,
+                                        result=output,
+                                        agent_id=agent_id,
+                                    )
+                                    continue
                                 logger.bind(
                                     task_id=str(self.task_id),
                                     node_id=str(node_id),
@@ -1699,6 +1990,20 @@ class DAGScheduler:
                                 agent_id=agent_id,
                             )
                             continue
+                    if node_role == "researcher":
+                        try:
+                            await self._persist_researcher_evidence_pool(
+                                session=session,
+                                output=output,
+                            )
+                            await session.commit()
+                        except Exception:
+                            logger.bind(
+                                task_id=str(self.task_id),
+                                node_id=str(node_id),
+                            ).opt(exception=True).warning(
+                                "failed to persist researcher evidence pool"
+                            )
                 if _is_invalid_output_for_role(node_role, output):
                     await self.on_node_failed(
                         node_id=node_id,
@@ -1717,6 +2022,325 @@ class DAGScheduler:
                     error=str(payload.get("error") or "Unknown agent failure"),
                     agent_id=agent_id,
                 )
+
+    async def _should_soften_consistency_failure(self, *, session: AsyncSession) -> bool:
+        task = await session.get(Task, self.task_id)
+        if task is None:
+            return False
+        try:
+            target_words = int(getattr(task, "target_words", 0) or 0)
+        except Exception:
+            target_words = 0
+        return target_words >= 30000
+
+    async def _record_consistency_soft_failure(
+        self,
+        *,
+        session: AsyncSession,
+        parsed: dict[str, Any],
+    ) -> None:
+        task = await session.get(Task, self.task_id)
+        if task is None:
+            return
+        checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+        raw = checkpoint.get("consistency_soft_failures")
+        events = raw if isinstance(raw, list) else []
+        events.append(
+            {
+                "at": datetime.now(UTC).isoformat(),
+                "reason": "pass_false_after_max_retries",
+                "severity_summary": parsed.get("severity_summary", {}),
+                "repair_targets": _normalize_repair_targets(parsed.get("repair_targets")),
+                "repair_priority": _normalize_repair_priority(parsed.get("repair_priority")),
+            }
+        )
+        checkpoint["consistency_soft_failures"] = events[-10:]
+        task.checkpoint_data = checkpoint
+
+    async def _persist_researcher_evidence_pool(
+        self,
+        *,
+        session: AsyncSession,
+        output: str,
+    ) -> None:
+        parsed = _parse_json_object(output)
+        if not isinstance(parsed, dict):
+            return
+        task = await session.get(Task, self.task_id)
+        if task is None:
+            return
+        items = normalize_evidence_ledger(parsed.get("evidence_ledger"))
+        source_policy = _build_source_policy(getattr(task, "mode", ""))
+        keywords = _derive_research_keywords(
+            getattr(task, "title", ""),
+            str(parsed.get("topic_anchor", "")),
+        )
+        markdown = evidence_pool_markdown(
+            task_id=self.task_id,
+            title=str(getattr(task, "title", "") or ""),
+            evidence_items=items,
+            source_policy=source_policy,
+            research_keywords=keywords,
+            mode=getattr(task, "mode", ""),
+        )
+        file_path = evidence_pool_file_path(self.task_id)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(markdown, encoding="utf-8")
+        summary = {
+            "total": len(items),
+            "with_url": sum(1 for item in items if str(item.get("source_url") or "").strip()),
+            "oa": sum(1 for item in items if str(item.get("source_kind") or "") == "oa"),
+            "patent": sum(1 for item in items if str(item.get("source_kind") or "") == "patent"),
+            "other": sum(1 for item in items if str(item.get("source_kind") or "") == "other"),
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+        checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+        checkpoint["evidence_pool"] = {
+            "file_path": str(file_path),
+            "summary": summary,
+            "seeds": evidence_pool_seeds(str(getattr(task, "mode", "") or "")),
+            "mode": str(getattr(task, "mode", "") or ""),
+            "markdown": markdown,
+        }
+        task.checkpoint_data = checkpoint
+
+    async def _skip_blocked_pending_nodes(self) -> int:
+        async with async_session_factory() as session:
+            failed_rows = await session.execute(
+                select(TaskNode.id).where(
+                    TaskNode.task_id == self.task_id,
+                    TaskNode.status == STATUS_FAILED,
+                )
+            )
+            failed_ids = {str(row[0]) for row in failed_rows.all()}
+            if not failed_ids:
+                return 0
+
+            pending_rows = await session.execute(
+                select(TaskNode.id, TaskNode.depends_on).where(
+                    TaskNode.task_id == self.task_id,
+                    TaskNode.status == STATUS_PENDING,
+                )
+            )
+            blocked_ids: list[uuid.UUID] = []
+            for node_id, deps_raw in pending_rows.all():
+                deps = [str(dep) for dep in (deps_raw or [])]
+                if any(dep in failed_ids for dep in deps):
+                    blocked_ids.append(node_id)
+
+            if not blocked_ids:
+                return 0
+
+            now = datetime.now(UTC).replace(tzinfo=None)
+            for node_id in blocked_ids:
+                await session.execute(
+                    update(TaskNode)
+                    .where(TaskNode.id == node_id, TaskNode.status == STATUS_PENDING)
+                    .values(
+                        status=STATUS_SKIPPED,
+                        finished_at=now,
+                        result="SKIPPED: blocked by failed dependencies",
+                    )
+                )
+            await session.commit()
+
+        for node_id in blocked_ids:
+            await set_dag_node_status(self.task_id, str(node_id), STATUS_SKIPPED)
+        return len(blocked_ids)
+
+    async def _infer_consistency_repair_targets(
+        self,
+        *,
+        session: AsyncSession,
+    ) -> list[int]:
+        """Infer fallback chapter targets when consistency omits repair_targets."""
+        writer_rows = await session.execute(
+            select(TaskNode.title)
+            .where(
+                TaskNode.task_id == self.task_id,
+                TaskNode.agent_role == "writer",
+            )
+            .order_by(TaskNode.id)
+        )
+        candidates: list[int] = []
+        for (title_raw,) in writer_rows.all():
+            title = str(title_raw or "")
+            if self._is_expansion_writer_title(title):
+                continue
+            chapter_index, _ = self._parse_chapter_meta(title)
+            if chapter_index is None or chapter_index <= 0:
+                continue
+            if chapter_index not in candidates:
+                candidates.append(chapter_index)
+
+        # Conservative fallback: repair one chapter first.
+        return candidates[:1]
+
+    @staticmethod
+    def _severity_weight(raw: str) -> int:
+        level = str(raw or "").strip().lower()
+        if level in {"critical", "blocker"}:
+            return 4
+        if level == "high":
+            return 3
+        if level == "medium":
+            return 2
+        return 1
+
+    def _collect_consistency_issue_scores(self, parsed: dict[str, Any]) -> dict[int, int]:
+        scores: dict[int, int] = {}
+        issue_buckets = (
+            "style_conflicts",
+            "claim_conflicts",
+            "duplicate_coverage",
+            "term_inconsistency",
+            "transition_gaps",
+            "source_policy_violations",
+        )
+        for bucket in issue_buckets:
+            entries = parsed.get(bucket, [])
+            if not isinstance(entries, list):
+                continue
+            for item in entries:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    chapter_index = int(item.get("chapter_index"))
+                except Exception:
+                    continue
+                if chapter_index <= 0:
+                    continue
+                weight = self._severity_weight(str(item.get("severity", "")))
+                scores[chapter_index] = scores.get(chapter_index, 0) + weight
+        return scores
+
+    def _consistency_has_actionable_issues(self, parsed: dict[str, Any]) -> bool:
+        issue_scores = self._collect_consistency_issue_scores(parsed)
+        if issue_scores:
+            return True
+
+        if _normalize_repair_targets(parsed.get("repair_targets")):
+            return True
+        if _normalize_repair_priority(parsed.get("repair_priority")):
+            return True
+
+        severity = parsed.get("severity_summary", {})
+        if isinstance(severity, dict):
+            for key in ("critical", "high", "medium"):
+                try:
+                    if int(severity.get(key, 0) or 0) > 0:
+                        return True
+                except Exception:
+                    continue
+        return False
+
+    async def _consume_consistency_repair_budget(
+        self,
+        *,
+        session: AsyncSession,
+        parsed: dict[str, Any],
+        fallback_targets: list[int],
+    ) -> tuple[bool, list[int], dict[str, Any] | None]:
+        task = await session.get(Task, self.task_id)
+        if task is None:
+            return True, fallback_targets, None
+
+        checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+        raw_budget = checkpoint.get("consistency_repair_budget")
+        budget = raw_budget if isinstance(raw_budget, dict) else {}
+        try:
+            target_words = int(getattr(task, "target_words", 0) or 0)
+        except Exception:
+            target_words = 0
+        default_total = 7
+        if target_words >= 50000:
+            default_total = 18
+        elif target_words >= 30000:
+            default_total = 14
+        elif target_words >= 15000:
+            default_total = 10
+
+        total_points = int(budget.get("total_points", default_total) or default_total)
+        remaining_points = int(budget.get("remaining_points", total_points) or total_points)
+        spent_points = int(budget.get("spent_points", 0) or 0)
+        rounds = int(budget.get("rounds", 0) or 0)
+        history = budget.get("events", [])
+        if not isinstance(history, list):
+            history = []
+
+        issue_scores = self._collect_consistency_issue_scores(parsed)
+        priority_targets = _normalize_repair_priority(parsed.get("repair_priority"))
+        repair_targets = _normalize_repair_targets(parsed.get("repair_targets"))
+        candidates: list[str] = []
+        for raw in priority_targets + repair_targets + fallback_targets:
+            token = str(raw)
+            if token in candidates:
+                continue
+            candidates.append(token)
+        selected_targets: list[int] = []
+        for token in candidates:
+            try:
+                value = int(token)
+            except Exception:
+                continue
+            if value <= 0 or value in selected_targets:
+                continue
+            selected_targets.append(value)
+        if not selected_targets:
+            ranked = sorted(issue_scores.items(), key=lambda item: item[1], reverse=True)
+            selected_targets = [chapter for chapter, _ in ranked[:2]]
+        if not selected_targets:
+            selected_targets = fallback_targets[:1]
+
+        required_points = 0
+        for chapter in selected_targets:
+            required_points += max(1, issue_scores.get(chapter, 1))
+
+        budget_report = {
+            "total_points": total_points,
+            "remaining_points_before": remaining_points,
+            "required_points": required_points,
+            "selected_targets": selected_targets,
+            "issue_scores": issue_scores,
+            "repair_priority": priority_targets,
+            "repair_targets": repair_targets,
+            "severity_summary": parsed.get("severity_summary", {}),
+        }
+        if required_points > remaining_points:
+            checkpoint["consistency_repair_budget"] = {
+                "total_points": total_points,
+                "remaining_points": remaining_points,
+                "spent_points": spent_points,
+                "rounds": rounds,
+                "events": history,
+                "last_failure": {
+                    **budget_report,
+                    "reason": "repair_budget_exhausted",
+                    "at": datetime.now(UTC).isoformat(),
+                },
+            }
+            task.checkpoint_data = checkpoint
+            return False, selected_targets, budget_report
+
+        remaining_after = remaining_points - required_points
+        history.append(
+            {
+                "at": datetime.now(UTC).isoformat(),
+                "selected_targets": selected_targets,
+                "required_points": required_points,
+                "remaining_after": remaining_after,
+                "severity_summary": parsed.get("severity_summary", {}),
+            }
+        )
+        checkpoint["consistency_repair_budget"] = {
+            "total_points": total_points,
+            "remaining_points": remaining_after,
+            "spent_points": spent_points + required_points,
+            "rounds": rounds + 1,
+            "events": history[-10:],
+        }
+        task.checkpoint_data = checkpoint
+        return True, selected_targets, budget_report
 
     async def _inject_consistency_repair_wave(
         self,
@@ -1803,25 +2427,35 @@ class DAGScheduler:
         self,
         *,
         session: AsyncSession,
+        node_id: uuid.UUID,
         node_title: str,
         output: str,
     ) -> tuple[bool, int, int]:
         """Validate writer output has enough content for long-form requests."""
         markdown = extract_writer_markdown(output)
         observed_units = _count_text_units(markdown)
-        min_units = await self._writer_min_units_for_task(session=session, node_title=node_title)
+        min_units = await self._writer_min_units_for_task(
+            session=session,
+            node_id=node_id,
+            node_title=node_title,
+        )
         return observed_units >= min_units, observed_units, min_units
 
     async def _writer_min_units_for_task(
         self,
         *,
         session: AsyncSession,
+        node_id: uuid.UUID,
         node_title: str,
     ) -> int:
+        budget_floor = await self._lookup_node_budget_floor(session=session, node_id=node_id)
+        if budget_floor is not None:
+            return budget_floor
+
         task = await session.get(Task, self.task_id)
         target_words = int(getattr(task, "target_words", 0) or 0)
         if target_words <= 0:
-            return 300
+            return DEFAULT_NODE_WORD_FLOOR
 
         writer_rows = await session.execute(
             select(TaskNode.title).where(
@@ -1839,12 +2473,12 @@ class DAGScheduler:
         is_global_expansion = "全稿扩写" in (node_title or "")
         budget_hint = _extract_word_budget_hint(node_title)
         if budget_hint is not None:
-            return max(500, min(3200, int(budget_hint * 0.45)))
+            return max(220, min(1200, int(budget_hint * 0.12)))
         if is_global_expansion:
-            return max(1400, min(6000, int(target_words * 0.2)))
+            return max(500, min(1500, int(target_words * 0.04)))
         if is_expansion:
-            return max(600, min(2200, int(chapter_budget * 0.45)))
-        return max(900, min(3200, int(chapter_budget * 0.6)))
+            return max(220, min(900, int(chapter_budget * 0.12)))
+        return max(280, min(1200, int(chapter_budget * 0.15)))
 
     async def _check_timeouts(self) -> None:
         """检查并处理超时节点。"""
@@ -1908,6 +2542,26 @@ class DAGScheduler:
             result = await session.execute(stmt)
             return result.scalars().first() is not None
 
+    async def _build_failed_nodes_reason(self) -> str:
+        async with async_session_factory() as session:
+            rows = await session.execute(
+                select(TaskNode.title, TaskNode.result)
+                .where(TaskNode.task_id == self.task_id, TaskNode.status == STATUS_FAILED)
+                .order_by(TaskNode.finished_at.asc().nullslast(), TaskNode.id.asc())
+            )
+            failed = rows.all()
+        if not failed:
+            return "DAG completed with failed nodes"
+        title_raw, result_raw = failed[0]
+        title = str(title_raw or "unknown node")
+        result_text = str(result_raw or "").strip()
+        if result_text:
+            compact = result_text.replace("\n", " ").strip()
+            if len(compact) > 220:
+                compact = f"{compact[:217]}..."
+            return f"DAG completed with failed nodes: {title} -> {compact}"
+        return f"DAG completed with failed nodes: {title}"
+
     async def _has_undone_nodes(self) -> bool:
         """是否还有未完成且非失败的节点。"""
         async with async_session_factory() as session:
@@ -1922,6 +2576,70 @@ class DAGScheduler:
     # Internal — 任务状态更新
     # ------------------------------------------------------------------
 
+    async def _ensure_assembly_editor_wave(
+        self,
+        *,
+        session: AsyncSession,
+    ) -> bool:
+        """Ensure a dedicated global assembly editor node runs before finalize."""
+        writer_rows = await session.execute(
+            select(TaskNode.id, TaskNode.title, TaskNode.result)
+            .where(TaskNode.task_id == self.task_id)
+            .where(TaskNode.agent_role == "writer")
+        )
+        raw_rows = writer_rows.all()
+        if asyncio.iscoroutine(raw_rows):
+            raw_rows = await raw_rows
+        rows = list(raw_rows or [])
+        if len(rows) < 2:
+            return False
+
+        has_assembly_editor = any("Assembly编辑收敛" in str(row[1] or "") for row in rows)
+        if has_assembly_editor:
+            return False
+
+        usable_count = 0
+        for _, _, result in rows:
+            content = extract_writer_markdown(str(result or ""))
+            if content:
+                usable_count += 1
+        if usable_count < 2:
+            return False
+
+        task = await session.get(Task, self.task_id)
+        target_words = int(getattr(task, "target_words", 0) or 0) if task is not None else 0
+        suggested = 0 if target_words <= 0 else max(1800, min(9000, int(target_words * 0.18)))
+        suffix = f"（目标补写约{suggested}字）" if suggested > 0 else ""
+        node_id = uuid.uuid4()
+        session.add(
+            TaskNode(
+                id=node_id,
+                task_id=self.task_id,
+                title=f"全稿Assembly编辑收敛（术语统一/重复折叠/结论收敛）{suffix}",
+                agent_role="writer",
+                status=STATUS_READY,
+                depends_on=[],
+                retry_count=0,
+            )
+        )
+        if task is not None:
+            checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+            checkpoint["assembly_editor"] = {
+                "node_id": str(node_id),
+                "inserted_at": datetime.now(UTC).isoformat(),
+                "suggested_words": suggested,
+            }
+            task.checkpoint_data = checkpoint
+        await session.flush()
+        await set_dag_node_status(self.task_id, str(node_id), STATUS_READY)
+        await push_ready_node(str(node_id), priority=0.0)
+        logger.bind(
+            task_id=str(self.task_id),
+            node_id=str(node_id),
+            suggested_words=suggested,
+        ).info("assembly editor wave inserted")
+        return True
+
     async def _mark_task_done(self) -> str:
         """Mark task done/fail, or extend DAG with auto-expansion wave.
 
@@ -1930,6 +2648,20 @@ class DAGScheduler:
         """
         fail_reason: str | None = None
         async with async_session_factory() as session:
+            created_assembly = await self._ensure_assembly_editor_wave(session=session)
+            if created_assembly:
+                await session.execute(
+                    update(Task)
+                    .where(Task.id == self.task_id)
+                    .values(
+                        status="pending",
+                        error_message=None,
+                    )
+                )
+                await session.commit()
+                self._schedule_event.set()
+                return "extended"
+
             # Assemble writer outputs before publishing terminal task status.
             from app.services.long_text_fsm import LongTextFSM
 
@@ -2055,11 +2787,15 @@ class DAGScheduler:
 
         wave_no = existing_waves + 1
         gap = max(0, target_words - max(0, current_words))
-        suggested_budget = max(1200, min(8000, int(gap * 1.1)))
-        if gap >= 12000:
-            expansion_nodes = 3
-        elif gap >= 6000:
-            expansion_nodes = 2
+        gap_ratio = gap / max(1, target_words)
+        waves_left = max(1, AUTO_EXPANSION_MAX_WAVES - existing_waves)
+        risk_score = min(1.0, (gap_ratio * 0.7) + ((1 / waves_left) * 0.3))
+        cost_cap = max(1800, int(target_words * (0.42 if wave_no == AUTO_EXPANSION_MAX_WAVES else 0.3)))
+        suggested_budget = min(cost_cap, max(1200, int(gap * (1.05 + (risk_score * 0.35)))))
+        if gap >= 14000 or risk_score >= 0.82:
+            expansion_nodes = min(3, waves_left + 1)
+        elif gap >= 7000 or risk_score >= 0.52:
+            expansion_nodes = min(2, waves_left + 1)
         else:
             expansion_nodes = 1
         per_node_budget = max(1200, int(suggested_budget / expansion_nodes))
@@ -2084,6 +2820,32 @@ class DAGScheduler:
                     retry_count=0,
                 )
             )
+        task = await session.get(Task, self.task_id)
+        if task is not None:
+            checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
+            raw_decisions = checkpoint.get("expansion_decisions")
+            decisions = raw_decisions if isinstance(raw_decisions, list) else []
+            decisions.append(
+                {
+                    "wave_no": wave_no,
+                    "target_words": int(target_words),
+                    "current_words": int(current_words),
+                    "gap": int(gap),
+                    "gap_ratio": round(gap_ratio, 4),
+                    "risk_score": round(risk_score, 4),
+                    "cost_cap": int(cost_cap),
+                    "suggested_budget": int(suggested_budget),
+                    "expansion_nodes": int(expansion_nodes),
+                    "per_node_budget": int(per_node_budget),
+                    "reason": (
+                        "adaptive expansion based on remaining gap, wave budget, "
+                        "and risk-to-cost ratio"
+                    ),
+                    "created_at": datetime.now(UTC).isoformat(),
+                }
+            )
+            checkpoint["expansion_decisions"] = decisions
+            task.checkpoint_data = checkpoint
         await session.flush()
         for node_id in inserted_ids:
             await set_dag_node_status(self.task_id, str(node_id), STATUS_READY)
@@ -2093,6 +2855,9 @@ class DAGScheduler:
             node_ids=[str(node_id) for node_id in inserted_ids],
             target_words=target_words,
             current_words=current_words,
+            gap_ratio=gap_ratio,
+            risk_score=risk_score,
+            cost_cap=cost_cap,
             suggested_budget=suggested_budget,
             expansion_nodes=expansion_nodes,
             per_node_budget=per_node_budget,

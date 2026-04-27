@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import communicator
 from app.memory.session import SessionMemory
 from app.models.task import Task
+from app.services.writer_output import extract_writer_markdown
 from app.utils.logger import logger
 
 
@@ -449,8 +450,33 @@ class LongTextFSM:
         nodes = list(result.scalars().all())
         nodes.sort(key=lambda node: self._natural_title_key(node.title or ""))
 
-        parts = [node.result for node in nodes if node.result]
-        output_text = "\n\n".join(parts)
+        assembly_parts: list[str] = []
+        parts: list[str] = []
+        for node in nodes:
+            raw = str(node.result or "")
+            if not raw or not self._is_usable_writer_output(raw):
+                continue
+            markdown = extract_writer_markdown(raw)
+            if markdown:
+                if "Assembly编辑收敛" in str(node.title or ""):
+                    assembly_parts.append(markdown)
+                parts.append(markdown)
+        base_text = "\n\n".join(parts)
+        output_text = base_text
+        if assembly_parts:
+            assembly_text = assembly_parts[-1]
+            base_units = self._count_words(base_text)
+            assembly_units = self._count_words(assembly_text)
+            # Assembly is an editor stage: accept rewritten full manuscript only
+            # when it covers most of the base draft; otherwise keep base draft.
+            if base_units <= 0 or assembly_units >= int(base_units * 0.6):
+                output_text = assembly_text
+            else:
+                logger.bind(task_id=str(self.task_id)).warning(
+                    "assembly output too short for replacement: base_units={}, assembly_units={}",
+                    base_units,
+                    assembly_units,
+                )
         word_count = self._count_words(output_text)
 
         await session.execute(
@@ -464,9 +490,31 @@ class LongTextFSM:
             await session.flush()
 
         logger.bind(task_id=str(self.task_id)).info(
-            "Output finalized: {} chapters, {} words", len(nodes), word_count
+            "Output finalized: {} chapters (usable={}, assembly_parts={}), {} words",
+            len(nodes),
+            len(parts),
+            len(assembly_parts),
+            word_count,
         )
         return word_count
+
+    @staticmethod
+    def _is_usable_writer_output(text: str) -> bool:
+        candidate = extract_writer_markdown(text)
+        if not candidate:
+            return False
+
+        lowered = candidate.lower()
+        head = lowered[:500]
+        if head.startswith("```json"):
+            return False
+        if head.startswith("{") and '"score"' in head and '"pass"' in head:
+            return False
+        if "please provide the necessary details" in head:
+            return False
+        if "i don't have the specific details" in head:
+            return False
+        return True
 
     async def _cleanup_session_memory(self) -> None:
         """Cleanup session-scoped memory when the task reaches terminal states."""

@@ -9,6 +9,7 @@ Strategy:
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -28,7 +29,12 @@ from app.agents.middleware import (
 )
 from app.agents.orchestrator import OrchestratorAgent
 from app.agents.manager import ManagerAgent
+from app.agents.consistency_agent import ConsistencyAgent
+from app.agents.outline_agent import OutlineAgent
+from app.agents.researcher_agent import ResearcherAgent
+from app.agents.reviewer_agent import ReviewerAgent
 from app.agents.worker import WorkerAgent
+from app.agents.writer_agent import WriterAgent
 from app.utils.token_tracker import TokenTracker
 
 
@@ -45,7 +51,9 @@ class MockLLMClient:
     async def chat(
         self, messages, *, model=None, role=None, max_tokens=None, temperature=0.7,
     ) -> str:
-        self.call_log.append({"method": "chat", "role": role, "messages": messages})
+        self.call_log.append(
+            {"method": "chat", "role": role, "messages": messages, "model": model}
+        )
         if role == "outline":
             return "# Outline\n## Chapter 1 Introduction\n## Chapter 2 Core Concepts"
         if role == "writer":
@@ -273,7 +281,7 @@ class TestTimeoutMiddleware:
             layer=2, llm_client=mock_llm, middlewares=(),
         )
         ctx = await mw.before_task(agent, {})
-        assert ctx["_timeout_seconds"] == 120.0
+        assert ctx["_timeout_seconds"] == 300.0
 
 
 class TestContextSummaryMiddleware:
@@ -714,6 +722,139 @@ class TestWorkerAgent:
         )
         assert agent.layer == 2
 
+    async def test_writer_uses_memory_context_without_prompt_fallback(self, mock_llm):
+        agent = WorkerAgent(
+            agent_id=uuid.uuid4(), name="writer_ctx",
+            role="writer", llm_client=mock_llm, middlewares=(),
+        )
+        await agent.handle_task(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "title": "Write chapter 1",
+                "agent_role": "writer",
+                "memory_context": "avoid repeating introduction",
+                "payload": {"chapter_index": 1, "chapter_title": "Introduction"},
+            }
+        )
+        writer_calls = [
+            call for call in mock_llm.call_log
+            if call.get("role") == "writer"
+        ]
+        user_prompt = writer_calls[0]["messages"][-1]["content"]
+        assert "Memory Context" in user_prompt
+        assert "avoid repeating introduction" in user_prompt
+
+    async def test_consistency_payload_is_normalized_for_prompt_contract(self, mock_llm):
+        agent = WorkerAgent(
+            agent_id=uuid.uuid4(), name="consistency_worker",
+            role="consistency", llm_client=mock_llm, middlewares=(),
+        )
+        await agent.handle_task(
+            {
+                "task_id": "t1",
+                "node_id": "n2",
+                "title": "Consistency check",
+                "agent_role": "consistency",
+                "payload": {"full_draft": "chapter draft text"},
+            }
+        )
+        consistency_calls = [
+            call for call in mock_llm.call_log
+            if call.get("role") == "consistency"
+        ]
+        user_prompt = consistency_calls[0]["messages"][-1]["content"]
+        assert "Full Text" in user_prompt
+
+    async def test_quick_low_word_tasks_use_fast_model_override(self, mock_llm):
+        agent = WorkerAgent(
+            agent_id=uuid.uuid4(), name="writer_fast",
+            role="writer", llm_client=mock_llm, middlewares=(),
+        )
+        await agent.handle_task(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "title": "Write quick chapter",
+                "agent_role": "writer",
+                "payload": {
+                    "depth": "quick",
+                    "target_words": 1200,
+                    "chapter_index": 1,
+                    "chapter_title": "Quick Intro",
+                },
+            }
+        )
+        writer_calls = [c for c in mock_llm.call_log if c.get("role") == "writer"]
+        assert writer_calls
+        assert any(call.get("model") == "gpt-4o-mini" for call in writer_calls)
+
+    async def test_writer_repairs_review_style_json_output(self):
+        class RepairMockLLM:
+            def __init__(self):
+                self.calls: list[dict[str, Any]] = []
+                self._writer_calls = 0
+
+            async def chat(self, messages, *, role=None, **kwargs):
+                self.calls.append({"role": role, "messages": messages})
+                if role == "writer":
+                    self._writer_calls += 1
+                    if self._writer_calls == 1:
+                        return '{"score": 80, "must_fix": [], "feedback": "ok", "pass": true}'
+                    return "# Chapter 1\n\nThis chapter is repaired markdown prose."
+                return "ok"
+
+        llm = RepairMockLLM()
+        agent = WorkerAgent(
+            agent_id=uuid.uuid4(), name="writer_repair",
+            role="writer", llm_client=llm, middlewares=(),
+        )
+        result = await agent.handle_task(
+            {
+                "task_id": "t1",
+                "node_id": "n1",
+                "title": "Write chapter",
+                "agent_role": "writer",
+                "payload": {"chapter_index": 1, "chapter_title": "Chapter 1"},
+            }
+        )
+        parsed = json.loads(result)
+        assert parsed["chapter_title"] == "Chapter 1"
+        assert parsed["content_markdown"].startswith("# Chapter 1")
+        assert len(llm.calls) >= 2
+
+    async def test_reviewer_repairs_invalid_non_json_output(self):
+        class ReviewerRepairMockLLM:
+            def __init__(self):
+                self.calls: list[dict[str, Any]] = []
+                self._review_calls = 0
+
+            async def chat(self, messages, *, role=None, **kwargs):
+                self.calls.append({"role": role, "messages": messages})
+                if role == "reviewer":
+                    self._review_calls += 1
+                    if self._review_calls == 1:
+                        return "looks good"
+                    return '{"score": 75, "must_fix": [], "feedback": "ok", "pass": true}'
+                return "ok"
+
+        llm = ReviewerRepairMockLLM()
+        agent = WorkerAgent(
+            agent_id=uuid.uuid4(), name="reviewer_repair",
+            role="reviewer", llm_client=llm, middlewares=(),
+        )
+        result = await agent.handle_task(
+            {
+                "task_id": "t1",
+                "node_id": "n2",
+                "title": "Review chapter",
+                "agent_role": "reviewer",
+                "payload": {"chapter_index": 1, "chapter_title": "Chapter 1"},
+            }
+        )
+        assert result.startswith("{")
+        assert len(llm.calls) >= 2
+
 
 # ===================================================================
 # Test: Middleware Pipeline Integration
@@ -794,3 +935,83 @@ class TestMiddlewarePipeline:
         assert isinstance(DEFAULT_MIDDLEWARES[2], TimeoutMiddleware)
         assert isinstance(DEFAULT_MIDDLEWARES[3], ContextSummaryMiddleware)
         assert isinstance(DEFAULT_MIDDLEWARES[4], MemoryMiddleware)
+
+
+class TestSpecializedAgentPayloadPassthrough:
+    """Dedicated role agents should preserve depth/target_words for fast-path routing."""
+
+    async def test_outline_agent_preserves_depth(self, mock_llm):
+        agent = OutlineAgent(agent_id=uuid.uuid4(), name="outline", llm_client=mock_llm, middlewares=())
+        with patch.object(WorkerAgent, "handle_task", new_callable=AsyncMock, return_value="ok") as mocked:
+            await agent.handle_task(
+                {
+                    "agent_role": "outline",
+                    "title": "Generate outline",
+                    "payload": {"depth": "quick", "target_words": 1200},
+                }
+            )
+        forwarded = mocked.await_args.args[0]["payload"]
+        assert forwarded["depth"] == "quick"
+        assert forwarded["target_words"] == 1200
+
+    async def test_writer_agent_preserves_depth(self, mock_llm):
+        agent = WriterAgent(agent_id=uuid.uuid4(), name="writer", llm_client=mock_llm, middlewares=())
+        with patch.object(WorkerAgent, "handle_task", new_callable=AsyncMock, return_value="ok") as mocked:
+            await agent.handle_task(
+                {
+                    "agent_role": "writer",
+                    "title": "Write chapter 1",
+                    "payload": {"depth": "quick", "target_words": 1200, "chapter_title": "Intro"},
+                }
+            )
+        forwarded = mocked.await_args.args[0]["payload"]
+        assert forwarded["depth"] == "quick"
+        assert forwarded["target_words"] == 1200
+
+    async def test_researcher_agent_preserves_depth(self, mock_llm):
+        agent = ResearcherAgent(
+            agent_id=uuid.uuid4(), name="researcher", llm_client=mock_llm, middlewares=()
+        )
+        with patch.object(WorkerAgent, "handle_task", new_callable=AsyncMock, return_value="ok") as mocked:
+            await agent.handle_task(
+                {
+                    "agent_role": "researcher",
+                    "title": "Research task",
+                    "payload": {"depth": "quick", "target_words": 900},
+                }
+            )
+        forwarded = mocked.await_args.args[0]["payload"]
+        assert forwarded["depth"] == "quick"
+        assert forwarded["target_words"] == 900
+
+    async def test_reviewer_agent_preserves_depth_and_target_words(self, mock_llm):
+        agent = ReviewerAgent(
+            agent_id=uuid.uuid4(), name="reviewer", llm_client=mock_llm, middlewares=()
+        )
+        with patch.object(WorkerAgent, "handle_task", new_callable=AsyncMock, return_value="ok") as mocked:
+            await agent.handle_task(
+                {
+                    "agent_role": "reviewer",
+                    "title": "Review chapter",
+                    "payload": {"depth": "quick", "target_words": 1200, "chapter_title": "Intro"},
+                }
+            )
+        forwarded = mocked.await_args.args[0]["payload"]
+        assert forwarded["depth"] == "quick"
+        assert forwarded["target_words"] == 1200
+
+    async def test_consistency_agent_preserves_depth_and_target_words(self, mock_llm):
+        agent = ConsistencyAgent(
+            agent_id=uuid.uuid4(), name="consistency", llm_client=mock_llm, middlewares=()
+        )
+        with patch.object(WorkerAgent, "handle_task", new_callable=AsyncMock, return_value="ok") as mocked:
+            await agent.handle_task(
+                {
+                    "agent_role": "consistency",
+                    "title": "Consistency check",
+                    "payload": {"depth": "quick", "target_words": 1200, "full_text": "draft"},
+                }
+            )
+        forwarded = mocked.await_args.args[0]["payload"]
+        assert forwarded["depth"] == "quick"
+        assert forwarded["target_words"] == 1200

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -50,10 +51,18 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     ),
     "deepseek-chat": ModelConfig(
         provider="deepseek",
-        model="deepseek-chat",
+        model="deepseek/deepseek-chat",
         supports_streaming=True,
         supports_json_mode=True,
         max_tokens=8192,
+        fallback="gpt-4o",
+    ),
+    "gpt-4o-mini": ModelConfig(
+        provider="openai",
+        model="gpt-4o-mini",
+        supports_streaming=True,
+        supports_json_mode=True,
+        max_tokens=4096,
         fallback="gpt-4o",
     ),
 }
@@ -62,6 +71,7 @@ ROLE_MODEL_MAP: dict[str, str] = {
     "orchestrator": "gpt-4o",
     "manager": "deepseek-chat",
     "outline": "gpt-4o",
+    "researcher": "gpt-4o",
     "writer": "deepseek-chat",
     "reviewer": "gpt-4o",
     "consistency": "gpt-4o",
@@ -90,7 +100,7 @@ class BaseLLMClient(ABC):
         model: str | None = None,
         role: str | None = None,
         max_tokens: int | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
     ) -> str:
@@ -104,7 +114,7 @@ class BaseLLMClient(ABC):
         model: str | None = None,
         role: str | None = None,
         max_tokens: int | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
     ) -> AsyncIterator[str]:
@@ -217,26 +227,177 @@ class LLMClient(BaseLLMClient):
     def _log_usage(self, model: str, usage: Any, role: str | None = None) -> None:
         if not usage:
             return
-        cached_tokens = 0
-        if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details:
-            cached_tokens = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
+        if isinstance(usage, dict):
+            prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
+            completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+            total_tokens = int(
+                usage.get("total_tokens", prompt_tokens + completion_tokens) or 0
+            )
+            prompt_details = usage.get("prompt_tokens_details") or {}
+            cached_tokens = int(prompt_details.get("cached_tokens", 0) or 0)
+        else:
+            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+            cached_tokens = 0
+            if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details:
+                cached_tokens = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
 
         logger.bind(
             model=model,
             role=role or "",
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
-            total_tokens=usage.total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
             cached_tokens=cached_tokens,
         ).info("LLM usage")
 
         if self._tracker:
             self._tracker.record(
-                prompt_tokens=usage.prompt_tokens,
-                completion_tokens=usage.completion_tokens,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
                 cached_tokens=cached_tokens,
                 role=role,
             )
+
+    @staticmethod
+    def _extract_usage(resp: Any) -> Any:
+        if isinstance(resp, dict):
+            return resp.get("usage")
+        return getattr(resp, "usage", None)
+
+    @staticmethod
+    def _extract_first_choice(resp: Any) -> Any | None:
+        if isinstance(resp, dict):
+            choices = resp.get("choices")
+        else:
+            choices = getattr(resp, "choices", None)
+        if not choices:
+            return None
+        try:
+            return choices[0]
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_message(cls, resp: Any) -> Any | None:
+        choice = cls._extract_first_choice(resp)
+        if choice is None:
+            return None
+        if isinstance(choice, dict):
+            return choice.get("message")
+        return getattr(choice, "message", None)
+
+    @staticmethod
+    def _extract_content_from_message(message: Any) -> str | None:
+        if message is None:
+            return None
+        if isinstance(message, dict):
+            content = message.get("content")
+        else:
+            content = getattr(message, "content", None)
+
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            # Some gateways may return content parts instead of a plain string.
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                    parts.append(item["text"])
+            return "".join(parts)
+        return None
+
+    @classmethod
+    def _extract_text_content(cls, resp: Any) -> str:
+        if isinstance(resp, str):
+            return resp
+        if isinstance(resp, dict):
+            message = cls._extract_message(resp)
+            content = cls._extract_content_from_message(message)
+            if content is not None:
+                return content
+            if isinstance(resp.get("content"), str):
+                return resp["content"]
+            return ""
+
+        message = cls._extract_message(resp)
+        content = cls._extract_content_from_message(message)
+        if content is not None:
+            return content
+        fallback_content = getattr(resp, "content", None)
+        if isinstance(fallback_content, str):
+            return fallback_content
+        return ""
+
+    @staticmethod
+    def _is_gateway_block_payload(content: str) -> bool:
+        text = (content or "").strip()
+        if not text:
+            return False
+
+        lowered = text.lower()
+        compact = lowered.replace(" ", "")
+
+        if compact.startswith("<!doctypehtml"):
+            return True
+        if 'name="aliyun_waf_aa"' in lowered:
+            return True
+
+        html_like = compact.startswith("<html") or "<html" in compact
+        challenge_markers = (
+            "captcha",
+            "cloudflare",
+            "just a moment",
+            "security check",
+            "waf",
+            "访问验证",
+            "人机验证",
+        )
+        return html_like and any(marker in lowered for marker in challenge_markers)
+
+    @classmethod
+    def _assert_clean_model_output(
+        cls,
+        *,
+        content: str,
+        model: str,
+        role: str | None,
+    ) -> None:
+        if cls._is_gateway_block_payload(content):
+            raise LLMUnavailableError(
+                f"Model '{model}' returned gateway/WAF challenge payload (role={role or 'n/a'})"
+            )
+
+    @staticmethod
+    def _parse_json_content(content: str) -> dict:
+        text = (content or "").strip()
+        if not text:
+            return {}
+
+        candidates: list[str] = [text]
+
+        fenced = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text, re.IGNORECASE)
+        if fenced:
+            candidates.append(fenced.group(1).strip())
+
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+            candidates.append(text[first_brace:last_brace + 1].strip())
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                continue
+
+        raise json.JSONDecodeError("No valid JSON object found", text, 0)
 
     # -- Retry and fallback core -------------------------------------------
 
@@ -381,7 +542,7 @@ class LLMClient(BaseLLMClient):
         model: str | None = None,
         role: str | None = None,
         max_tokens: int | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
     ) -> str:
@@ -394,8 +555,14 @@ class LLMClient(BaseLLMClient):
                 max_tokens=max_tokens or config.max_tokens,
                 temperature=temperature,
             )
-            self._log_usage(config.model, resp.usage, role)
-            return resp.choices[0].message.content or ""
+            self._log_usage(config.model, self._extract_usage(resp), role)
+            content = self._extract_text_content(resp)
+            self._assert_clean_model_output(
+                content=content,
+                model=config.model,
+                role=role,
+            )
+            return content
 
         return await self._call_with_retry(
             model_name,
@@ -411,7 +578,7 @@ class LLMClient(BaseLLMClient):
         model: str | None = None,
         role: str | None = None,
         max_tokens: int | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
     ) -> AsyncIterator[str]:
@@ -462,11 +629,16 @@ class LLMClient(BaseLLMClient):
                 kwargs["response_format"] = {"type": "json_object"}
 
             resp = await client.chat.completions.create(**kwargs)
-            self._log_usage(config.model, resp.usage, role)
+            self._log_usage(config.model, self._extract_usage(resp), role)
 
-            content = resp.choices[0].message.content or "{}"
+            content = self._extract_text_content(resp) or "{}"
+            self._assert_clean_model_output(
+                content=content,
+                model=config.model,
+                role=role,
+            )
             try:
-                result = json.loads(content)
+                result = self._parse_json_content(content)
             except json.JSONDecodeError as exc:
                 logger.bind(model=config.model, role=role or "").warning(
                     f"LLM returned invalid JSON: {exc}"
@@ -513,24 +685,42 @@ class LLMClient(BaseLLMClient):
                 max_tokens=max_tokens or config.max_tokens,
                 temperature=0.3,
             )
-            self._log_usage(config.model, resp.usage, role)
+            self._log_usage(config.model, self._extract_usage(resp), role)
 
-            message = resp.choices[0].message
-            if message.tool_calls:
+            message = self._extract_message(resp)
+            if isinstance(message, dict):
+                tool_calls = message.get("tool_calls") or []
+            else:
+                tool_calls = getattr(message, "tool_calls", None) or []
+            if tool_calls:
                 return {
                     "type": "tool_calls",
                     "tool_calls": [
                         {
-                            "id": tc.id,
+                            "id": tc.get("id") if isinstance(tc, dict) else tc.id,
                             "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
+                                "name": (
+                                    tc.get("function", {}).get("name")
+                                    if isinstance(tc, dict)
+                                    else tc.function.name
+                                ),
+                                "arguments": (
+                                    tc.get("function", {}).get("arguments")
+                                    if isinstance(tc, dict)
+                                    else tc.function.arguments
+                                ),
                             },
                         }
-                        for tc in message.tool_calls
+                        for tc in tool_calls
                     ],
                 }
-            return {"type": "text", "content": message.content or ""}
+            content = self._extract_text_content(resp)
+            self._assert_clean_model_output(
+                content=content,
+                model=config.model,
+                role=role,
+            )
+            return {"type": "text", "content": content}
 
         return await self._call_with_retry(
             model_name,
@@ -580,7 +770,7 @@ class DebugMockLLMClient(BaseLLMClient):
         model: str | None = None,
         role: str | None = None,
         max_tokens: int | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
     ) -> str:
@@ -601,7 +791,7 @@ class DebugMockLLMClient(BaseLLMClient):
         model: str | None = None,
         role: str | None = None,
         max_tokens: int | None = None,
-        temperature: float = 0.7,
+        temperature: float = 0.3,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
     ) -> AsyncIterator[str]:

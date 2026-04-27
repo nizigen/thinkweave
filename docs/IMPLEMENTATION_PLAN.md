@@ -8,6 +8,27 @@
 
 ---
 
+## Milestone v1.1：30k Longform Reliability（增量）
+
+### Phase 5.4 — 30k Benchmark Gate + Real Env E2E
+- [x] 新增 `scripts/longform_eval_runner.sh`，输出 machine-readable JSON 指标：
+  - `length_compliance`
+  - `instruction_adherence`
+  - `citation_coverage`
+  - `duplicate_rate`
+  - `consistency_severity_budget`
+- [x] 新增 `backend/tests/test_longform_eval.py`，覆盖达标/不达标/输入缺失场景
+- [x] 扩展 `scripts/playwright_cli_real_env.sh` 支持 `MODE/DEPTH/TARGET_WORDS` 参数化（可直接跑 30k）
+- [x] 扩展 `backend/tests/test_e2e_flows.py` longform 30k 创建与详情断言
+- [x] 文档同步 gate 判定口径（progress + plan）
+
+**验收命令：**
+- `cd backend && .venv/bin/pytest -q tests/test_longform_eval.py tests/test_e2e_flows.py`
+- `TARGET_WORDS=30000 DEPTH=deep MODE=report WAIT_FOR_COMPLETION=1 COMPLETION_TIMEOUT_SECS=3600 TUNNEL_PROVIDER=local TASK_TOKEN=test-token-123 bash scripts/playwright_cli_real_env.sh`
+- `bash scripts/longform_eval_runner.sh`
+
+---
+
 ## Phase 0：项目脚手架（第3-4周）
 
 ### Step 0.1 — 项目目录初始化

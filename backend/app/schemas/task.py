@@ -88,6 +88,8 @@ class TaskDetailRead(TaskRead):
     blocking_reason: str | None = None
     node_status_summary: dict[str, int] = Field(default_factory=dict)
     stage_progress: dict[str, int] = Field(default_factory=dict)
+    evidence_summary: dict[str, int] = Field(default_factory=dict)
+    citation_summary: dict[str, int] = Field(default_factory=dict)
 
 
 class TaskControlSkipRequest(BaseModel):

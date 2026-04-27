@@ -17,3 +17,9 @@
 - [x] Phase 4: Web Observability Alignment + E2E Validation (completed 2026-04-26)
   **Goal:** Align monitoring with stage semantics and validate with real flows.
   **Depends on:** Phase 3
+
+## Milestone v1.1: 30k Longform Reliability
+
+- [ ] Phase 5: Ultimate Longform 30k Closure
+  **Goal:** Close the 30k reliability gap with tool-backed research, adaptive budget planning, assembly rewrite, and benchmark gates.
+  **Depends on:** Phase 4

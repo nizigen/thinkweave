@@ -813,6 +813,78 @@ class TestFinalizeOutput:
         assert "Real content here." in (task.output_text or "")
         assert task.word_count == word_count
 
+    @pytest.mark.asyncio
+    async def test_finalize_output_prefers_assembly_editor_result(self, db_session):
+        from app.models.task_node import TaskNode
+
+        task = await _create_task(db_session, fsm_state="done")
+        n1 = TaskNode(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            title="Chapter 1",
+            agent_role="writer",
+            status="completed",
+            result="Draft chapter one content.",
+        )
+        n2 = TaskNode(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            title="全稿Assembly编辑收敛（术语统一/重复折叠/结论收敛）",
+            agent_role="writer",
+            status="completed",
+            result="Final assembled manuscript with expanded consolidated details.",
+        )
+        db_session.add(n1)
+        db_session.add(n2)
+        await db_session.flush()
+
+        fsm = LongTextFSM(task_id=task.id, state=LongTextState.DONE)
+        await fsm.finalize_output(session=db_session)
+
+        await db_session.refresh(task)
+        assert task.output_text == "Final assembled manuscript with expanded consolidated details."
+
+    @pytest.mark.asyncio
+    async def test_finalize_output_keeps_base_when_assembly_too_short(self, db_session):
+        from app.models.task_node import TaskNode
+
+        task = await _create_task(db_session, fsm_state="done")
+        n1 = TaskNode(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            title="Chapter 1",
+            agent_role="writer",
+            status="completed",
+            result="This is chapter one with substantial detail and evidence.",
+        )
+        n2 = TaskNode(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            title="Chapter 2",
+            agent_role="writer",
+            status="completed",
+            result="This is chapter two with substantial detail and analysis.",
+        )
+        n3 = TaskNode(
+            id=uuid.uuid4(),
+            task_id=task.id,
+            title="全稿Assembly编辑收敛（术语统一/重复折叠/结论收敛）",
+            agent_role="writer",
+            status="completed",
+            result="Too short.",
+        )
+        db_session.add(n1)
+        db_session.add(n2)
+        db_session.add(n3)
+        await db_session.flush()
+
+        fsm = LongTextFSM(task_id=task.id, state=LongTextState.DONE)
+        await fsm.finalize_output(session=db_session)
+
+        await db_session.refresh(task)
+        assert "chapter one" in (task.output_text or "").lower()
+        assert "chapter two" in (task.output_text or "").lower()
+
 
 # ===========================================================================
 # 9. session_memory_namespace in checkpoint

@@ -16,8 +16,12 @@ class WriterAgent(WorkerAgent):
         super().__init__(**kwargs)
 
     async def handle_task(self, ctx: dict[str, Any]) -> str:
+        incoming_role = str(ctx.get("agent_role") or "writer").strip().lower()
+        if incoming_role != "writer":
+            return await super().handle_task(ctx)
         payload = dict(ctx.get("payload", {}))
         normalized_payload = {
+            "depth": payload.get("depth", ""),
             "chapter_index": payload.get("chapter_index", ""),
             "chapter_title": payload.get("chapter_title", ""),
             "full_outline": payload.get("full_outline", ""),
@@ -26,6 +30,11 @@ class WriterAgent(WorkerAgent):
             "memory_context": ctx.get("memory_context", payload.get("memory_context", "")),
             "topic_claims": payload.get("topic_claims", {}),
             "assigned_evidence": payload.get("assigned_evidence", []),
+            "source_policy": payload.get("source_policy", ""),
+            "research_protocol": payload.get("research_protocol", ""),
+            "research_keywords": payload.get("research_keywords", ""),
+            "evidence_pool_summary": payload.get("evidence_pool_summary", ""),
+            "evidence_pool_markdown": payload.get("evidence_pool_markdown", ""),
             "target_words": payload.get("target_words", ""),
         }
 

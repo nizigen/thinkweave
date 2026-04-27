@@ -9,10 +9,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -32,6 +33,8 @@ from app.services.dag_scheduler import (
     get_scheduler,
     start_scheduler,
     stop_scheduler,
+    _is_invalid_output_for_role,
+    _is_suspicious_node_output,
     _active_schedulers,
 )
 
@@ -80,11 +83,13 @@ class FakeAgent:
         name: str = "test-agent",
         role: str = "writer",
         status: str = AGENT_IDLE,
+        capabilities: str | None = None,
     ):
         self.id = agent_id or make_uuid()
         self.name = name
         self.role = role
         self.status = status
+        self.capabilities = capabilities
         self.created_at = datetime.now(UTC).replace(tzinfo=None)
 
 
@@ -121,6 +126,51 @@ class TestDAGSchedulerInit:
         assert scheduler._stop.is_set()
 
 
+class TestRoleOutputValidation:
+    def test_writer_rejects_reviewer_json(self):
+        payload = """{"score": 81, "must_fix": [], "feedback": "ok", "pass": true}"""
+        assert _is_invalid_output_for_role("writer", payload) is True
+
+    def test_writer_rejects_consistency_json(self):
+        payload = """{"pass": false, "style_conflicts": [], "claim_conflicts": [], "repair_targets": []}"""
+        assert _is_invalid_output_for_role("writer", payload) is True
+
+    def test_writer_rejects_plain_markdown(self):
+        content = "# Chapter 1\n\nThis is valid markdown chapter content."
+        assert _is_invalid_output_for_role("writer", content) is True
+
+    def test_writer_accepts_structured_writer_json(self):
+        payload = (
+            '{"chapter_title":"第1章","content_markdown":"# 第1章\\n\\n'
+            '这是一个满足长度要求的章节正文示例，用于验证 writer 结构化输出契约。'
+            '内容保持在本章范围内，并且避免模板化短语，确保质量门槛可通过。",'
+            '"key_points":["k1"],"evidence_trace":[],"boundary_notes":[]}'
+        )
+        assert _is_invalid_output_for_role("writer", payload) is False
+
+    def test_writer_schema_check_does_not_fail_on_style_only_issues(self):
+        payload = (
+            '{"chapter_title":"第1章","content_markdown":"首先，这里给出背景。\\n\\n'
+            '其次，这里给出方法。\\n\\n最后，这里给出结论。",'
+            '"key_points":["k1"],"evidence_trace":[],"boundary_notes":[]}'
+        )
+        assert _is_invalid_output_for_role("writer", payload) is False
+
+    def test_reviewer_requires_json_contract(self):
+        assert _is_invalid_output_for_role("reviewer", "plain text") is True
+        assert _is_invalid_output_for_role(
+            "reviewer",
+            """{"score": 75, "must_fix": [], "feedback": "ok", "pass": true}""",
+        ) is False
+
+    def test_consistency_requires_json_contract(self):
+        assert _is_invalid_output_for_role("consistency", "plain text") is True
+        assert _is_invalid_output_for_role(
+            "consistency",
+            """{"pass": false, "style_conflicts": [], "claim_conflicts": [], "repair_targets": [], "repair_priority": [1], "severity_summary": {"critical":0,"high":1,"medium":0,"low":0}}""",
+        ) is False
+
+
 # ---------------------------------------------------------------------------
 # Test: 并发控制 _can_dispatch
 # ---------------------------------------------------------------------------
@@ -154,6 +204,333 @@ class TestCanDispatch:
             scheduler._running_nodes[nid] = make_uuid()
             scheduler._node_roles[nid] = "writer"
         assert scheduler._can_dispatch("outline") is True
+
+
+class TestOrphanRunningRecovery:
+    @pytest.mark.asyncio
+    async def test_reconcile_orphan_running_nodes_recovers_to_ready(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        agent_id = make_uuid()
+        stale_node = FakeNode(
+            task_id=scheduler.task_id,
+            status=STATUS_RUNNING,
+            retry_count=2,
+            assigned_agent=agent_id,
+        )
+
+        first_result = MagicMock()
+        first_result.scalars.return_value.all.return_value = [stale_node]
+
+        with (
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock) as mock_set_status,
+            patch("app.services.dag_scheduler.push_ready_node", new_callable=AsyncMock) as mock_push_ready,
+        ):
+            mock_session = AsyncMock()
+            mock_session.execute = AsyncMock(side_effect=[first_result, MagicMock(), MagicMock()])
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await scheduler._reconcile_orphan_running_nodes()
+
+        mock_session.commit.assert_awaited_once()
+        mock_set_status.assert_awaited_once_with(
+            scheduler.task_id,
+            str(stale_node.id),
+            STATUS_READY,
+        )
+        mock_push_ready.assert_awaited_once_with(str(stale_node.id), priority=2.0)
+
+class TestWriterBudgetHelpers:
+    def test_parse_chapter_meta_supports_english_titles(self, scheduler: DAGScheduler):
+        idx, name = scheduler._parse_chapter_meta("Chapter 2: Method and Analysis")
+        assert idx == 2
+        assert "Method" in name
+
+        idx2, _ = scheduler._parse_chapter_meta("Ch. 3 - Results")
+        assert idx2 == 3
+
+    def test_primary_writer_count_excludes_expansion_titles(self, scheduler: DAGScheduler):
+        writer_nodes = [
+            ("第1章：背景", "content-a"),
+            ("第1章：背景（扩写）", "content-b"),
+            ("第2章：方法", "content-c"),
+            ("全稿扩写与篇幅补足", "content-d"),
+        ]
+        assert scheduler._primary_writer_count(writer_nodes) == 2
+
+    def test_expansion_title_detection(self, scheduler: DAGScheduler):
+        assert scheduler._is_expansion_writer_title("第3章：实验（扩写）") is True
+        assert scheduler._is_expansion_writer_title("全稿扩写与篇幅补足") is True
+        assert scheduler._is_expansion_writer_title("第3章：实验设计") is False
+
+    @pytest.mark.asyncio
+    async def test_build_assignment_payload_includes_word_budget_and_ledger(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node_id = make_uuid()
+        task = SimpleNamespace(
+            title="Longform strategy report",
+            mode="report",
+            depth="deep",
+            target_words=30000,
+            checkpoint_data={},
+        )
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=task)
+
+        with (
+            patch.object(scheduler, "_load_outline_result", new=AsyncMock(return_value="")),
+            patch.object(
+                scheduler,
+                "_load_writer_nodes",
+                new=AsyncMock(return_value=[("第1章：背景", "a"), ("第2章：方法", "b")]),
+            ),
+        ):
+            payload = await scheduler._build_assignment_payload(
+                session=session,
+                node_id=node_id,
+                node_title="第1章：背景",
+                node_role="writer",
+                node_retry_count=0,
+                routing_reason="role_fallback",
+                routing_mode="auto",
+            )
+
+        assert payload["planned_words"] > 0
+        assert payload["word_floor"] >= 300
+        assert payload["word_ceiling"] >= payload["word_floor"]
+        assert payload["target_words"] == payload["planned_words"]
+        ledger = task.checkpoint_data.get("node_budget_ledger", {})
+        assert str(node_id) in ledger
+        assert ledger[str(node_id)]["planned_words"] == payload["planned_words"]
+
+    @pytest.mark.asyncio
+    async def test_writer_min_units_prefers_node_budget_ledger_floor(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node_id = make_uuid()
+        task = SimpleNamespace(
+            target_words=30000,
+            checkpoint_data={
+                "node_budget_ledger": {
+                    str(node_id): {
+                        "word_floor": 1333,
+                    }
+                }
+            },
+        )
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=task)
+
+        min_units = await scheduler._writer_min_units_for_task(
+            session=session,
+            node_id=node_id,
+            node_title="第1章：背景",
+        )
+        assert min_units == 1333
+
+    @pytest.mark.asyncio
+    async def test_auto_expansion_records_adaptive_decision(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        task = SimpleNamespace(checkpoint_data={})
+        session = AsyncMock()
+        execute_result = MagicMock()
+        execute_result.all.return_value = []
+        session.execute = AsyncMock(return_value=execute_result)
+        session.get = AsyncMock(return_value=task)
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new=AsyncMock()),
+            patch("app.services.dag_scheduler.push_ready_node", new=AsyncMock()),
+        ):
+            created = await scheduler._enqueue_auto_expansion_wave(
+                session=session,
+                target_words=30000,
+                current_words=12000,
+            )
+
+        assert created is True
+        decisions = task.checkpoint_data.get("expansion_decisions", [])
+        assert decisions
+        latest = decisions[-1]
+        assert latest["gap"] == 18000
+        assert latest["expansion_nodes"] >= 1
+        assert "adaptive expansion" in latest["reason"]
+
+
+class TestConsistencyRepairBudget:
+    def test_consistency_actionable_detection_false_when_empty(self, scheduler: DAGScheduler):
+        parsed = {
+            "style_conflicts": [],
+            "claim_conflicts": [],
+            "duplicate_coverage": [],
+            "term_inconsistency": [],
+            "transition_gaps": [],
+            "source_policy_violations": [],
+            "repair_targets": [],
+            "repair_priority": [],
+            "severity_summary": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        }
+        assert scheduler._consistency_has_actionable_issues(parsed) is False
+
+    def test_consistency_actionable_detection_true_with_conflict(self, scheduler: DAGScheduler):
+        parsed = {
+            "claim_conflicts": [{"chapter_index": 1, "severity": "medium"}],
+            "repair_targets": [],
+            "repair_priority": [],
+            "severity_summary": {"critical": 0, "high": 0, "medium": 1, "low": 0},
+        }
+        assert scheduler._consistency_has_actionable_issues(parsed) is True
+
+    @pytest.mark.asyncio
+    async def test_consume_repair_budget_allows_within_quota(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        task = SimpleNamespace(
+            target_words=30000,
+            checkpoint_data={},
+        )
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=task)
+        parsed = {
+            "style_conflicts": [{"chapter_index": 2, "severity": "medium"}],
+            "claim_conflicts": [{"chapter_index": 3, "severity": "high"}],
+            "repair_priority": [3, 2],
+            "repair_targets": [2, 3],
+            "severity_summary": {"critical": 0, "high": 1, "medium": 1, "low": 0},
+        }
+
+        allowed, targets, report = await scheduler._consume_consistency_repair_budget(
+            session=session,
+            parsed=parsed,
+            fallback_targets=[2],
+        )
+
+        assert allowed is True
+        assert 3 in targets
+        assert report is not None
+        budget = task.checkpoint_data.get("consistency_repair_budget", {})
+        assert budget.get("remaining_points", 0) < budget.get("total_points", 0)
+
+    @pytest.mark.asyncio
+    async def test_consume_repair_budget_rejects_when_exhausted(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        task = SimpleNamespace(
+            target_words=30000,
+            checkpoint_data={
+                "consistency_repair_budget": {
+                    "total_points": 4,
+                    "remaining_points": 1,
+                    "spent_points": 3,
+                    "rounds": 1,
+                    "events": [],
+                }
+            },
+        )
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=task)
+        parsed = {
+            "claim_conflicts": [{"chapter_index": 3, "severity": "high"}],
+            "repair_priority": [3],
+            "repair_targets": [3],
+            "severity_summary": {"critical": 0, "high": 1, "medium": 0, "low": 0},
+        }
+
+        allowed, targets, report = await scheduler._consume_consistency_repair_budget(
+            session=session,
+            parsed=parsed,
+            fallback_targets=[3],
+        )
+
+        assert allowed is False
+        assert targets == [3]
+        assert report is not None
+        assert report["required_points"] > report["remaining_points_before"]
+
+
+class TestMatchAgentRouting:
+    @pytest.mark.asyncio
+    async def test_match_agent_prefers_capability_match_over_plain_role(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        role_only = FakeAgent(name="role-only", role="writer", capabilities="draft")
+        capability_agent = FakeAgent(
+            name="cap-agent",
+            role="writer",
+            capabilities="draft,retrieval",
+        )
+        fake_result = MagicMock()
+        fake_result.scalars.return_value.all.return_value = [role_only, capability_agent]
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=fake_result)
+
+        agent, reason = await scheduler._match_agent(
+            session,
+            role="writer",
+            required_capabilities=["retrieval"],
+            preferred_agents=[],
+            routing_mode="auto",
+        )
+
+        assert agent is capability_agent
+        assert reason == "capability_match"
+
+    @pytest.mark.asyncio
+    async def test_match_agent_falls_back_to_role_when_capability_missing(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        role_agent = FakeAgent(name="writer-a", role="writer", capabilities="draft")
+        fake_result = MagicMock()
+        fake_result.scalars.return_value.all.return_value = [role_agent]
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=fake_result)
+
+        agent, reason = await scheduler._match_agent(
+            session,
+            role="writer",
+            required_capabilities=["retrieval"],
+            preferred_agents=[],
+            routing_mode="auto",
+        )
+
+        assert agent is role_agent
+        assert reason == "role_fallback"
+
+    @pytest.mark.asyncio
+    async def test_match_agent_strict_bind_blocks_fallback(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        role_agent = FakeAgent(name="writer-a", role="writer", capabilities="draft")
+        fake_result = MagicMock()
+        fake_result.scalars.return_value.all.return_value = [role_agent]
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=fake_result)
+
+        agent, reason = await scheduler._match_agent(
+            session,
+            role="writer",
+            required_capabilities=["retrieval"],
+            preferred_agents=["missing-agent"],
+            routing_mode="strict_bind",
+        )
+
+        assert agent is None
+        assert reason == "strict_bind_no_match"
 
 
 class TestAssignNode:
@@ -271,6 +648,54 @@ class TestAssignNode:
         mock_set_status.assert_not_called()
         mock_timeout.assert_not_called()
         mock_comm.send_task_assignment.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_assign_node_emits_routing_labels_in_events(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node = FakeNode(status=STATUS_READY, retry_count=0, agent_role="writer")
+        agent = FakeAgent(role="writer")
+        session = AsyncMock()
+        session.expire_all = MagicMock()
+        session.get = AsyncMock(
+            side_effect=[
+                FakeNode(
+                    node_id=node.id,
+                    status=STATUS_RUNNING,
+                    assigned_agent=agent.id,
+                    agent_role="writer",
+                ),
+                SimpleNamespace(checkpoint_data={"control": {"status": "active"}}),
+            ]
+        )
+        update_result = MagicMock()
+        update_result.rowcount = 1
+        session.execute = AsyncMock(side_effect=[update_result, MagicMock()])
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.add_timeout_watch", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.communicator") as mock_comm,
+        ):
+            mock_comm.send_task_assignment = AsyncMock()
+            mock_comm.send_status_update = AsyncMock()
+
+            assigned = await scheduler._assign_node(
+                session,
+                node,
+                agent,
+                routing_reason="capability_match",
+                routing_mode="capability_first",
+            )
+
+        assert assigned is True
+        assign_kwargs = mock_comm.send_task_assignment.await_args.kwargs
+        assert assign_kwargs["payload"]["routing_reason"] == "capability_match"
+        assert assign_kwargs["payload"]["routing_mode"] == "capability_first"
+        status_kwargs = mock_comm.send_status_update.await_args.kwargs
+        assert status_kwargs["extra"]["routing_reason"] == "capability_match"
+        assert status_kwargs["extra"]["routing_mode"] == "capability_first"
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +996,7 @@ class TestControlCooperation:
             _session: object,
             node: FakeNode,
             _agent: FakeAgent,
+            **_: object,
         ) -> bool:
             if node.id == first.id:
                 task.checkpoint_data["control"]["status"] = "pause_requested"
@@ -813,7 +1239,8 @@ class TestRunTerminalSemantics:
             await scheduler.run()
 
         mock_done.assert_not_called()
-        mock_failed.assert_awaited_once_with("DAG completed with failed nodes")
+        mock_failed.assert_awaited_once()
+        assert "DAG completed with failed nodes" in mock_failed.await_args.args[0]
 
 
 class TestSkipSemantics:
@@ -1201,6 +1628,7 @@ class TestMarkTask:
         with (
             patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
             patch("app.services.dag_scheduler.communicator") as mock_comm,
+            patch("app.services.long_text_fsm.LongTextFSM.finalize_output", new_callable=AsyncMock) as mock_finalize,
         ):
             mock_session = AsyncMock()
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -1210,17 +1638,20 @@ class TestMarkTask:
 
             await scheduler._mark_task_done()
 
-        mock_session.execute.assert_called_once()
+        assert mock_session.execute.call_count >= 1
         mock_session.commit.assert_called_once()
+        mock_finalize.assert_awaited_once()
         mock_comm.send_status_update.assert_called_once()
         mock_comm.send_task_event.assert_called_once()
         assert mock_comm.send_task_event.await_args.kwargs["msg_type"] == "task_done"
+        assert mock_comm.send_task_event.await_args.kwargs["payload"]["status"] == "completed"
 
     @pytest.mark.asyncio
     async def test_mark_task_done_ignores_notification_failures(self, scheduler: DAGScheduler):
         with (
             patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
             patch("app.services.dag_scheduler.communicator") as mock_comm,
+            patch("app.services.long_text_fsm.LongTextFSM.finalize_output", new_callable=AsyncMock),
         ):
             mock_session = AsyncMock()
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -1269,6 +1700,224 @@ class TestMarkTask:
 
 
 # ---------------------------------------------------------------------------
+# Test: consistency repair-target injection path
+# ---------------------------------------------------------------------------
+
+
+class TestConsistencyRepairWave:
+    @pytest.mark.asyncio
+    async def test_drain_task_results_injects_repair_wave_on_consistency_fail(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node_id = make_uuid()
+        agent_id = make_uuid()
+        payload = {
+            "status": "done",
+            "output": json.dumps(
+                {
+                    "pass": False,
+                    "style_conflicts": [],
+                    "claim_conflicts": [],
+                    "repair_targets": [1, 3],
+                },
+                ensure_ascii=False,
+            ),
+        }
+        envelope = SimpleNamespace(
+            msg_type="task_result",
+            node_id=str(node_id),
+            from_agent=str(agent_id),
+            payload=payload,
+        )
+
+        with (
+            patch(
+                "app.services.dag_scheduler.xread_latest",
+                new_callable=AsyncMock,
+                return_value=[SimpleNamespace(message_id="1-0", data={})],
+            ),
+            patch(
+                "app.services.dag_scheduler.MessageEnvelope.from_redis",
+                return_value=envelope,
+            ),
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
+            patch.object(
+                scheduler,
+                "_inject_consistency_repair_wave",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_inject,
+            patch.object(
+                scheduler,
+                "on_node_completed",
+                new_callable=AsyncMock,
+            ) as mock_completed,
+            patch.object(
+                scheduler,
+                "on_node_failed",
+                new_callable=AsyncMock,
+            ) as mock_failed,
+        ):
+            mock_session = AsyncMock()
+            role_row = MagicMock()
+            role_row.first.return_value = ("consistency", "一致性检查", 0)
+            mock_session.execute = AsyncMock(return_value=role_row)
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await scheduler._drain_task_results()
+
+        mock_inject.assert_awaited_once_with(
+            session=ANY,
+            repair_targets=[1, 3],
+        )
+        mock_completed.assert_awaited_once_with(
+            node_id=node_id,
+            result=payload["output"],
+            agent_id=agent_id,
+        )
+        mock_failed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_drain_task_results_fails_when_consistency_budget_exhausted(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node_id = make_uuid()
+        agent_id = make_uuid()
+        payload = {
+            "status": "done",
+            "output": json.dumps(
+                {
+                    "pass": False,
+                    "style_conflicts": [],
+                    "claim_conflicts": [],
+                    "repair_targets": [2],
+                },
+                ensure_ascii=False,
+            ),
+        }
+        envelope = SimpleNamespace(
+            msg_type="task_result",
+            node_id=str(node_id),
+            from_agent=str(agent_id),
+            payload=payload,
+        )
+
+        with (
+            patch(
+                "app.services.dag_scheduler.xread_latest",
+                new_callable=AsyncMock,
+                return_value=[SimpleNamespace(message_id="1-0", data={})],
+            ),
+            patch(
+                "app.services.dag_scheduler.MessageEnvelope.from_redis",
+                return_value=envelope,
+            ),
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
+            patch.object(
+                scheduler,
+                "_inject_consistency_repair_wave",
+                new_callable=AsyncMock,
+                return_value=False,  # repair wave budget exhausted
+            ) as mock_inject,
+            patch.object(
+                scheduler,
+                "on_node_completed",
+                new_callable=AsyncMock,
+            ) as mock_completed,
+            patch.object(
+                scheduler,
+                "on_node_failed",
+                new_callable=AsyncMock,
+            ) as mock_failed,
+        ):
+            mock_session = AsyncMock()
+            role_row = MagicMock()
+            role_row.first.return_value = ("consistency", "一致性检查", MAX_RETRIES - 1)
+            mock_session.execute = AsyncMock(return_value=role_row)
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await scheduler._drain_task_results()
+
+        mock_inject.assert_awaited_once_with(
+            session=ANY,
+            repair_targets=[2],
+        )
+        mock_completed.assert_not_awaited()
+        mock_failed.assert_awaited_once()
+        assert "max retries/repair waves" in mock_failed.await_args.kwargs["error"]
+
+    @pytest.mark.asyncio
+    async def test_inject_repair_wave_compacts_nodes_for_quick_low_word_task(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        added_nodes: list[object] = []
+        mock_session = AsyncMock()
+
+        writer_rows = MagicMock()
+        writer_rows.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=writer_rows)
+        mock_session.get = AsyncMock(
+            return_value=SimpleNamespace(depth="quick", target_words=1200)
+        )
+        mock_session.add = MagicMock(side_effect=lambda node: added_nodes.append(node))
+        mock_session.commit = AsyncMock()
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.push_ready_node", new_callable=AsyncMock),
+        ):
+            ok = await scheduler._inject_consistency_repair_wave(
+                session=mock_session,
+                repair_targets=[1, 2, 3],
+            )
+
+        assert ok is True
+        roles = [getattr(node, "agent_role", "") for node in added_nodes]
+        assert roles.count("writer") == 1
+        assert roles.count("reviewer") == 0
+        assert roles.count("consistency") == 1
+        consistency = next(node for node in added_nodes if getattr(node, "agent_role", "") == "consistency")
+        assert len(getattr(consistency, "depends_on", []) or []) == 1
+
+    @pytest.mark.asyncio
+    async def test_inject_repair_wave_keeps_reviewer_chain_for_standard_depth(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        added_nodes: list[object] = []
+        mock_session = AsyncMock()
+
+        writer_rows = MagicMock()
+        writer_rows.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=writer_rows)
+        mock_session.get = AsyncMock(
+            return_value=SimpleNamespace(depth="standard", target_words=4000)
+        )
+        mock_session.add = MagicMock(side_effect=lambda node: added_nodes.append(node))
+        mock_session.commit = AsyncMock()
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.push_ready_node", new_callable=AsyncMock),
+        ):
+            ok = await scheduler._inject_consistency_repair_wave(
+                session=mock_session,
+                repair_targets=[1, 2],
+            )
+
+        assert ok is True
+        roles = [getattr(node, "agent_role", "") for node in added_nodes]
+        assert roles.count("writer") == 2
+        assert roles.count("reviewer") == 2
+        assert roles.count("consistency") == 1
+
+
+# ---------------------------------------------------------------------------
 # Test: _match_agent
 # ---------------------------------------------------------------------------
 
@@ -1279,20 +1928,32 @@ class TestMatchAgent:
         agent = FakeAgent(role="writer")
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = agent
+        mock_result.scalars.return_value.all.return_value = [agent]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         scheduler = DAGScheduler(make_uuid())
-        result = await scheduler._match_agent(mock_session, "writer")
-        assert result is agent
+        matched, reason = await scheduler._match_agent(mock_session, "writer")
+        assert matched is agent
+        assert reason == "role_fallback"
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_agent_available(self):
         mock_session = AsyncMock()
         mock_result = MagicMock()
-        mock_result.scalars.return_value.first.return_value = None
+        mock_result.scalars.return_value.all.return_value = []
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         scheduler = DAGScheduler(make_uuid())
-        result = await scheduler._match_agent(mock_session, "writer")
-        assert result is None
+        matched, reason = await scheduler._match_agent(mock_session, "writer")
+        assert matched is None
+        assert reason == "no_idle_agent"
+
+
+class TestOutputSanitization:
+    def test_detects_waf_html_payload(self):
+        assert _is_suspicious_node_output(
+            '<!doctypehtml><meta name="aliyun_waf_aa" content="x">'
+        )
+
+    def test_allows_normal_markdown_payload(self):
+        assert not _is_suspicious_node_output("# 标题\n\n正常内容。")

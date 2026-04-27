@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
@@ -115,12 +116,33 @@ class TestCreateTask:
         assert data["status"] == "pending"
         assert data["fsm_state"] == "init"
 
-        assert len(data["nodes"]) == 3
+        assert len(data["nodes"]) >= 3
         roles = {n["agent_role"] for n in data["nodes"]}
         assert "outline" in roles
+        assert "researcher" in roles
         assert "writer" in roles
+        assert "reviewer" in roles
+        assert "consistency" in roles
+        assert all("required_capabilities" in n for n in data["nodes"])
+        assert all("preferred_agents" in n for n in data["nodes"])
+        assert all("routing_mode" in n for n in data["nodes"])
+        assert all("routing_reason" in n for n in data["nodes"])
+        assert all("routing_status" in n for n in data["nodes"])
 
         assert any(c["role"] == "orchestrator" for c in mock_llm.call_log)
+
+    async def test_create_task_starts_scheduler(
+        self,
+        client: AsyncClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        mock_start = AsyncMock()
+        monkeypatch.setattr("app.services.task_service.start_scheduler", mock_start)
+
+        resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
+        assert resp.status_code == 201
+
+        mock_start.assert_awaited_once()
 
     async def test_create_task_with_novel_mode(self, client: AsyncClient):
         payload = {**VALID_PAYLOAD, "mode": "novel", "target_words": 50000}
@@ -212,7 +234,7 @@ class TestCreateTaskWithRuntimeLlmSelection:
         assert resp.status_code == 201
         data = resp.json()
         assert data["status"] == "pending"
-        assert len(data["nodes"]) == 3
+        assert len(data["nodes"]) >= 3
 
         get_llm_client.cache_clear()
 
@@ -251,7 +273,8 @@ class TestGetTask:
         data = resp.json()
         assert data["id"] == task_id
         assert data["title"] == VALID_PAYLOAD["title"]
-        assert len(data["nodes"]) == 3
+        assert len(data["nodes"]) >= 3
+        assert "error_message" in data
 
     async def test_get_task_includes_monitor_recovery_snapshot_fields(
         self,
@@ -302,6 +325,52 @@ class TestGetTask:
         assert data["checkpoint_data"]["control"]["status"] == "active"
         assert data["checkpoint_data"]["control"]["preview_cache"][node_id]["content"] == "preview body"
         assert data["checkpoint_data"]["control"]["review_scores"][node_id]["score"] == 91
+
+    async def test_get_task_returns_error_message_field(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ):
+        detail = await _create_task_detail(client)
+        await db_session.execute(
+            update(Task)
+            .where(Task.id == uuid.UUID(detail["id"]))
+            .values(error_message="simulated failure reason")
+        )
+        await db_session.commit()
+
+        resp = await client.get(f"/api/tasks/{detail['id']}", headers=AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["error_message"] == "simulated failure reason"
+
+    async def test_get_task_returns_blocking_reason_for_non_terminal_task(
+        self,
+        client: AsyncClient,
+    ):
+        detail = await _create_task_detail(client)
+        resp = await client.get(f"/api/tasks/{detail['id']}", headers=AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "blocking_reason" in data
+        assert data["blocking_reason"]
+
+    async def test_get_task_returns_no_blocking_reason_for_terminal_task(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ):
+        detail = await _create_task_detail(client)
+        await db_session.execute(
+            update(Task)
+            .where(Task.id == uuid.UUID(detail["id"]))
+            .values(status="failed", error_message="mock failure")
+        )
+        await db_session.commit()
+        resp = await client.get(f"/api/tasks/{detail['id']}", headers=AUTH_HEADERS)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["blocking_reason"] is None
 
     async def test_get_task_not_found(self, client: AsyncClient):
         fake_id = str(uuid.uuid4())

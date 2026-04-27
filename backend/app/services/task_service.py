@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -18,6 +19,7 @@ from app.services.dag_scheduler import start_scheduler
 from app.services.entry_stage import build_entry_metadata
 from app.services.pipeline_orchestrator import PipelineOrchestrator
 from app.services.stage_contracts import get_stage_contract, resolve_stage_code
+from app.services.writer_output import parse_writer_payload
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
 
@@ -89,6 +91,80 @@ def _build_stage_progress(nodes: list[TaskNodeRead]) -> dict[str, int]:
         stage = str(node.stage_code or "QA").strip().upper() or "QA"
         progress[stage] = progress.get(stage, 0) + 1
     return progress
+
+
+def _parse_json_object(raw: Any) -> dict[str, Any] | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _build_evidence_and_citation_summary(nodes: list[TaskNode]) -> tuple[dict[str, int], dict[str, int]]:
+    evidence_total = 0
+    evidence_with_url = 0
+    evidence_unbound_claims = 0
+
+    citations_total = 0
+    citations_with_evidence = 0
+    citations_uncertain = 0
+
+    for node in nodes:
+        role = str(getattr(node, "agent_role", "") or "").strip().lower()
+        result = getattr(node, "result", None)
+        if not result:
+            continue
+
+        if role == "researcher":
+            parsed = _parse_json_object(result)
+            if not parsed:
+                continue
+            ledger = parsed.get("evidence_ledger", [])
+            if not isinstance(ledger, list):
+                continue
+            for item in ledger:
+                if not isinstance(item, dict):
+                    continue
+                evidence_total += 1
+                source_url = str(item.get("source_url") or "").strip()
+                claim_target = str(item.get("claim_target") or "").strip()
+                if source_url:
+                    evidence_with_url += 1
+                if not claim_target:
+                    evidence_unbound_claims += 1
+
+        if role == "writer":
+            payload = parse_writer_payload(str(result))
+            if not isinstance(payload, dict):
+                continue
+            citation_ledger = payload.get("citation_ledger", [])
+            if not isinstance(citation_ledger, list):
+                continue
+            for row in citation_ledger:
+                if not isinstance(row, dict):
+                    continue
+                citations_total += 1
+                support = str(row.get("support") or "").strip().lower()
+                if support and "uncertainty" not in support:
+                    citations_with_evidence += 1
+                else:
+                    citations_uncertain += 1
+
+    evidence_summary = {
+        "total": evidence_total,
+        "with_source_url": evidence_with_url,
+        "unbound_claims": evidence_unbound_claims,
+    }
+    citation_summary = {
+        "total": citations_total,
+        "bound_to_evidence": citations_with_evidence,
+        "uncertain_or_missing": citations_uncertain,
+    }
+    return evidence_summary, citation_summary
 
 
 def _parse_capability_tokens(raw: str | None) -> list[str]:
@@ -465,6 +541,7 @@ async def create_task(
             )
         )
     blocking_reason = _build_blocking_reason(task, node_reads)
+    evidence_summary, citation_summary = _build_evidence_and_citation_summary(nodes)
     return TaskDetailRead(
         id=task.id,
         title=task.title,
@@ -484,6 +561,8 @@ async def create_task(
         blocking_reason=blocking_reason,
         node_status_summary=_build_node_status_summary(node_reads),
         stage_progress=_build_stage_progress(node_reads),
+        evidence_summary=evidence_summary,
+        citation_summary=citation_summary,
     )
 
 
@@ -545,6 +624,9 @@ async def get_task_detail(
     task_read.blocking_reason = _build_blocking_reason(task, node_reads)
     task_read.node_status_summary = _build_node_status_summary(node_reads)
     task_read.stage_progress = _build_stage_progress(node_reads)
+    evidence_summary, citation_summary = _build_evidence_and_citation_summary(nodes)
+    task_read.evidence_summary = evidence_summary
+    task_read.citation_summary = citation_summary
     return task_read
 
 

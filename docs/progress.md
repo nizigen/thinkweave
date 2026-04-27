@@ -1,3 +1,44 @@
+## Phase 5 Wave 4（2026-04-27）
+- 新增 30k 评测脚本：`scripts/longform_eval_runner.sh`
+  - 输入任务详情 JSON，输出 machine-readable 指标 JSON（`length_compliance` / `instruction_adherence` / `citation_coverage` / `duplicate_rate` / `consistency_severity_budget`）。
+  - 输出统一 gate 判定：`length_gate`、`adherence_gate`、`citation_gate`、`overall`。
+- 新增评测测试：`backend/tests/test_longform_eval.py`
+  - 覆盖缺失输入、30k 达标样例、长度不达标样例。
+- 真实环境脚本增强：`scripts/playwright_cli_real_env.sh`
+  - 支持 longform 参数：`MODE` / `DEPTH` / `TARGET_WORDS`。
+  - 输出新增证据/引用/一致性预算摘要：`evidence_summary`、`citation_summary`、`consistency_repair_budget`、`expansion_decisions`。
+- E2E 用例扩展：`backend/tests/test_e2e_flows.py`
+  - 新增 `target_words=30000, depth=deep` 的 longform 创建与详情字段断言。
+
+## Phase 1 重构推进（2026-04-25）
+- 阶段命名从字母码切换为语义码：`SCOPING/RESEARCH/OUTLINE/DRAFT/REVIEW/ASSEMBLY/QA`，并保留 legacy `A-H` alias 兼容映射。
+- 明确保留 DAG 为执行层：pipeline metadata 新增 `execution_graph=dag_preserved`，planning 文档同步写死“阶段语义主线 + DAG 执行图”。
+- 去除图表图像阶段（原 `VISUALS`），统一为 7 阶段链路。
+- `task_service` 入口测试已对齐新 orchestrator（从 patch `decompose_task` 改为 patch `PipelineOrchestrator.plan_task`）。
+- prompt 对齐修正：`writer/write_chapter.md` 与 `orchestrator/decompose.md` 去除旧 `D/G` 字母阶段引用，改为 `DRAFT/ASSEMBLY`。
+- 新增失败透明化字段透传：`TaskRead` / `TaskDetailRead` 增加 `error_message`；补充 API 用例验证 `/api/tasks/{id}` 返回失败原因。
+- API 测试去除“固定 3 节点”假设，改为结构性断言（至少包含 outline/researcher/writer/reviewer/consistency），兼容深度扩展 DAG。
+- Playwright CLI 真实环境回归（local direct）：任务创建与监控链路可用，DAG 节点推进正常；最终触发 finalize gate 失败（`got=772, required_min=9000, target=10000`），已定位为当前剩余主问题。
+- 测试结果：
+  - `tests/test_task_service_entry_stage.py tests/test_dag_scheduler.py tests/test_task_decomposer.py` => 83 passed
+  - `tests/test_prompt_contracts.py tests/test_agent_prompt_contracts.py tests/test_task_service_entry_stage.py tests/test_dag_scheduler.py` => 73 passed
+  - `tests/test_task_api.py tests/test_ws_endpoint.py tests/test_task_service_entry_stage.py` => 62 passed
+  - `tests/test_task_api.py tests/test_prompt_contracts.py tests/test_task_service_entry_stage.py` => 50 passed
+
+## Step 8.1 Agent-First Routing（2026-04-23）
+- 新增 `docs/superpowers/contexts/2026-04-23-step-8-1-agent-first-routing-context.md` 与 `docs/superpowers/plans/2026-04-23-step-8-1-agent-first-routing-plan.md`，完成 discuss-phase + plan-phase 产物落地。
+- 路由模型从纯 `role` 匹配扩展为三层策略：`explicit_bind -> capability_match -> role_fallback`。
+- `DAGNodeSchema` 扩展路由字段：`required_capabilities` / `preferred_agents` / `routing_mode`（向后兼容旧 DAG）。
+- `task_service` 增加 capability 维度 `routing_snapshot`，并补充 `strict_bind_failures` 预检结果。
+- `dag_scheduler` 新增路由解释回写：在 `checkpoint_data.routing_results` 持久化 `routing_reason/routing_status`。
+- `TaskNodeRead` schema 已对齐路由字段：`required_capabilities`、`preferred_agents`、`routing_mode`、`routing_reason`、`routing_status`。
+- `agent_manager`/`AgentCreate` 增强 capabilities 规范化与校验（分隔符兼容、去重、长度约束）。
+- 前端监控与结果页已展示路由信息：`DagViewer`、`AgentPanel`、`Result` 均可见 `routing_reason/routing_status`。
+- 任务创建链路新增路由预检提示：`Home` 创建成功后即时提示缺失能力/strict bind 问题；`Monitor` 顶部展示 `routing_snapshot` 预警明细。
+- 验证通过：`tests/test_task_api.py tests/test_task_decomposer.py tests/test_dag_scheduler.py tests/test_agents.py tests/test_task_service_entry_stage.py` => `128 passed`。
+- 前端验证通过：`vitest src/components/monitor/__tests__/DagViewer.test.tsx src/components/monitor/__tests__/MonitorPage.test.tsx` => `4 passed`。
+- Playwright 真实环境验证：访问 `Home` 与 `Monitor`（含数据库夹具任务 `11111111-1111-4111-8111-111111111111`）确认 `Routing Precheck`、缺失能力文案、strict bind 节点按钮渲染与可点击行为。
+
 ## 文档同步（2026-03-22）
 - 已吸收可复用设计：分层推进、生命周期 hook、SessionMemory 优先落地。
 - 已明确本仓库 provider 真值：`cognee==0.5.5`，默认 `kuzu+lancedb`。
@@ -292,3 +333,84 @@
   - `backend/tests/test_agent_core.py + test_event_bridge.py + test_ws_endpoint.py` => `66 passed`
   - `backend/tests/test_communicator.py + test_agent_core.py + test_dag_scheduler.py + test_event_bridge.py + test_ws_endpoint.py + test_ws_manager.py` => `129 passed`
   - `backend/tests/test_long_text_fsm.py` 在本机因 PostgreSQL 连接拒绝未纳入本轮通过集，需在测试库可用后补跑。
+
+2026-04-23: Step 8.2 LLM fallback hardening + create-task unblocking.
+- Backend `app/utils/llm_client.py`:
+  - Added gateway response compatibility for `str/dict/object` payloads (`usage/message/content/tool_calls` extraction).
+  - Added tolerant JSON parsing for chat_json (`raw JSON`, fenced ```json blocks, and embedded JSON object extraction).
+- Backend `app/services/task_decomposer.py`:
+  - Added safe fallback DAG generation when decomposition output is malformed, while preserving original `503` behavior for `LLMUnavailableError`.
+- Tests added/updated:
+  - `backend/tests/test_llm_client.py`: non-standard response compatibility + fenced JSON parsing cases.
+  - `backend/tests/test_task_decomposer.py`: fallback DAG generation when `chat_json` returns invalid JSON.
+- Verification:
+  - `backend/.venv/bin/pytest -q tests/test_task_api.py tests/test_task_decomposer.py tests/test_dag_scheduler.py tests/test_agents.py tests/test_task_service_entry_stage.py tests/test_llm_client.py` => `159 passed`.
+  - Real API run (ephemeral uvicorn): `POST /api/tasks` changed from `500` to `201`, with fallback DAG persisted and routing snapshot returned.
+- Playwright CLI real-env check:
+  - Used `@playwright/cli` with temporary `localtunnel` URL; confirmed browser can open deployed tunnel and reach app title `Hierarch - Agent Orchestration`.
+  - Full UI create-flow is blocked in this environment by tunnel/HMR transport errors (`502` on `/src/main.tsx` and Vite websocket handshake), so task creation was validated via real backend HTTP call instead.
+2026-04-23: Step 8.3 observability follow-up (routing labels in events).
+- Scheduler event payloads now include both `routing_reason` and `routing_mode` for assignment + running status updates.
+- Files:
+  - `backend/app/services/dag_scheduler.py`
+  - `backend/tests/test_dag_scheduler.py`
+  - `backend/tests/test_communicator.py`
+  - `docs/superpowers/plans/2026-04-23-step-8-1-agent-first-routing-plan.md` (Task 5 checklist marked complete)
+- Verification:
+  - `backend/.venv/bin/pytest -q tests/test_dag_scheduler.py tests/test_communicator.py` => `73 passed`
+  - `backend/.venv/bin/pytest -q tests/test_dag_scheduler.py tests/test_task_api.py tests/test_agents.py` => `113 passed`
+- Playwright CLI real-env smoke:
+  - `@playwright/cli` + temporary localtunnel can reach deployed page URL and load app title `Hierarch - Agent Orchestration`.
+  - Snapshot remains empty in this tunnel+Vite-HMR setup, so UI deep-flow assertions continue to rely on backend real HTTP validation in parallel.
+2026-04-23: Step 8.4 capability-only DAG compatibility.
+- `DAGNodeSchema.role` is now optional to support capability-only nodes while preserving legacy role-based DAG behavior.
+- `parse_dag_response` now enforces first-node-outline only when role is explicitly present.
+- Added regression case for role-omitted DAG parsing.
+- Files:
+  - `backend/app/schemas/task.py`
+  - `backend/app/services/task_decomposer.py`
+  - `backend/tests/test_task_decomposer.py`
+- Verification:
+  - `backend/.venv/bin/pytest -q tests/test_task_decomposer.py tests/test_task_api.py tests/test_dag_scheduler.py tests/test_agents.py` => `129 passed`
+- Playwright CLI real-env smoke:
+  - `@playwright/cli` + localtunnel URL reachable; app title loads as `Hierarch - Agent Orchestration`.
+
+2026-04-23: Step 8.1 plan closure.
+- Marked `docs/superpowers/plans/2026-04-23-step-8-1-agent-first-routing-plan.md` checklist as completed after Task 1-5 implementation and regression verification.
+2026-04-23: Step 8.5 Playwright CLI reliability hardening (single-port e2e mode).
+- Added backend optional setting `frontend_dist_dir` and static SPA serving fallback in `app/main.py` when enabled.
+- This allows backend + frontend static bundle to run under one origin for tunnel-based real-env checks (no Vite HMR dependency).
+- Added reusable script `scripts/playwright_cli_real_env.sh` to execute:
+  1) frontend build
+  2) backend start with `FRONTEND_DIST_DIR`
+  3) localtunnel bootstrap
+  4) Playwright CLI open + tunnel bypass + token setup + create-flow attempt
+  5) log evidence dump
+- Verification:
+  - `backend/.venv/bin/pytest -q tests/test_task_api.py tests/test_ws_endpoint.py tests/test_communicator.py` => `79 passed`
+  - Script run completed and produced stable URL + Playwright CLI evidence logs.
+2026-04-23: Step 8.6 Playwright CLI hard assertion mode.
+- Upgraded `scripts/playwright_cli_real_env.sh` with strict assertion:
+  - unique task title per run (`pw-cli-e2e-<ts>-<rand>`)
+  - post-action API check (`GET /api/tasks?limit=50`) must contain created title
+  - non-zero exit when assertion fails
+- Current blocker observed in real runs:
+  - localtunnel intermittently returns `502/503` for frontend asset chunks, causing SPA route lazy-load failure and UI stuck at `加载中...`
+  - result: create button not clickable (`clicked=false`), assertion fails as expected.
+- Evidence files:
+  - `/tmp/pw_cli_e2e.log`
+  - `/tmp/pw_backend_e2e.log`
+  - `/root/github/agentic-nexus/.playwright-cli/console-2026-04-23T05-05-07-864Z.log`
+2026-04-23: Step 8.7 Playwright CLI full-flow pass via tunnelmole.
+- Updated `scripts/playwright_cli_real_env.sh`:
+  - tunnel provider switch (`TUNNEL_PROVIDER=tunnelmole|localtunnel`, default `tunnelmole`)
+  - backend health wait before tunnel startup
+  - strict assertion mode retained (unique title + API verification)
+- Real execution result (pass):
+  - command: `./scripts/playwright_cli_real_env.sh`
+  - assertion: `ASSERTION PASSED: created task title found`
+  - Playwright evidence includes:
+    - Home page rendered with form text
+    - POST `/api/tasks` 201
+    - redirected to `/monitor/<task_id>`
+    - monitor page snapshot captured with DAG/control panels

@@ -13,6 +13,9 @@ TUNNEL_PROVIDER="${TUNNEL_PROVIDER:-tunnelmole}"  # tunnelmole | localtunnel | l
 WAIT_FOR_COMPLETION="${WAIT_FOR_COMPLETION:-1}"
 COMPLETION_TIMEOUT_SECS="${COMPLETION_TIMEOUT_SECS:-900}"
 POLL_INTERVAL_SECS="${POLL_INTERVAL_SECS:-5}"
+MODE="${MODE:-report}"
+DEPTH="${DEPTH:-quick}"
+TARGET_WORDS="${TARGET_WORDS:-1200}"
 
 cleanup() {
   [[ -n "${LT_PID:-}" ]] && kill "$LT_PID" >/dev/null 2>&1 || true
@@ -125,12 +128,12 @@ npx -y @playwright/cli run-code "async page => {
 
   const depthSelect = page.locator('select').nth(1);
   if (await depthSelect.count()) {
-    await depthSelect.selectOption('quick');
+    await depthSelect.selectOption('$DEPTH');
   }
 
   const wordsInput = page.locator('input[type=number]').first();
   if (await wordsInput.count()) {
-    await wordsInput.fill('1200');
+    await wordsInput.fill('$TARGET_WORDS');
   }
 
   const submit = page.getByRole('button', { name: /开始生成|创建|Create|Start|提交|Submit/i }).first();
@@ -169,7 +172,8 @@ else
   echo "ASSERTION FAILED: task title not found from UI flow => $TITLE"
   echo "FALLBACK: creating task via API to continue E2E evidence capture"
   CREATE_BODY=$(jq -nc --arg title "$TITLE" \
-    '{title:$title, mode:"report", depth:"quick", target_words:1200}')
+    --arg mode "$MODE" --arg depth "$DEPTH" --argjson target_words "$TARGET_WORDS" \
+    '{title:$title, mode:$mode, depth:$depth, target_words:$target_words}')
   curl -sS -X POST "http://$BACKEND_HOST:$BACKEND_PORT/api/tasks" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
@@ -241,14 +245,21 @@ if [[ -s /tmp/pw_task_detail.json ]]; then
     title,
     status,
     fsm_state,
+    mode,
+    depth,
+    target_words,
     word_count,
     error_message,
     blocking_reason,
     stage_progress,
     node_status_summary,
+    evidence_summary,
+    citation_summary,
     output_preview: ((.output_text // "")[:1200]),
     node_status_counts: (.nodes | group_by(.status) | map({status: .[0].status, count: length})),
     routing_results: (.checkpoint_data.routing_results // {}),
+    consistency_repair_budget: (.checkpoint_data.consistency_repair_budget // {}),
+    expansion_decisions: (.checkpoint_data.expansion_decisions // []),
     memory_keys: ((.checkpoint_data.memory // {}) | keys)
   }' /tmp/pw_task_detail.json || true
 fi

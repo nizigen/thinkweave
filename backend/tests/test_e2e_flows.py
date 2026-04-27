@@ -46,6 +46,13 @@ DRAFT_PAYLOAD = {
     "draft_text": "This is an existing draft that should be continued. " * 20,
 }
 
+LONGFORM_PAYLOAD = {
+    "title": "E2E Test: Longform 30k Report",
+    "mode": "report",
+    "depth": "deep",
+    "target_words": 30000,
+}
+
 
 async def _create_task(client: AsyncClient, payload: dict) -> dict:
     resp = await client.post("/api/tasks", json=payload, headers=AUTH)
@@ -130,6 +137,8 @@ class TestReportE2EFlow:
         assert len(detail["nodes"]) > 0
         assert "node_status_summary" in detail
         assert "stage_progress" in detail
+        assert "evidence_summary" in detail
+        assert "citation_summary" in detail
         first_node = detail["nodes"][0]
         assert "stage_code" in first_node
         assert "stage_name" in first_node
@@ -176,6 +185,17 @@ class TestReportE2EFlow:
         resp = await client.get(f"/api/export/{task['id']}/pdf", headers=AUTH)
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/pdf"
+
+    async def test_longform_30k_task_detail_exposes_quality_summaries(
+        self, client: AsyncClient
+    ):
+        task = await _create_task(client, LONGFORM_PAYLOAD)
+        detail = await _get_task(client, task["id"])
+        assert detail["target_words"] == 30000
+        assert detail["depth"] == "deep"
+        assert isinstance(detail.get("evidence_summary"), dict)
+        assert isinstance(detail.get("citation_summary"), dict)
+        assert "stage_progress" in detail
 
 
 # ---------------------------------------------------------------------------
