@@ -741,7 +741,9 @@ class TestWorkerAgent:
             call for call in mock_llm.call_log
             if call.get("role") == "writer"
         ]
-        user_prompt = writer_calls[0]["messages"][-1]["content"]
+        prompt_calls = [call for call in writer_calls if isinstance(call.get("messages"), list)]
+        assert prompt_calls
+        user_prompt = prompt_calls[0]["messages"][-1]["content"]
         assert "Memory Context" in user_prompt
         assert "avoid repeating introduction" in user_prompt
 

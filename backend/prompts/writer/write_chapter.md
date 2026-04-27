@@ -18,6 +18,8 @@
 - evidence_pool_summary: {evidence_pool_summary}
 - evidence_pool_markdown: {evidence_pool_markdown}
 - target_words: {target_words}
+- task_target_words: {task_target_words}
+- node_target_words: {node_target_words}
 - is_assembly_editor: {is_assembly_editor}
 - title_level_rule: {title_level_rule}
 - evidence_rule: {evidence_rule}
@@ -26,10 +28,11 @@
 在不突破章节边界的前提下，产出足够长、证据可追踪、可通过后续一致性检查的章节内容。
 
 ## 语言与表达硬约束
-1. 默认简体中文。
-2. 非必要不写英文整句；英文仅用于术语、专名、标准名、原始文献题名。
+1. 正文默认使用简体中文。
+2. 非必要不用英文整句；英文仅用于术语、专名、标准名、原始文献题名。
 3. 术语首次出现采用“中文（English）”，后续优先中文主术语。
 4. 禁止流程日志式自述、空泛开场、机械三段式套话。
+5. 避免机械 connector（首先/其次/最后）式拼接，段落过渡必须基于语义推进。
 
 ## 写作规则（严格执行）
 1. 章节边界：
@@ -42,7 +45,8 @@
    - 每段一个主论点，必须有推进关系。
    - 相邻段不能重复同一论点，只换表述。
 4. 篇幅纪律：
-   - 围绕 `target_words` 组织内容密度。
+   - 优先围绕 `node_target_words` 组织内容密度；若为空则使用 `target_words`。
+   - `task_target_words` 仅用于全局上下文，不作为单节点硬写作配额。
    - 禁止“先缩水再交给扩写轮次补救”的偷懒写法。
 5. 标题纪律：
    - content_markdown 仅允许二级标题（# / ## 或 1 / 1.1）。
@@ -86,7 +90,7 @@
 
 ## 最终校验清单（生成前自检）
 1. JSON 字段齐全且类型正确。
-2. content_markdown 达到目标篇幅预期（接近 target_words）。
+2. content_markdown 达到目标篇幅预期（接近 node_target_words，若为空则接近 target_words）。
 3. 未出现三级标题。
 4. evidence_trace 与 citation_ledger 非空且可追踪。
 5. 无编造来源、无流程泄漏、无明显模板腔。

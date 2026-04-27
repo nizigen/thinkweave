@@ -33,7 +33,7 @@ from app.services.evidence_pool import (
     evidence_pool_seeds,
     normalize_evidence_ledger,
 )
-from app.services.node_schema import has_valid_schema_for_role
+from app.services.node_schema import coerce_output_to_role_schema, has_valid_schema_for_role
 from app.services.writer_output import extract_writer_markdown
 from app.services.stage_contracts import (
     SCHEMA_VERSION,
@@ -370,7 +370,13 @@ class DAGScheduler:
                 if await self._all_nodes_terminal():
                     if await self._has_failed_nodes():
                         log.error("DAG completed with failed nodes")
-                        failed_reason = await self._build_failed_nodes_reason()
+                        failed_reason = "DAG completed with failed nodes"
+                        try:
+                            failed_reason = await self._build_failed_nodes_reason()
+                        except Exception:
+                            log.opt(exception=True).warning(
+                                "failed to build failed-nodes reason; fallback to generic reason"
+                            )
                         await self._mark_task_failed(failed_reason)
                     else:
                         log.info("DAG completed — all nodes done")
@@ -1258,13 +1264,18 @@ class DAGScheduler:
         payload["planned_words"] = 0
         payload["word_floor"] = DEFAULT_NODE_WORD_FLOOR
         payload["word_ceiling"] = DEFAULT_NODE_WORD_FLOOR
+        payload["task_target_words"] = 0
+        payload["node_target_words"] = 0
 
         task = await session.get(Task, self.task_id)
         evidence_pool_block: dict[str, Any] = {}
         if task is not None:
             payload["mode"] = task.mode
             payload["depth"] = task.depth
-            payload["target_words"] = int(task.target_words or 0)
+            task_target_words = int(task.target_words or 0)
+            payload["target_words"] = task_target_words
+            payload["task_target_words"] = task_target_words
+            payload["node_target_words"] = task_target_words
             checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))
             raw_evidence_pool = checkpoint.get("evidence_pool")
             if isinstance(raw_evidence_pool, dict):
@@ -1316,6 +1327,8 @@ class DAGScheduler:
                 node_role=node_role,
                 depth=payload.get("depth"),
                 target_words=payload.get("target_words"),
+                task_target_words=payload.get("task_target_words"),
+                node_target_words=payload.get("node_target_words"),
             ).debug("assignment payload built")
             return payload
 
@@ -1344,16 +1357,21 @@ class DAGScheduler:
                 node_role=node_role,
                 depth=payload.get("depth"),
                 target_words=payload.get("target_words"),
+                task_target_words=payload.get("task_target_words"),
+                node_target_words=payload.get("node_target_words"),
             ).debug("assignment payload built")
             return payload
 
         writer_nodes = await self._load_writer_nodes(session)
         writer_count = self._primary_writer_count(writer_nodes)
         if task is not None and "target_words" not in payload:
-            payload["target_words"] = int(task.target_words or 0)
+            task_target_words = int(task.target_words or 0)
+            payload["target_words"] = task_target_words
+            payload["task_target_words"] = task_target_words
+            payload["node_target_words"] = task_target_words
 
         if node_role == "writer":
-            task_target_words = int(payload.get("target_words") or 0)
+            task_target_words = int(payload.get("task_target_words") or payload.get("target_words") or 0)
             is_expansion_pass = self._is_expansion_writer_title(node_title)
             is_assembly_editor = "Assembly编辑收敛" in (node_title or "")
             payload["is_expansion_pass"] = is_expansion_pass
@@ -1365,6 +1383,9 @@ class DAGScheduler:
                 writer_count=writer_count,
             )
             if planned_words > 0:
+                payload["node_target_words"] = planned_words
+                # Keep historical `target_words` as per-node writing budget for
+                # prompt compatibility, while preserving task_target_words for diagnostics.
                 payload["target_words"] = planned_words
             payload["planned_words"] = planned_words
             payload["word_floor"] = word_floor
@@ -1451,6 +1472,8 @@ class DAGScheduler:
                 node_role=node_role,
                 depth=payload.get("depth"),
                 target_words=payload.get("target_words"),
+                task_target_words=payload.get("task_target_words"),
+                node_target_words=payload.get("node_target_words"),
             ).debug("assignment payload built")
             return payload
 
@@ -1492,6 +1515,8 @@ class DAGScheduler:
                 node_role=node_role,
                 depth=payload.get("depth"),
                 target_words=payload.get("target_words"),
+                task_target_words=payload.get("task_target_words"),
+                node_target_words=payload.get("node_target_words"),
             ).debug("assignment payload built")
             return payload
 
@@ -1547,6 +1572,8 @@ class DAGScheduler:
                 node_role=node_role,
                 depth=payload.get("depth"),
                 target_words=payload.get("target_words"),
+                task_target_words=payload.get("task_target_words"),
+                node_target_words=payload.get("node_target_words"),
             ).debug("assignment payload built")
             return payload
 
@@ -1849,6 +1876,21 @@ class DAGScheduler:
                     node_role = str(row[0]) if row and row[0] else ""
                     node_title = str(row[1]) if row and row[1] else ""
                     node_retry_count = int(row[2]) if row and row[2] is not None else 0
+                    coerced_output = coerce_output_to_role_schema(
+                        node_role,
+                        output,
+                        node_title=node_title,
+                    )
+                    if isinstance(coerced_output, str) and coerced_output.strip():
+                        if coerced_output.strip() != output.strip():
+                            logger.bind(
+                                task_id=str(self.task_id),
+                                node_id=str(node_id),
+                                node_role=node_role or "unknown",
+                            ).warning(
+                                "node output schema auto-repaired before scheduler validation"
+                            )
+                        output = coerced_output
                     if node_role == "writer":
                         valid_length, observed_units, min_units = await self._validate_writer_output_length(
                             session=session,

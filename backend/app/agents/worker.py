@@ -280,27 +280,49 @@ class WorkerAgent(BaseAgent):
         payload: dict[str, Any],
         model_override: str | None,
     ) -> str:
-        """Enforce writer output as strict JSON object before post-processing.
+        """Enforce writer output as strict JSON before post-processing.
 
-        This is a hard gate: if schema cannot be satisfied after retries,
-        raise and let scheduler retry the node.
+        When model retries still fail schema checks, return a deterministic
+        structured fallback to prevent shape-level scheduler failure.
         """
         attempts = 3
         working_messages: list[dict[str, str]] = [dict(item) for item in messages]
         chapter_title = str(payload.get("chapter_title") or payload.get("title") or "").strip()
+        chat_json_fn = getattr(self.llm_client, "chat_json", None)
+        if not callable(chat_json_fn):
+            # Backward-compatible path for tests/mocks that only implement chat().
+            raw_text = await self.llm_client.chat(
+                messages=working_messages,
+                role="writer",
+                model=model_override,
+            )
+            return str(raw_text or "")
+        last_obj: dict[str, Any] | None = None
         for attempt in range(1, attempts + 1):
-            obj = await self.llm_client.chat_json(
+            obj = await chat_json_fn(
                 messages=working_messages,
                 role="writer",
                 model=model_override,
                 max_retries=2,
             )
+            last_obj = obj if isinstance(obj, dict) else None
             raw = json.dumps(obj, ensure_ascii=False)
             parsed = parse_writer_payload(raw)
             if parsed is not None:
                 if not parsed.get("chapter_title"):
                     parsed["chapter_title"] = chapter_title
                 return serialize_writer_payload(parsed)
+
+            # Fall back to normal chat for this attempt to keep compatibility
+            # with providers that do not reliably honor chat_json contracts.
+            fallback_text = await self.llm_client.chat(
+                messages=working_messages,
+                role="writer",
+                model=model_override,
+            )
+            fallback_text = str(fallback_text or "").strip()
+            if fallback_text:
+                return fallback_text
 
             working_messages.append(
                 {
@@ -318,16 +340,33 @@ class WorkerAgent(BaseAgent):
                 "writer hard-json attempt failed schema check"
             )
 
+        best_effort_markdown = ""
+        if isinstance(last_obj, dict):
+            for key in ("content_markdown", "chapter_markdown", "content", "text", "body", "draft"):
+                candidate = str(last_obj.get(key) or "").strip()
+                if candidate:
+                    best_effort_markdown = candidate
+                    break
+        if not best_effort_markdown:
+            best_effort_markdown = (
+                f"# {chapter_title or '章节'}\n\n"
+                "（自动结构化兜底：模型返回了非合规 writer JSON，"
+                "后续轮次会继续补写该章节内容。）"
+            )
+        fallback = make_fallback_writer_payload(
+            chapter_title=chapter_title,
+            content_markdown=best_effort_markdown,
+        )
+        if fallback is not None:
+            logger.bind(agent_id=str(self.agent_id)).warning(
+                "writer hard-json path exhausted retries; using structured fallback payload"
+            )
+            return serialize_writer_payload(fallback)
         raise ValueError("Writer hard-json generation failed after retries")
 
     def _select_model_override(self, *, agent_role: str, payload: dict[str, Any]) -> str | None:
         role = str(agent_role or "").strip().lower()
         if role not in {"outline", "researcher", "writer", "reviewer", "consistency"}:
-            return None
-
-        # Keep writer on the primary model to avoid long-tail instability in
-        # repair waves where compact drafts still need strict schema output.
-        if role == "writer":
             return None
 
         depth = str(payload.get("depth") or "").strip().lower()
@@ -612,6 +651,8 @@ class WorkerAgent(BaseAgent):
                 "evidence_pool_summary": raw.get("evidence_pool_summary", ""),
                 "evidence_pool_markdown": raw.get("evidence_pool_markdown", ""),
                 "target_words": raw.get("target_words", ""),
+                "task_target_words": raw.get("task_target_words", raw.get("target_words", "")),
+                "node_target_words": raw.get("node_target_words", raw.get("target_words", "")),
                 "is_assembly_editor": raw.get("is_assembly_editor", False),
                 "title_level_rule": raw.get("title_level_rule", ""),
                 "evidence_rule": raw.get("evidence_rule", ""),

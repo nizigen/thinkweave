@@ -19,6 +19,7 @@ import pytest
 import pytest_asyncio
 
 from app.config import settings
+from app.services.node_schema import coerce_output_to_role_schema
 from app.services.dag_scheduler import (
     AGENT_BUSY,
     AGENT_IDLE,
@@ -171,6 +172,20 @@ class TestRoleOutputValidation:
         ) is False
 
 
+class TestRoleOutputCoercion:
+    def test_writer_plain_markdown_can_be_coerced_into_writer_schema(self):
+        raw = "# 第1章\n\n这是未结构化的 writer 草稿正文。"
+        repaired = coerce_output_to_role_schema("writer", raw, node_title="第1章：背景")
+        assert isinstance(repaired, str) and repaired.strip()
+        assert _is_invalid_output_for_role("writer", repaired) is False
+
+    def test_reviewer_plain_text_can_be_coerced_into_reviewer_schema(self):
+        raw = "这一章质量一般，需要补证据。"
+        repaired = coerce_output_to_role_schema("reviewer", raw, node_title="第2章审查")
+        assert isinstance(repaired, str) and repaired.strip()
+        assert _is_invalid_output_for_role("reviewer", repaired) is False
+
+
 # ---------------------------------------------------------------------------
 # Test: 并发控制 _can_dispatch
 # ---------------------------------------------------------------------------
@@ -303,6 +318,8 @@ class TestWriterBudgetHelpers:
         assert payload["planned_words"] > 0
         assert payload["word_floor"] >= 300
         assert payload["word_ceiling"] >= payload["word_floor"]
+        assert payload["task_target_words"] == 30000
+        assert payload["node_target_words"] == payload["planned_words"]
         assert payload["target_words"] == payload["planned_words"]
         ledger = task.checkpoint_data.get("node_budget_ledger", {})
         assert str(node_id) in ledger
@@ -458,6 +475,67 @@ class TestConsistencyRepairBudget:
         assert targets == [3]
         assert report is not None
         assert report["required_points"] > report["remaining_points_before"]
+
+
+class TestDrainTaskResultShapeRepair:
+    @pytest.mark.asyncio
+    async def test_drain_task_results_auto_repairs_invalid_writer_shape(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node_id = make_uuid()
+        agent_id = make_uuid()
+        envelope = SimpleNamespace(
+            msg_type="task_result",
+            node_id=str(node_id),
+            from_agent=str(agent_id),
+            payload={
+                "status": "done",
+                "output": "# 第1章\n\n这是未结构化的 writer 草稿。",
+            },
+        )
+
+        with (
+            patch(
+                "app.services.dag_scheduler.xread_latest",
+                new_callable=AsyncMock,
+                return_value=[SimpleNamespace(message_id="1-0", data={})],
+            ),
+            patch(
+                "app.services.dag_scheduler.MessageEnvelope.from_redis",
+                return_value=envelope,
+            ),
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
+            patch.object(
+                scheduler,
+                "_validate_writer_output_length",
+                new_callable=AsyncMock,
+                return_value=(True, 600, 300),
+            ),
+            patch.object(
+                scheduler,
+                "on_node_completed",
+                new_callable=AsyncMock,
+            ) as mock_completed,
+            patch.object(
+                scheduler,
+                "on_node_failed",
+                new_callable=AsyncMock,
+            ) as mock_failed,
+        ):
+            mock_session = AsyncMock()
+            role_row = MagicMock()
+            role_row.first.return_value = ("writer", "第1章：背景", 0)
+            mock_session.execute = AsyncMock(return_value=role_row)
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await scheduler._drain_task_results()
+
+        mock_completed.assert_awaited_once()
+        completed_output = mock_completed.await_args.kwargs.get("result", "")
+        assert _is_invalid_output_for_role("writer", completed_output) is False
+        mock_failed.assert_not_awaited()
 
 
 class TestMatchAgentRouting:
@@ -1772,11 +1850,14 @@ class TestConsistencyRepairWave:
             session=ANY,
             repair_targets=[1, 3],
         )
-        mock_completed.assert_awaited_once_with(
-            node_id=node_id,
-            result=payload["output"],
-            agent_id=agent_id,
-        )
+        mock_completed.assert_awaited_once()
+        completed_kwargs = mock_completed.await_args.kwargs
+        assert completed_kwargs["node_id"] == node_id
+        assert completed_kwargs["agent_id"] == agent_id
+        completed_output = str(completed_kwargs.get("result") or "")
+        assert _is_invalid_output_for_role("consistency", completed_output) is False
+        parsed_completed = json.loads(completed_output)
+        assert parsed_completed.get("repair_targets") == [1, 3]
         mock_failed.assert_not_awaited()
 
     @pytest.mark.asyncio
