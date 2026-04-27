@@ -1,53 +1,94 @@
-你将为长文任务生成“章节结构 + 研究协议”。
-
-## 写作语言总则
-- 默认正文语言：简体中文。
-- 非必要不用英文整句；仅在术语、标准名、专有名词、引用题名中允许英文。
-- 若用户明确要求英文，再切换主语言。
+你将为长文任务生成“章节结构 + 研究协议 + 长度预算”。
 
 ## 输入
 - title: {title}
 - mode: {mode}
+- depth: {depth}
 - target_words: {target_words}
-- draft_text: {draft_text}
-- review_comments: {review_comments}
-- style_requirements: {style_requirements}
 - source_policy: {source_policy}
 - research_keywords: {research_keywords}
+- evidence_pool_summary: {evidence_pool_summary}
+- evidence_pool_markdown: {evidence_pool_markdown}
 
-## 输出格式（Markdown）
-按以下 4 个区块输出：
+## 语言与风格硬约束
+1. 默认简体中文。
+2. 非必要不写英文整句；英文只用于术语/标准名/专有名词。
+3. 章节命名避免口号式空话，要能直接指导 writer 落地。
 
+## 任务要求（重点保证长文可达）
+1. 输出必须体现清晰论证主线：问题界定 -> 证据展开 -> 机制/方法 -> 落地/风险 -> 结论。
+2. 每章必须提供 owns/boundary，避免跨章重复。
+3. 每章必须声明 evidence_needs，避免后续“无证据硬写”。
+4. 若 `target_words >= 30000`，章节计划必须显式给出：
+   - 主章节数量建议（至少 9 章）；
+   - 每章建议字数区间；
+   - 预留扩写章节或扩写轮次说明。
+5. 若 `target_words >= 50000`，需给出分层扩写策略（主章节 + 补写层 + 收敛层）。
+
+## 输出格式（Markdown，必须包含以下区块）
 ### 1) Topic Anchor
-- 定义本报告“要回答的问题”和“非目标范围（non-goals）”。
+- 用 3-6 条要点定义：
+  - 研究核心问题（必须回答）
+  - 非目标范围（明确不写）
+  - 全篇主论点（可辩护、可被证据检验）
 
-### 2) Chapter Plan
-按章节列出：
-- chapter title
-- chapter summary（80-180字，中文）
-- key points（3-6条）
-- context bridges（前章->本章->后章）
-- owns（本章负责）
-- boundary（本章不覆盖）
-- evidence needs（证据类型）
+### 2) Length Budget Plan
+- 给出总字数预算拆分：
+  - total_target_words
+  - baseline_chapter_count
+  - per_chapter_budget（按章）
+  - expansion_reserve（预留补写字数）
+- 预算必须与 target_words 对齐，不得明显低估。
 
-### 3) research_protocol（JSON）
-必须给出 fenced JSON，字段至少包含：
-- theme_definition
-- keyword_buckets.core_terms / expansion_terms / exclusion_terms
-- source_allowlist.preferred_domains / allowed_source_types / forbidden
-- query_blueprint（按 chapter_index 给查询）
+### 3) Chapter Plan
+按章节输出，建议使用 `第N章：标题`：
+- chapter_title
+- chapter_summary（120-220字）
+- key_questions（2-4条）
+- key_points（4-7条）
+- context_bridges（上一章如何进入本章，本章如何引到下一章）
+- owns（本章必须覆盖）
+- boundary（本章禁止覆盖）
+- evidence_needs（source type + why）
+- suggested_word_budget（整数）
 
-### 4) topic_claims（JSON）
-必须给出 machine-readable 的 topic_claims，字段至少包含：
-- chapter_index
-- owns
-- boundary
-- assigned_evidence
+### 4) research_protocol（JSON fenced code）
+必须输出 ```json 代码块，至少包含：
+{{
+  "theme_definition": "...",
+  "keyword_buckets": {{
+    "core_terms": [],
+    "expansion_terms": [],
+    "exclusion_terms": []
+  }},
+  "source_allowlist": {{
+    "preferred_domains": [],
+    "allowed_source_types": [],
+    "forbidden": []
+  }},
+  "query_blueprint": [
+    {{
+      "chapter_index": 1,
+      "queries": ["中文主检索词", "英文扩展词"]
+    }}
+  ]
+}}
 
-## 质量要求
-- 明确边界，避免章节重叠。
-- 研究协议必须可执行，避免泛化空话。
-- 结构需覆盖“背景、现状、分析或方法、结论/展望”。
-- 标题层级最多二级：仅允许 `#` 与 `##`（或编号 `1` / `1.1`），禁止三级标题（如 `###` 或 `1.1.1`）。
-- 章节标题与摘要默认使用中文，避免中英混杂导致术语漂移。
+### 5) topic_claims（JSON fenced code）
+必须输出 ```json 代码块，至少包含：
+{{
+  "claims": [
+    {{
+      "chapter_index": 1,
+      "owns": [],
+      "boundary": [],
+      "assigned_evidence": []
+    }}
+  ]
+}}
+
+## 质量门槛
+- 标题层级最多二级（仅 `#`/`##` 或 `1`/`1.1`）。
+- 不得出现 `###` 或 `1.1.1`。
+- 不得编造来源、统计数字、机构结论。
+- 不得输出与章节无关的流程自述或模型自述。

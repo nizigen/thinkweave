@@ -544,7 +544,7 @@ class WorkerAgent(BaseAgent):
             schema_hint = (
                 '{"pass":false,"style_conflicts":[],"claim_conflicts":[],'
                 '"duplicate_coverage":[],"term_inconsistency":[],'
-                '"transition_gaps":[],"source_policy_violations":[],'
+                '"transition_gaps":[],"language_policy_conflicts":[],"source_policy_violations":[],'
                 '"severity_summary":{"critical":0,"high":0,"medium":0,"low":0},'
                 '"repair_priority":[],"repair_targets":[]}'
             )
@@ -581,6 +581,17 @@ class WorkerAgent(BaseAgent):
     ) -> dict[str, Any]:
         """Ensure role-specific prompt variables always exist to avoid fallback prompts."""
         raw = dict(payload or {})
+        if agent_role == "outline":
+            return {
+                "title": raw.get("title", ""),
+                "mode": raw.get("mode", "report"),
+                "depth": raw.get("depth", ""),
+                "target_words": raw.get("target_words", ""),
+                "source_policy": raw.get("source_policy", ""),
+                "research_keywords": raw.get("research_keywords", ""),
+                "evidence_pool_summary": raw.get("evidence_pool_summary", ""),
+                "evidence_pool_markdown": raw.get("evidence_pool_markdown", ""),
+            }
         if agent_role == "writer":
             return {
                 "depth": raw.get("depth", ""),
@@ -642,7 +653,9 @@ class WorkerAgent(BaseAgent):
         if agent_role == "consistency":
             return {
                 "depth": raw.get("depth", ""),
+                "target_words": raw.get("target_words", ""),
                 "chapters_summary": raw.get("chapters_summary", ""),
+                "key_fragments": raw.get("key_fragments", ""),
                 "full_text": raw.get("full_text", raw.get("full_draft", "")),
                 "topic_claims": raw.get("topic_claims", []),
                 "chapter_metadata": raw.get("chapter_metadata", []),

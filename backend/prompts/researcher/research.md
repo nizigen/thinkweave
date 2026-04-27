@@ -1,13 +1,9 @@
 你需要输出“章节可执行的研究方案与证据账本”。
 
-## 语言策略
-- 输出说明与论断默认使用简体中文。
-- 检索词可中英混合，但必须“中文主检索词 + 英文同义词扩展”并行设计。
-- 非必要不使用英文整句描述分析结论。
-
 ## 输入
 - task title: {title}
 - mode: {mode}
+- depth: {depth}
 - target_words: {target_words}
 - full_outline: {full_outline}
 - source_policy: {source_policy}
@@ -17,7 +13,13 @@
 - evidence_pool_markdown: {evidence_pool_markdown}
 - memory_context: {memory_context}
 
-## 输出
+## 长文导向要求
+1. 本任务优先保障长文本可写性，尤其 `target_words >= 30000` 的场景。
+2. evidence_ledger 必须覆盖主要章节，不允许“证据集中在少数章节”。
+3. 每条关键论断应有可追踪来源，无法追踪时必须显式标 uncertainty。
+4. 查询策略要具备“定义、机制、比较、风险、实施、评估”六类覆盖。
+
+## 输出（硬约束）
 只输出严格 JSON（不要 markdown 代码块）：
 {{
   "topic_anchor": "一句话定义研究锚点",
@@ -29,14 +31,14 @@
   "keyword_plan": [
     {{
       "bucket": "definition|benchmark|method|risk|regulation|trend",
-      "queries": ["q1", "q2", "q3"]
+      "queries": ["中文检索词", "英文扩展词"]
     }}
   ],
   "evidence_ledger": [
     {{
       "evidence_id": "E1",
       "claim_target": "该证据支持的论断",
-      "required_source_type": "standard|paper|dataset|official_report",
+      "required_source_type": "standard|paper|dataset|official_report|industry_report|patent",
       "priority": "high|medium|low",
       "source_url": "https://...",
       "source_title": "来源标题",
@@ -53,15 +55,18 @@
   "uncertainty_flags": ["需要人工确认的风险点"]
 }}
 
-## 研究质量要求
-- keyword_plan 至少 4 个 bucket。
-- 每个 bucket 至少包含 1 条中文 query。
-- evidence_ledger 至少 8 条。
-- evidence_ledger 中每条都必须包含 `source_url/source_title/published_at`。
-- 优先从 evidence_pool_seeds 指定的 OA / 专利入口域名中选择候选来源。
-- 当 mode=report 时，优先使用 industry_report_urls + oa_urls + patent_urls。
-- 当 mode=novel 时，优先使用 fiction_reference_urls（世界观/叙事/文体参考），并避免伪造事实来源。
-- 若 evidence_pool_markdown 已有可用条目，优先复用并补齐缺失字段，不要重复制造同类证据。
-- full_outline 不为空时，chapter_mapping 不得为空。
-- 查询必须与主题直接相关，禁止离题扩散。
-- 严格遵守 source policy。
+## 质量约束
+1. keyword_plan 至少 6 个 bucket，每个 bucket 至少 2 条 queries。
+2. 每个 bucket 至少包含 1 条中文 query 与 1 条英文扩展 query。
+3. evidence_ledger 至少 12 条；当 `target_words >= 30000` 时至少 18 条；当 `target_words >= 50000` 时至少 28 条。
+4. 每条 evidence 必须包含 `source_url/source_title/published_at`，三者缺一不可。
+5. chapter_mapping 在 full_outline 非空时不得为空，且至少覆盖 80% 章节。
+6. 优先复用 evidence_pool_markdown 中已有高价值证据，避免重复制造同类低质量条目。
+7. 若 mode=report，优先 domain 白名单中的 OA / 专利 / 权威报告来源。
+8. 若 mode=novel，仅把现实来源用于背景与设定约束，不得伪装为事实研究结论。
+
+## 反模式（禁止）
+- 输出空泛关键词（如“发展趋势”“应用价值”）但无检索可执行性。
+- 大量来源无 URL 或无时间信息。
+- 用同一来源支撑多个不相干核心结论。
+- 把不确定信息写成确定事实，不进 uncertainty_flags。
