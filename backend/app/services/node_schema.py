@@ -211,9 +211,16 @@ def has_valid_schema_for_role(role: str | None, content: str) -> bool:
         parsed = _parse_json_object(text)
         if not parsed:
             return False
-        keys = {str(k).lower() for k in parsed.keys()}
         required = {"score", "must_fix", "feedback", "pass"}
-        return required.issubset(keys)
+        if not required.issubset({str(k).lower() for k in parsed.keys()}):
+            return False
+        if not isinstance(parsed.get("must_fix"), list):
+            return False
+        if not isinstance(parsed.get("feedback"), str):
+            return False
+        if not isinstance(parsed.get("pass"), bool):
+            return False
+        return True
 
     if role_name == "consistency":
         parsed = _parse_json_object(text)
@@ -228,7 +235,30 @@ def has_valid_schema_for_role(role: str | None, content: str) -> bool:
             "repair_priority",
             "severity_summary",
         }
-        return required.issubset(keys)
+        if not required.issubset(keys):
+            return False
+        if not isinstance(parsed.get("pass"), bool):
+            return False
+        for k in (
+            "style_conflicts",
+            "claim_conflicts",
+            "repair_priority",
+            "repair_targets",
+        ):
+            if not isinstance(parsed.get(k), list):
+                return False
+        for k in (
+            "duplicate_coverage",
+            "term_inconsistency",
+            "transition_gaps",
+            "language_policy_conflicts",
+            "source_policy_violations",
+        ):
+            if k in parsed and not isinstance(parsed.get(k), list):
+                return False
+        if not isinstance(parsed.get("severity_summary"), dict):
+            return False
+        return True
 
     if role_name == "researcher":
         parsed = _parse_json_object(text)
@@ -243,7 +273,21 @@ def has_valid_schema_for_role(role: str | None, content: str) -> bool:
             "chapter_mapping",
             "uncertainty_flags",
         }
-        return required.issubset(keys)
+        if not required.issubset(keys):
+            return False
+        if not isinstance(parsed.get("topic_anchor"), str):
+            return False
+        if not isinstance(parsed.get("source_scope"), dict):
+            return False
+        if not isinstance(parsed.get("keyword_plan"), list):
+            return False
+        if not isinstance(parsed.get("evidence_ledger"), list):
+            return False
+        if not isinstance(parsed.get("chapter_mapping"), list):
+            return False
+        if not isinstance(parsed.get("uncertainty_flags"), list):
+            return False
+        return True
 
     # Outline and other roles currently allow plain markdown/text.
     return True
@@ -277,4 +321,3 @@ def coerce_output_to_role_schema(
         return _coerce_researcher_output(text, node_title=node_title)
 
     return text or None
-

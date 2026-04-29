@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import communicator
 from app.memory.session import SessionMemory
 from app.models.task import Task
-from app.services.writer_output import extract_writer_markdown
+from app.services.writer_output import extract_writer_markdown, extract_writer_sections
 from app.utils.logger import logger
 
 
@@ -456,7 +456,12 @@ class LongTextFSM:
             raw = str(node.result or "")
             if not raw or not self._is_usable_writer_output(raw):
                 continue
-            markdown = extract_writer_markdown(raw)
+            chapter_title = self._chapter_title_from_node_title(str(node.title or ""))
+            section_blocks = self._sections_to_markdown_blocks(
+                extract_writer_sections(raw, default_heading=chapter_title),
+                default_heading=chapter_title,
+            )
+            markdown = "\n\n".join(block for block in section_blocks if block).strip()
             if markdown:
                 if "Assembly编辑收敛" in str(node.title or ""):
                     assembly_parts.append(markdown)
@@ -515,6 +520,52 @@ class LongTextFSM:
         if "i don't have the specific details" in head:
             return False
         return True
+
+    @staticmethod
+    def _chapter_title_from_node_title(node_title: str) -> str:
+        text = str(node_title or "").strip()
+        if not text:
+            return "章节"
+        marker = re.search(r"(第\s*\d+\s*章[:：]?\s*.*)$", text)
+        if marker:
+            return marker.group(1).strip()
+        return text
+
+    @staticmethod
+    def _looks_like_json_blob(text: str) -> bool:
+        sample = str(text or "").strip()
+        if not sample:
+            return False
+        if (sample.startswith("{") and sample.endswith("}")) or (sample.startswith("[") and sample.endswith("]")):
+            return True
+        if '"paragraphs"' in sample and ('"chapter_title"' in sample or '"content_markdown"' in sample):
+            return True
+        return False
+
+    @classmethod
+    def _sections_to_markdown_blocks(
+        cls,
+        sections: list[dict[str, Any]],
+        *,
+        default_heading: str = "章节",
+    ) -> list[str]:
+        blocks: list[str] = []
+        for section in sections:
+            heading = str(section.get("heading") or default_heading or "章节").strip()
+            paragraphs = section.get("paragraphs") if isinstance(section.get("paragraphs"), list) else []
+            paragraph_texts: list[str] = []
+            for paragraph in paragraphs:
+                if not isinstance(paragraph, dict):
+                    continue
+                text = str(paragraph.get("text") or "").strip()
+                if not text or cls._looks_like_json_blob(text):
+                    continue
+                paragraph_texts.append(text)
+            if not paragraph_texts:
+                continue
+            blocks.append(f"## {heading}")
+            blocks.extend(paragraph_texts)
+        return blocks
 
     async def _cleanup_session_memory(self) -> None:
         """Cleanup session-scoped memory when the task reaches terminal states."""

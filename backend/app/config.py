@@ -33,10 +33,11 @@ class Settings(BaseSettings):
     # LLM retry policy
     llm_max_retries: int = 3
     llm_retry_base_delay: float = 1.0
+    llm_request_timeout_seconds: int = 120
 
     # DAG node timeout controls (seconds)
     dag_node_timeout_seconds: int = 300
-    dag_writer_node_timeout_seconds: int = 900
+    dag_writer_node_timeout_seconds: int = 180
 
     # Optional RAG
     rag_enabled: bool = False

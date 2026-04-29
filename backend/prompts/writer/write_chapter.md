@@ -76,8 +76,12 @@
 ## 输出（硬约束）
 只输出严格 JSON（不要 markdown 代码块，不要解释文本）：
 {{
+  "heading": "{chapter_title}",
+  "paragraphs": [
+    {{"text": "中文分析段落", "citation_keys": ["CIT-001", "CIT-002"]}}
+  ],
   "chapter_title": "{chapter_title}",
-  "content_markdown": "章节正文 markdown",
+  "content_markdown": "兼容字段，可由 paragraphs 自动拼接",
   "key_points": ["要点1", "要点2", "要点3"],
   "evidence_trace": [
     {{"claim": "关键论断", "evidence_ids": ["E1", "E2"]}}
@@ -87,10 +91,11 @@
     {{"statement": "重要陈述", "support": "evidence_id 或 uncertainty", "source_url": "https://... (可空)"}}
   ]
 }}
+其中 `paragraphs` 为主输出结构，必须非空；每段都要有 `text`，并尽量绑定 1-2 个 `citation_keys`。
 
 ## 最终校验清单（生成前自检）
-1. JSON 字段齐全且类型正确。
-2. content_markdown 达到目标篇幅预期（接近 node_target_words，若为空则接近 target_words）。
+1. JSON 字段齐全且类型正确（重点检查 `heading + paragraphs`）。
+2. paragraphs 总体篇幅达到目标预期（接近 node_target_words，若为空则接近 target_words）。
 3. 未出现三级标题。
 4. evidence_trace 与 citation_ledger 非空且可追踪。
 5. 无编造来源、无流程泄漏、无明显模板腔。

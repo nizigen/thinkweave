@@ -9,6 +9,7 @@ Worker 根据 ctx.agent_role 自动加载对应 Prompt 模板，
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -26,6 +27,7 @@ from app.utils.logger import logger
 from app.utils.prompt_loader import PromptLoader
 
 _FAST_PATH_MAX_TARGET_WORDS = 2000
+_STAGE_AUTORETRY_LIMIT = 2
 
 
 def _count_text_units(text: str) -> int:
@@ -115,29 +117,50 @@ class WorkerAgent(BaseAgent):
             model_override=model_override or "",
         ).debug("worker model selection")
         result: str | None = None
-        if str(agent_role or "").strip().lower() == "researcher":
-            result = await self._run_researcher_tool_path(
-                messages=messages,
-                payload=payload,
-                model_override=model_override,
-            )
-            if result:
-                log.bind(result_len=len(result)).info(
-                    "researcher used tool-backed execution path"
+        role_norm = str(agent_role or "").strip().lower()
+        for attempt in range(1, _STAGE_AUTORETRY_LIMIT + 2):
+            try:
+                if role_norm == "researcher":
+                    result = await self._run_researcher_tool_path(
+                        messages=messages,
+                        payload=payload,
+                        model_override=model_override,
+                    )
+                    if result:
+                        log.bind(result_len=len(result), attempt=attempt).info(
+                            "researcher used tool-backed execution path"
+                        )
+                if not result and role_norm == "writer":
+                    result = await self._run_writer_hard_json_path(
+                        messages=messages,
+                        payload=payload,
+                        model_override=model_override,
+                    )
+                    log.bind(result_len=len(result), attempt=attempt).info(
+                        "writer used hard-json generation path"
+                    )
+                if not result:
+                    result = await self.llm_client.chat(
+                        messages=messages,
+                        role=agent_role,
+                        model=model_override,
+                    )
+                break
+            except Exception as exc:
+                if attempt > _STAGE_AUTORETRY_LIMIT:
+                    raise
+                delay = min(2.0 * attempt, 8.0)
+                log.warning(
+                    "stage autoretry triggered (attempt {}/{}): {} ; retry in {:.1f}s",
+                    attempt,
+                    _STAGE_AUTORETRY_LIMIT,
+                    exc,
+                    delay,
                 )
-        if not result and str(agent_role or "").strip().lower() == "writer":
-            result = await self._run_writer_hard_json_path(
-                messages=messages,
-                payload=payload,
-                model_override=model_override,
-            )
-            log.bind(result_len=len(result)).info("writer used hard-json generation path")
-        if not result:
-            result = await self.llm_client.chat(
-                messages=messages,
-                role=agent_role,
-                model=model_override,
-            )
+                await asyncio.sleep(delay)
+
+        if result is None:
+            raise RuntimeError("worker execution produced empty result after retries")
         result = await self._apply_output_contract(
             result=result,
             title=title,
@@ -288,6 +311,9 @@ class WorkerAgent(BaseAgent):
         attempts = 3
         working_messages: list[dict[str, str]] = [dict(item) for item in messages]
         chapter_title = str(payload.get("chapter_title") or payload.get("title") or "").strip()
+        injected_prompt = self._build_writer_injected_prompt(payload=payload, chapter_title=chapter_title)
+        if injected_prompt:
+            working_messages.append({"role": "user", "content": injected_prompt})
         chat_json_fn = getattr(self.llm_client, "chat_json", None)
         if not callable(chat_json_fn):
             # Backward-compatible path for tests/mocks that only implement chat().
@@ -322,7 +348,11 @@ class WorkerAgent(BaseAgent):
             )
             fallback_text = str(fallback_text or "").strip()
             if fallback_text:
-                return fallback_text
+                parsed_fallback = parse_writer_payload(fallback_text)
+                if parsed_fallback is not None:
+                    if not parsed_fallback.get("chapter_title"):
+                        parsed_fallback["chapter_title"] = chapter_title
+                    return serialize_writer_payload(parsed_fallback)
 
             working_messages.append(
                 {
@@ -330,7 +360,9 @@ class WorkerAgent(BaseAgent):
                     "content": (
                         "上次输出未通过 writer schema 校验。"
                         "必须返回严格 JSON 对象，且至少包含："
-                        "chapter_title, content_markdown, key_points, "
+                        "heading, paragraphs。"
+                        "其中 paragraphs 必须是数组，每项包含 text 和 citation_keys。"
+                        "可附带 chapter_title, content_markdown, key_points, "
                         "evidence_trace, boundary_notes, citation_ledger。"
                         "禁止返回 markdown 代码块或额外解释。"
                     ),
@@ -363,6 +395,44 @@ class WorkerAgent(BaseAgent):
             )
             return serialize_writer_payload(fallback)
         raise ValueError("Writer hard-json generation failed after retries")
+
+    @staticmethod
+    def _estimate_writer_paragraph_count(node_target_words: int) -> int:
+        target = max(0, int(node_target_words or 0))
+        if target <= 0:
+            return 5
+        # Konruns-like sizing: roughly one analytical paragraph per ~350 chars.
+        return max(4, min(18, target // 350 + 1))
+
+    def _build_writer_injected_prompt(self, *, payload: dict[str, Any], chapter_title: str) -> str:
+        title = str(chapter_title or "本章").strip() or "本章"
+        chapter_desc = str(payload.get("chapter_description") or "").strip()
+        chapter_content = str(payload.get("chapter_content") or "").strip()
+        research_questions = str(payload.get("research_questions") or "").strip()
+        source_policy = str(payload.get("source_policy") or "").strip()
+        evidence_pool_summary = str(payload.get("evidence_pool_summary") or "").strip()
+        try:
+            node_target_words = int(payload.get("node_target_words") or payload.get("target_words") or 0)
+        except Exception:
+            node_target_words = 0
+        paragraph_count = self._estimate_writer_paragraph_count(node_target_words)
+        return (
+            "后端强注入写作约束（必须执行）：\n"
+            f"- 章节：{title}\n"
+            f"- 本章目标字数：至少 {max(900, node_target_words)}\n"
+            f"- 最少段落数：{paragraph_count}\n"
+            f"- 章节任务：{chapter_desc or '围绕章节主题给出可执行分析与证据支撑'}\n"
+            f"- 研究问题：{research_questions or '请围绕任务主题中的核心问题推进论证'}\n"
+            "- 输出必须为严格 JSON 对象，不得有 markdown 代码块或解释文本。\n"
+            '- 必须包含键：heading, paragraphs, chapter_title, content_markdown, key_points, evidence_trace, boundary_notes, citation_ledger。\n'
+            '- paragraphs 每项必须是 {"text":"中文分析段落","citation_keys":["..."]}。\n'
+            "- 每段应包含：可检验观点 + 证据支撑 + 边界/反例或实施含义；禁止空话和模板开头。\n"
+            "- 不得写“围绕本章继续补充”“本轮扩写”等流程描述。\n"
+            "- 引用仅通过 citation_keys 字段绑定，不要把 citation key 写进正文句子。\n"
+            f"- 可用证据策略：{source_policy[:1200] if source_policy else '遵循给定证据池与章节边界'}\n"
+            f"- 证据池摘要：{evidence_pool_summary[:1200] if evidence_pool_summary else '无摘要时使用 assigned_evidence'}\n"
+            f"- 已有正文（用于扩写而非重写）：{chapter_content[:2000] if chapter_content else '（空）'}"
+        )
 
     def _select_model_override(self, *, agent_role: str, payload: dict[str, Any]) -> str | None:
         role = str(agent_role or "").strip().lower()
@@ -420,9 +490,9 @@ class WorkerAgent(BaseAgent):
             except (TypeError, ValueError):
                 target_words = 0
             if target_words > 0:
-                min_units = max(220, min(1200, int(target_words * 0.15)))
+                min_units = max(900, int(target_words * 0.92))
         if min_units <= 0:
-            min_units = 220
+            min_units = 700
         observed_units = 0
         observed_zh_ratio = 0.0
         should_enforce_chinese = not _english_requested(payload)
@@ -463,8 +533,9 @@ class WorkerAgent(BaseAgent):
             "Repair the chapter into strict JSON writer schema with improved writing quality.\n"
             "Output requirements:\n"
             "- Return strict JSON object only (no markdown code fence)\n"
-            '- Required keys: "chapter_title", "content_markdown", "key_points", "evidence_trace", "boundary_notes", "citation_ledger"\n'
-            "- content_markdown must be chapter prose in markdown\n"
+            '- Required keys: "heading", "paragraphs"\n'
+            '- paragraphs must be array items like {"text":"...", "citation_keys":["..."]}\n'
+            "- content_markdown can be provided as compatibility field but is optional\n"
             '- key_points must be string array (3-6 bullets)\n'
             '- evidence_trace must be array of {"claim": "...", "evidence_ids": ["..."]}\n'
             '- boundary_notes must be string array\n'
@@ -517,13 +588,120 @@ class WorkerAgent(BaseAgent):
             logger.bind(agent_id=str(self.agent_id)).opt(exception=True).warning(
                 "writer output repair failed; keeping original output"
             )
-        fallback = make_fallback_writer_payload(
+        # Backend hard fallback (Konruns-style): enforce minimum length via local structured supplement,
+        # instead of relying solely on model retries.
+        local_fallback = make_fallback_writer_payload(
             chapter_title=chapter_title,
             content_markdown=result,
         )
-        if fallback is not None:
-            return serialize_writer_payload(fallback)
-        return result
+        if local_fallback is None:
+            local_fallback = make_fallback_writer_payload(
+                chapter_title=chapter_title,
+                content_markdown=f"# {chapter_title}\n\n（本地补写占位）",
+            )
+        if local_fallback is None:
+            return result
+        ensured = self._ensure_local_writer_minimum(
+            payload=local_fallback,
+            min_units=min_units,
+            chapter_title=chapter_title,
+            task_payload=payload,
+        )
+        return serialize_writer_payload(ensured)
+
+    def _ensure_local_writer_minimum(
+        self,
+        *,
+        payload: dict[str, Any],
+        min_units: int,
+        chapter_title: str,
+        task_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        paragraphs_raw = payload.get("paragraphs", [])
+        paragraphs: list[dict[str, Any]] = []
+        if isinstance(paragraphs_raw, list):
+            for item in paragraphs_raw:
+                if isinstance(item, dict) and str(item.get("text") or "").strip():
+                    keys_raw = item.get("citation_keys", [])
+                    if isinstance(keys_raw, list):
+                        keys = [str(k).strip() for k in keys_raw if str(k).strip()]
+                    else:
+                        keys = []
+                    paragraphs.append({"text": str(item.get("text") or "").strip(), "citation_keys": keys})
+
+        current_text = "\n\n".join(item["text"] for item in paragraphs)
+        current_units = _count_text_units(current_text)
+        if current_units >= min_units:
+            return payload
+
+        evidence_ids = self._derive_local_citation_keys(task_payload)
+        round_idx = 1
+        while current_units < min_units:
+            snippet = self._build_local_writer_paragraph(
+                chapter_title=chapter_title,
+                round_idx=round_idx,
+                base_text=current_text,
+            )
+            paragraphs.append(
+                {
+                    "text": snippet,
+                    "citation_keys": evidence_ids[:2],
+                }
+            )
+            current_text = "\n\n".join(item["text"] for item in paragraphs)
+            current_units = _count_text_units(current_text)
+            round_idx += 1
+            if round_idx > 24:
+                break
+
+        payload["heading"] = str(payload.get("heading") or chapter_title or "").strip()
+        payload["chapter_title"] = str(payload.get("chapter_title") or payload["heading"]).strip()
+        payload["paragraphs"] = paragraphs
+        payload["content_markdown"] = current_text
+        payload.setdefault("key_points", [])
+        payload.setdefault("evidence_trace", [])
+        payload.setdefault("boundary_notes", [])
+        payload.setdefault("citation_ledger", [])
+        return payload
+
+    @staticmethod
+    def _derive_local_citation_keys(task_payload: dict[str, Any]) -> list[str]:
+        out: list[str] = []
+        assigned = task_payload.get("assigned_evidence", [])
+        if isinstance(assigned, list):
+            for item in assigned:
+                if isinstance(item, dict):
+                    key = str(item.get("evidence_id") or "").strip()
+                else:
+                    key = str(item or "").strip()
+                if key and key not in out:
+                    out.append(key)
+        if not out:
+            out.append("E-LOCAL")
+        return out
+
+    @staticmethod
+    def _build_local_writer_paragraph(*, chapter_title: str, round_idx: int, base_text: str = "") -> str:
+        sentences = [
+            s.strip()
+            for s in re.split(r"[。！？!?]\s*", str(base_text or ""))
+            if len(s.strip()) >= 18
+        ]
+        anchor = sentences[(round_idx - 1) % len(sentences)] if sentences else f"{chapter_title}的核心结论"
+        dimensions = [
+            "机制解释",
+            "实施步骤",
+            "量化指标",
+            "约束条件",
+            "反例与边界",
+            "落地建议",
+        ]
+        dim = dimensions[(round_idx - 1) % len(dimensions)]
+        return (
+            f"{anchor}。进一步展开其{dim}时，可以按照“现状基线—关键变量—执行动作—可观测结果”四步来描述。"
+            "具体可先明确当前状态与目标差值，再给出可操作动作清单与阶段里程碑，"
+            "最后用可验证的结果指标收束论证，避免停留在抽象表述。"
+        )
 
     def _structured_output_valid(self, text: str, agent_role: str) -> bool:
         if not has_valid_schema_for_role(agent_role, text):

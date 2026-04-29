@@ -266,12 +266,13 @@ class BaseAgent(ABC):
             )
 
         except Exception as exc:
+            error_text = str(exc).strip() or exc.__class__.__name__ or "agent_execution_failed"
             # 上报失败
             await communicator.send_task_result(
                 task_id=task_id,
                 node_id=node_id,
                 from_agent=str(self.agent_id),
-                result={"status": "failed", "error": str(exc)},
+                result={"status": "failed", "error": error_text},
             )
 
             self._log.bind(task_id=task_id, node_id=node_id).error(

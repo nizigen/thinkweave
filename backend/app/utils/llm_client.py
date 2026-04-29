@@ -82,7 +82,7 @@ ROLE_MODEL_MAP: dict[str, str] = {
 # Retryable API errors
 # ---------------------------------------------------------------------------
 
-_RETRYABLE = (APIConnectionError, APIStatusError, RateLimitError)
+_RETRYABLE = (APIConnectionError, APIStatusError, RateLimitError, asyncio.TimeoutError)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +180,7 @@ class LLMClient(BaseLLMClient):
         return normalized in {"sk-xxx", "your-api-key", "placeholder", "changeme"}
 
     def _build_client(self, provider: str) -> AsyncOpenAI:
+        request_timeout = max(5, int(getattr(settings, "llm_request_timeout_seconds", 120)))
         if provider == "openai":
             if self._is_placeholder_key(settings.openai_api_key):
                 raise LLMUnavailableError(
@@ -188,6 +189,7 @@ class LLMClient(BaseLLMClient):
             return AsyncOpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
+                timeout=request_timeout,
             )
         if provider == "deepseek":
             if self._is_placeholder_key(settings.deepseek_api_key):
@@ -197,6 +199,7 @@ class LLMClient(BaseLLMClient):
             return AsyncOpenAI(
                 api_key=settings.deepseek_api_key,
                 base_url=settings.deepseek_base_url,
+                timeout=request_timeout,
             )
         raise LLMUnavailableError(f"Provider '{provider}' not configured")
 
@@ -499,7 +502,8 @@ class LLMClient(BaseLLMClient):
         last_error: Exception | None = None
         for attempt in range(max_attempts):
             try:
-                return await operation()
+                request_timeout = max(5, int(getattr(settings, "llm_request_timeout_seconds", 120)))
+                return await asyncio.wait_for(operation(), timeout=request_timeout)
             except _RETRYABLE as exc:
                 delay = settings.llm_retry_base_delay * (2 ** attempt)
                 logger.warning(

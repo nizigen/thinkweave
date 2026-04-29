@@ -40,8 +40,25 @@ _DEPTH_CHAPTER_BOUNDS: dict[str, tuple[int, int]] = {
     "deep": (8, 12),
 }
 _LONGFORM_MIN_CHAPTERS_BY_TARGET: list[tuple[int, dict[str, int]]] = [
-    (50000, {"quick": 10, "standard": 12, "deep": 14}),
-    (30000, {"quick": 7, "standard": 9, "deep": 10}),
+    (50000, {"quick": 12, "standard": 14, "deep": 16}),
+    (30000, {"quick": 10, "standard": 12, "deep": 14}),
+]
+_CHAPTER_TITLE_TEMPLATES = [
+    "研究背景与问题界定",
+    "核心概念与评价框架",
+    "现状诊断与关键矛盾",
+    "技术路线与实现机制",
+    "数据与证据基础",
+    "组织机制与流程重构",
+    "治理与合规边界",
+    "实施路径与阶段计划",
+    "风险识别与应对策略",
+    "成本收益与资源配置",
+    "行业案例与对比分析",
+    "综合结论与行动建议",
+    "分场景扩展与落地细则",
+    "监测评估与持续优化",
+    "长期演进与战略展望",
 ]
 
 
@@ -64,6 +81,23 @@ def _is_expansion_title(title: str) -> bool:
         return False
     markers = ("扩写", "补写", "整合", "篇幅补足")
     return any(marker in text for marker in markers)
+
+
+def _normalized_chapter_title(chapter_index: int) -> str:
+    idx = max(1, chapter_index) - 1
+    if idx < len(_CHAPTER_TITLE_TEMPLATES):
+        name = _CHAPTER_TITLE_TEMPLATES[idx]
+    else:
+        name = f"分主题展开{chapter_index}"
+    return f"第{chapter_index}章：{name}"
+
+
+def _looks_like_low_value_chapter_title(title: str) -> bool:
+    text = (title or "").strip()
+    if not text:
+        return True
+    low_value_markers = ("补充专题", "专题补写", "扩写", "篇幅补足", "待补充", "章节草稿")
+    return any(marker in text for marker in low_value_markers)
 
 
 def _dedupe_preserve_order(items: list[str]) -> list[str]:
@@ -394,6 +428,16 @@ def _ensure_depth_chapter_count(
         return _role(node) == "writer" and not _is_expansion_title(str(node.get("title") or ""))
 
     primary_writers = [node for node in raw_nodes if _is_primary_writer(node)]
+
+    # Normalize low-value writer titles into executable chapter intents.
+    for writer in primary_writers:
+        title = str(writer.get("title") or "")
+        idx = _parse_chapter_index(title)
+        if idx is None:
+            continue
+        if _looks_like_low_value_chapter_title(title):
+            writer["title"] = _normalized_chapter_title(idx)
+
     if len(primary_writers) >= min_chapters:
         return dag
 
@@ -414,7 +458,7 @@ def _ensure_depth_chapter_count(
         chapter_index = max_chapter_index + offset
         writer_id = _allocate_node_id(existing_ids, "n_writer_extra")
         reviewer_id = _allocate_node_id(existing_ids, "n_reviewer_extra")
-        writer_title = f"第{chapter_index}章：补充专题{chapter_index}"
+        writer_title = _normalized_chapter_title(chapter_index)
         reviewer_title = f"第{chapter_index}章审查"
 
         raw_nodes.append(

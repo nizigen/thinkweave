@@ -399,14 +399,17 @@ class TestConsistencyRepairBudget:
         }
         assert scheduler._consistency_has_actionable_issues(parsed) is False
 
-    def test_consistency_actionable_detection_true_with_conflict(self, scheduler: DAGScheduler):
+    def test_consistency_actionable_detection_false_with_medium_only_conflict(
+        self,
+        scheduler: DAGScheduler,
+    ):
         parsed = {
             "claim_conflicts": [{"chapter_index": 1, "severity": "medium"}],
             "repair_targets": [],
             "repair_priority": [],
             "severity_summary": {"critical": 0, "high": 0, "medium": 1, "low": 0},
         }
-        assert scheduler._consistency_has_actionable_issues(parsed) is True
+        assert scheduler._consistency_has_actionable_issues(parsed) is False
 
     @pytest.mark.asyncio
     async def test_consume_repair_budget_allows_within_quota(
@@ -535,6 +538,70 @@ class TestDrainTaskResultShapeRepair:
         mock_completed.assert_awaited_once()
         completed_output = mock_completed.await_args.kwargs.get("result", "")
         assert _is_invalid_output_for_role("writer", completed_output) is False
+        mock_failed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_drain_task_results_forces_writer_fallback_when_coerce_still_invalid(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node_id = make_uuid()
+        agent_id = make_uuid()
+        envelope = SimpleNamespace(
+            msg_type="task_result",
+            node_id=str(node_id),
+            from_agent=str(agent_id),
+            payload={
+                "status": "done",
+                "output": '{"unexpected":"shape"}',
+            },
+        )
+
+        with (
+            patch(
+                "app.services.dag_scheduler.xread_latest",
+                new_callable=AsyncMock,
+                return_value=[SimpleNamespace(message_id="1-0", data={})],
+            ),
+            patch(
+                "app.services.dag_scheduler.MessageEnvelope.from_redis",
+                return_value=envelope,
+            ),
+            patch(
+                "app.services.dag_scheduler.coerce_output_to_role_schema",
+                return_value='{"still":"invalid"}',
+            ),
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
+            patch.object(
+                scheduler,
+                "_validate_writer_output_length",
+                new_callable=AsyncMock,
+                return_value=(True, 600, 300),
+            ),
+            patch.object(
+                scheduler,
+                "on_node_completed",
+                new_callable=AsyncMock,
+            ) as mock_completed,
+            patch.object(
+                scheduler,
+                "on_node_failed",
+                new_callable=AsyncMock,
+            ) as mock_failed,
+        ):
+            mock_session = AsyncMock()
+            role_row = MagicMock()
+            role_row.first.return_value = ("writer", "终稿扩写与整合", 0)
+            mock_session.execute = AsyncMock(return_value=role_row)
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await scheduler._drain_task_results()
+
+        mock_completed.assert_awaited_once()
+        completed_output = str(mock_completed.await_args.kwargs.get("result", ""))
+        assert _is_invalid_output_for_role("writer", completed_output) is False
+        assert "content_markdown" in completed_output
         mock_failed.assert_not_awaited()
 
 
@@ -1846,10 +1913,7 @@ class TestConsistencyRepairWave:
 
             await scheduler._drain_task_results()
 
-        mock_inject.assert_awaited_once_with(
-            session=ANY,
-            repair_targets=[1, 3],
-        )
+        mock_inject.assert_not_awaited()
         mock_completed.assert_awaited_once()
         completed_kwargs = mock_completed.await_args.kwargs
         assert completed_kwargs["node_id"] == node_id
@@ -1857,7 +1921,7 @@ class TestConsistencyRepairWave:
         completed_output = str(completed_kwargs.get("result") or "")
         assert _is_invalid_output_for_role("consistency", completed_output) is False
         parsed_completed = json.loads(completed_output)
-        assert parsed_completed.get("repair_targets") == [1, 3]
+        assert parsed_completed.get("pass") is False
         mock_failed.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1923,13 +1987,9 @@ class TestConsistencyRepairWave:
 
             await scheduler._drain_task_results()
 
-        mock_inject.assert_awaited_once_with(
-            session=ANY,
-            repair_targets=[2],
-        )
-        mock_completed.assert_not_awaited()
-        mock_failed.assert_awaited_once()
-        assert "max retries/repair waves" in mock_failed.await_args.kwargs["error"]
+        mock_inject.assert_not_awaited()
+        mock_completed.assert_awaited_once()
+        mock_failed.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_inject_repair_wave_compacts_nodes_for_quick_low_word_task(

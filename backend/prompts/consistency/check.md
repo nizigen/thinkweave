@@ -17,16 +17,16 @@
 2. 再用 key_fragments/full_text 做关键回查，避免仅凭摘要误判。
 3. 输出问题时必须给到具体章节与修复动作。
 
-## 判定策略（长度优先但不跳过严格）
-1. 若存在 critical/high 问题，`pass` 必须为 false。
-2. 若仅有 medium/low 问题，可根据整体可读性与长度目标决定 pass，但必须给出 repair_priority 与 repair_targets。
-3. 当 `target_words >= 30000` 且无 critical/high 时，可“带问题放行”以优先保障长度闭合。
-4. 当 `target_words >= 50000` 时，对重复覆盖和过渡断裂要更严格（避免超长文崩结构）。
+## 判定策略（可用优先，降低阻断）
+1. 仅当存在 critical/high 问题时，`pass=false`。
+2. 仅有 medium/low 问题时，默认 `pass=true`，并把问题写入各冲突数组作为 warning。
+3. 当 `target_words >= 30000` 时，优先保证流程闭合，禁止因纯 medium/low 问题阻断。
+4. repair_priority / repair_targets 主要用于 critical/high 问题；若仅 warning 可留空。
 
 ## 输出
 只输出严格 JSON（不要 markdown 代码块）：
 {{
-  "pass": false,
+  "pass": true,
   "style_conflicts": [
     {{"chapter_index": 2, "problem": "风格或标题层级不一致", "suggestion": "统一术语、语气与标题层级（最多到 1.1）", "severity": "medium"}}
   ],
@@ -48,15 +48,15 @@
   "source_policy_violations": [
     {{"chapter_index": 2, "problem": "来源策略不合规", "suggestion": "降级确定性或补充合规证据", "severity": "high"}}
   ],
-  "severity_summary": {{"critical": 0, "high": 2, "medium": 3, "low": 1}},
-  "repair_priority": [3, 2, 4],
-  "repair_targets": [1, 3, 4]
+  "severity_summary": {{"critical": 0, "high": 0, "medium": 3, "low": 1}},
+  "repair_priority": [],
+  "repair_targets": []
 }}
 
 ## 审计硬约束
-1. 标题层级最多二级（1 / 1.1 或 # / ##）；出现 `###` 或 `1.1.1` 至少 high。
+1. 标题层级最多二级（1 / 1.1 或 # / ##）；出现 `###` 或 `1.1.1` 默认记为 medium，除非明显破坏结构才升 high。
 2. 默认中文正文；若用户未明确要求英文，大量英文整句必须进入 `language_policy_conflicts`。
 3. `severity_summary` 必须准确统计四档数量。
-4. 当 `pass=false` 时，repair_targets 不能为空。
+4. 当 `pass=false` 时，repair_targets 不能为空；当 `pass=true` 时可为空。
 5. repair_priority 必须按“严重度 + 影响面”排序。
 6. 不得凭空捏造冲突；必须可在输入文本中定位到依据。
