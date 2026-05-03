@@ -13,6 +13,10 @@ from app.schemas.task import (
     BatchDeleteRequest,
     BatchDeleteResult,
     DecompositionAuditRead,
+    TaskControlAdminRetryRequest,
+    TaskControlAdminSkipRequest,
+    TaskControlForceTransitionRequest,
+    TaskControlResumeFromCheckpointRequest,
     TaskControlRetryRequest,
     TaskControlSkipRequest,
     TaskCreate,
@@ -219,3 +223,98 @@ async def retry_node(
         raise HTTPException(status_code=404, detail="Task not found")
     except task_control.TaskControlError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/{task_id}/control/admin/force-transition", response_model=TaskDetailRead)
+async def force_transition(
+    task_id: uuid.UUID,
+    body: TaskControlForceTransitionRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.admin_force_transition(
+            session,
+            task_id,
+            to_state=body.to_state,
+            reason=body.reason,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        detail = str(exc)
+        status_code = 403 if "admin privileges required" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail)
+
+
+@router.post("/{task_id}/control/admin/resume-from-checkpoint", response_model=TaskDetailRead)
+async def resume_from_checkpoint(
+    task_id: uuid.UUID,
+    body: TaskControlResumeFromCheckpointRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.admin_resume_from_checkpoint(
+            session,
+            task_id,
+            reason=body.reason,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        detail = str(exc)
+        status_code = 403 if "admin privileges required" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail)
+
+
+@router.post("/{task_id}/control/admin/skip", response_model=TaskDetailRead)
+async def admin_skip_node(
+    task_id: uuid.UUID,
+    body: TaskControlAdminSkipRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.admin_skip_node(
+            session,
+            task_id,
+            node_id=body.node_id,
+            reason=body.reason,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        detail = str(exc)
+        status_code = 403 if "admin privileges required" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail)
+
+
+@router.post("/{task_id}/control/admin/retry", response_model=TaskDetailRead)
+async def admin_retry(
+    task_id: uuid.UUID,
+    body: TaskControlAdminRetryRequest,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    try:
+        return await task_control.admin_retry_node(
+            session,
+            task_id,
+            node_id=body.node_id,
+            reason=body.reason,
+            user_id=auth.user_id,
+            is_admin=auth.is_admin,
+        )
+    except task_control.TaskControlNotFoundError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except task_control.TaskControlError as exc:
+        detail = str(exc)
+        status_code = 403 if "admin privileges required" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail)

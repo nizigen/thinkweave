@@ -57,6 +57,21 @@
   - `pytest -q backend/tests/test_review_fixes.py -k "publish_heartbeat"` => `1 passed`
   - `pytest -q backend/tests/test_agent_core.py -k "handle_message"` => `3 passed`
 
+## Phase 6 Wave 3 检查点（2026-05-03，Admin Recovery）
+
+- 新增 admin 恢复控制能力（reason 必填）：
+  - `POST /api/tasks/{task_id}/control/admin/force-transition`
+  - `POST /api/tasks/{task_id}/control/admin/resume-from-checkpoint`
+  - `POST /api/tasks/{task_id}/control/admin/skip`
+  - `POST /api/tasks/{task_id}/control/admin/retry`
+- `task_control` 新增：
+  - `admin_force_transition`（通过 `StateStore.transition_fsm` 执行强制迁移并审计）
+  - `admin_resume_from_checkpoint`
+  - `admin_skip_node` / `admin_retry_node`
+  - 统一发出 `operator_action` 事件（含 action/reason/metadata）
+- 回归验证：
+  - `pytest -q backend/tests/test_task_control.py tests/test_task_api.py -k "admin or control"` => `55 passed`
+
 ## Step 9 系统诊断与改进方案（2026-05-03）
 
 **诊断方式:** 通过 AI 生成的 OPC UA 报告文章缺陷反推系统代码架构问题

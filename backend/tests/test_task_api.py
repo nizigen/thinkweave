@@ -712,6 +712,46 @@ class TestTaskControlAPI:
             settings.task_auth_tokens = old_tokens
             settings.admin_user_ids = old_admins
 
+    async def test_admin_force_transition_requires_admin(self, client: AsyncClient):
+        detail = await _create_task_detail(client)
+        resp = await client.post(
+            f"/api/tasks/{detail['id']}/control/admin/force-transition",
+            json={"to_state": "writing", "reason": "manual recovery"},
+            headers=AUTH_HEADERS,
+        )
+        assert resp.status_code == 403
+
+    async def test_admin_force_transition_happy_path(self, client: AsyncClient):
+        detail = await _create_task_detail(client)
+        resp = await client.post(
+            f"/api/tasks/{detail['id']}/control/admin/force-transition",
+            json={"to_state": "writing", "reason": "manual recovery"},
+            headers={"Authorization": "Bearer token-admin"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["fsm_state"] == "writing"
+
+    async def test_admin_resume_from_checkpoint_requires_reason(
+        self, client: AsyncClient
+    ):
+        detail = await _create_task_detail(client)
+        resp = await client.post(
+            f"/api/tasks/{detail['id']}/control/admin/resume-from-checkpoint",
+            json={},
+            headers={"Authorization": "Bearer token-admin"},
+        )
+        assert resp.status_code == 422
+
+    async def test_admin_skip_requires_admin(self, client: AsyncClient):
+        detail = await _create_task_detail(client)
+        node_id = detail["nodes"][0]["id"]
+        resp = await client.post(
+            f"/api/tasks/{detail['id']}/control/admin/skip",
+            json={"node_id": node_id, "reason": "manual skip"},
+            headers=AUTH_HEADERS,
+        )
+        assert resp.status_code == 403
+
 
 class TestTaskRecoveryPersistence:
     @pytest.fixture(autouse=True)

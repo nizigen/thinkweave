@@ -16,7 +16,9 @@ from app.schemas.task import TaskDetailRead
 from app.services.checkpoint_control import ensure_task_control
 from app.services import communicator, task_service
 from app.services.dag_scheduler import get_scheduler
+from app.services.long_text_fsm import LongTextState
 from app.services.redis_streams import remove_timeout_watch, timeout_watch_member
+from app.services.state_store import StateStore, StateTransitionConflictError
 from app.utils.logger import logger
 
 PAUSABLE_TASK_STATUSES = {"pending", "running"}
@@ -255,6 +257,30 @@ async def _emit_control_events(
         logger.bind(task_id=str(task_id), command_type=command_type).opt(
             exception=True
         ).warning("failed to emit control monitor events")
+
+
+async def _emit_operator_action_event(
+    *,
+    task_id: uuid.UUID,
+    action: str,
+    reason: str,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    try:
+        await communicator.send_task_event(
+            task_id=task_id,
+            from_agent="task_control",
+            msg_type="operator_action",
+            payload={
+                "action": action,
+                "reason": reason,
+                "metadata": dict(metadata or {}),
+            },
+        )
+    except Exception:
+        logger.bind(task_id=str(task_id), action=action).opt(exception=True).warning(
+            "failed to emit operator action event"
+        )
 
 
 async def _get_visible_task(
@@ -542,4 +568,166 @@ async def retry_node(
         message="node retried",
     )
     _wake_scheduler(task_id)
+    return detail
+
+
+async def admin_force_transition(
+    session: AsyncSession,
+    task_id: uuid.UUID,
+    *,
+    to_state: str,
+    reason: str,
+    user_id: str,
+    is_admin: bool,
+) -> TaskDetailRead:
+    if not is_admin:
+        raise TaskControlError("admin privileges required")
+    task = await _get_visible_task(
+        session,
+        task_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+    target_state = str(to_state or "").strip().lower()
+    valid_states = {state.value for state in LongTextState}
+    if target_state not in valid_states:
+        raise TaskControlError(f"invalid target state '{target_state}'")
+
+    current_state = str(getattr(task, "fsm_state", "") or "init").strip().lower() or "init"
+    checkpoint_data = (
+        dict(task.checkpoint_data)
+        if isinstance(task.checkpoint_data, dict)
+        else {}
+    )
+    checkpoint_data.setdefault("operator_actions", []).append(
+        {
+            "action": "force_transition",
+            "from_state": current_state,
+            "to_state": target_state,
+            "reason": reason,
+        }
+    )
+    state_store = StateStore()
+    try:
+        await state_store.transition_fsm(
+            session=session,
+            task_id=task_id,
+            from_state=current_state,
+            to_state=target_state,
+            reason=f"admin_force_transition:{reason}",
+            created_by=user_id or "admin",
+            metadata={"action": "force_transition"},
+            checkpoint_data=checkpoint_data,
+            commit=False,
+        )
+    except StateTransitionConflictError as exc:
+        raise TaskControlError(str(exc)) from exc
+    detail = await _commit_and_refresh_detail(
+        session,
+        task_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+    await _emit_operator_action_event(
+        task_id=task_id,
+        action="force_transition",
+        reason=reason,
+        metadata={"to_state": target_state},
+    )
+    _wake_scheduler(task_id)
+    return detail
+
+
+async def admin_resume_from_checkpoint(
+    session: AsyncSession,
+    task_id: uuid.UUID,
+    *,
+    reason: str,
+    user_id: str,
+    is_admin: bool,
+) -> TaskDetailRead:
+    if not is_admin:
+        raise TaskControlError("admin privileges required")
+    task = await _get_visible_task(
+        session,
+        task_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+    control = _merge_control_update(task, status="active", command_type="resume_from_checkpoint")
+    if str(getattr(task, "status", "") or "") in {"failed", "done"}:
+        task.status = "pending"
+    detail = await _commit_and_refresh_detail(
+        session,
+        task_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+    await _emit_operator_action_event(
+        task_id=task_id,
+        action="resume_from_checkpoint",
+        reason=reason,
+        metadata={"control_status": control.get("status")},
+    )
+    await _emit_control_events(
+        task_id=task_id,
+        command_type="resume_from_checkpoint",
+        control=dict(control),
+        message="resume from checkpoint requested",
+    )
+    _wake_scheduler(task_id)
+    return detail
+
+
+async def admin_skip_node(
+    session: AsyncSession,
+    task_id: uuid.UUID,
+    *,
+    node_id: uuid.UUID,
+    reason: str,
+    user_id: str,
+    is_admin: bool,
+) -> TaskDetailRead:
+    if not is_admin:
+        raise TaskControlError("admin privileges required")
+    detail = await skip_node(
+        session,
+        task_id,
+        node_id=node_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+    await _emit_operator_action_event(
+        task_id=task_id,
+        action="skip_node",
+        reason=reason,
+        metadata={"node_id": str(node_id)},
+    )
+    return detail
+
+
+async def admin_retry_node(
+    session: AsyncSession,
+    task_id: uuid.UUID,
+    *,
+    node_id: uuid.UUID,
+    reason: str,
+    user_id: str,
+    is_admin: bool,
+) -> TaskDetailRead:
+    if not is_admin:
+        raise TaskControlError("admin privileges required")
+    detail = await retry_node(
+        session,
+        task_id,
+        node_id=node_id,
+        user_id=user_id,
+        is_admin=is_admin,
+    )
+    await _emit_operator_action_event(
+        task_id=task_id,
+        action="retry_node",
+        reason=reason,
+        metadata={"node_id": str(node_id)},
+    )
     return detail

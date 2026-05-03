@@ -11,6 +11,10 @@ import pytest
 
 from app.services.redis_streams import timeout_watch_member
 from app.services.task_control import (
+    admin_force_transition,
+    admin_resume_from_checkpoint,
+    admin_retry_node,
+    admin_skip_node,
     _retry_node_in_memory,
     _skip_node_in_memory,
     TaskControlError,
@@ -152,7 +156,10 @@ async def test_retry_node_wakes_scheduler_after_requeue() -> None:
     task_id = uuid.uuid4()
     node = _build_node("failed")
     node.retry_count = 2
-    task = SimpleNamespace(checkpoint_data={"control": {"status": "active"}})
+    task = SimpleNamespace(
+        checkpoint_data={"control": {"status": "active"}},
+        fsm_state="writing",
+    )
     session = AsyncMock()
     scheduler = MagicMock()
     retry_result = MagicMock()
@@ -478,7 +485,10 @@ async def test_retry_node_resets_budget_then_scheduler_can_dispatch_same_node() 
     task_id = uuid.uuid4()
     node = _build_node("failed")
     node.retry_count = 2
-    task = SimpleNamespace(checkpoint_data={"control": {"status": "active"}})
+    task = SimpleNamespace(
+        checkpoint_data={"control": {"status": "active"}},
+        fsm_state="writing",
+    )
     session = AsyncMock()
     retry_result = MagicMock()
     retry_result.rowcount = 1
@@ -509,6 +519,7 @@ async def test_retry_node_resets_budget_then_scheduler_can_dispatch_same_node() 
     params = retry_update.compile().params
     assert params["status"] == "ready"
     assert params["retry_count"] == 0
+    node.status = "ready"
 
     from app.services.dag_scheduler import DAGScheduler
 
@@ -563,3 +574,121 @@ async def test_retry_node_rejects_terminal_task_status() -> None:
 def test_skip_and_retry_public_contract_are_task_scoped_async_handlers() -> None:
     assert inspect.iscoroutinefunction(skip_node)
     assert inspect.iscoroutinefunction(retry_node)
+
+
+@pytest.mark.asyncio
+async def test_admin_force_transition_requires_admin() -> None:
+    session = AsyncMock()
+    with pytest.raises(TaskControlError, match="admin privileges required"):
+        await admin_force_transition(
+            session,
+            uuid.uuid4(),
+            to_state="writing",
+            reason="manual recovery",
+            user_id="user-1",
+            is_admin=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_force_transition_emits_operator_action() -> None:
+    task_id = uuid.uuid4()
+    task = SimpleNamespace(fsm_state="outline", checkpoint_data={"control": {"status": "active"}})
+    session = AsyncMock()
+    communicator = MagicMock()
+    communicator.send_task_event = AsyncMock()
+
+    with (
+        patch("app.services.task_control._get_visible_task", new=AsyncMock(return_value=task)),
+        patch("app.services.task_control.StateStore") as mock_store_cls,
+        patch(
+            "app.services.task_control._commit_and_refresh_detail",
+            new=AsyncMock(return_value={"id": str(task_id), "fsm_state": "writing"}),
+        ),
+        patch("app.services.task_control.get_scheduler", return_value=None, create=True),
+        patch("app.services.task_control.communicator", communicator, create=True),
+    ):
+        mock_store = MagicMock()
+        mock_store.transition_fsm = AsyncMock()
+        mock_store_cls.return_value = mock_store
+        detail = await admin_force_transition(
+            session,
+            task_id,
+            to_state="writing",
+            reason="manual recovery",
+            user_id="admin-user",
+            is_admin=True,
+        )
+
+    assert detail["id"] == str(task_id)
+    msg_types = [call.kwargs["msg_type"] for call in communicator.send_task_event.await_args_list]
+    assert "operator_action" in msg_types
+
+
+@pytest.mark.asyncio
+async def test_admin_resume_from_checkpoint_sets_control_active() -> None:
+    task_id = uuid.uuid4()
+    task = SimpleNamespace(status="failed", checkpoint_data={"control": {"status": "paused"}})
+    session = AsyncMock()
+    communicator = MagicMock()
+    communicator.send_task_event = AsyncMock()
+    communicator.send_status_update = AsyncMock()
+
+    with (
+        patch("app.services.task_control._get_visible_task", new=AsyncMock(return_value=task)),
+        patch(
+            "app.services.task_control._commit_and_refresh_detail",
+            new=AsyncMock(return_value={"id": str(task_id), "status": "pending"}),
+        ),
+        patch("app.services.task_control.get_scheduler", return_value=None, create=True),
+        patch("app.services.task_control.communicator", communicator, create=True),
+    ):
+        detail = await admin_resume_from_checkpoint(
+            session,
+            task_id,
+            reason="resume after fix",
+            user_id="admin-user",
+            is_admin=True,
+        )
+
+    assert detail["status"] == "pending"
+    assert task.checkpoint_data["control"]["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_admin_skip_and_retry_emit_operator_action() -> None:
+    task_id = uuid.uuid4()
+    node_id = uuid.uuid4()
+    session = AsyncMock()
+    communicator = MagicMock()
+    communicator.send_task_event = AsyncMock()
+
+    with (
+        patch("app.services.task_control.skip_node", new=AsyncMock(return_value={"id": str(task_id)})),
+        patch("app.services.task_control.retry_node", new=AsyncMock(return_value={"id": str(task_id)})),
+        patch("app.services.task_control.communicator", communicator, create=True),
+    ):
+        await admin_skip_node(
+            session,
+            task_id,
+            node_id=node_id,
+            reason="skip blocked node",
+            user_id="admin-user",
+            is_admin=True,
+        )
+        await admin_retry_node(
+            session,
+            task_id,
+            node_id=node_id,
+            reason="retry after manual patch",
+            user_id="admin-user",
+            is_admin=True,
+        )
+
+    actions = [
+        call.kwargs["payload"]["action"]
+        for call in communicator.send_task_event.await_args_list
+        if call.kwargs.get("msg_type") == "operator_action"
+    ]
+    assert "skip_node" in actions
+    assert "retry_node" in actions

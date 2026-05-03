@@ -114,6 +114,25 @@ class TaskControlRetryRequest(BaseModel):
     node_id: uuid.UUID
 
 
+class TaskControlAdminSkipRequest(BaseModel):
+    node_id: uuid.UUID
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class TaskControlAdminRetryRequest(BaseModel):
+    node_id: uuid.UUID
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class TaskControlForceTransitionRequest(BaseModel):
+    to_state: str = Field(..., min_length=1, max_length=64)
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class TaskControlResumeFromCheckpointRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
 # ---------------------------------------------------------------------------
 # DAG Validation Schemas (for LLM JSON response parsing)
 # ---------------------------------------------------------------------------
