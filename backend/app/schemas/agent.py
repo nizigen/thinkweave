@@ -72,6 +72,18 @@ class AgentStatusUpdate(BaseModel):
     status: Literal["idle", "busy", "offline"]
 
 
+class AgentHealthRead(BaseModel):
+    id: uuid.UUID
+    status: str
+    runtime_status: str
+    current_task: str = ""
+    current_node: str = ""
+    capabilities: str | None = None
+    error_count: int = 0
+    last_heartbeat: float | None = None
+    heartbeat_age_seconds: float | None = None
+
+
 class ModelOptionRead(BaseModel):
     value: str
     label: str

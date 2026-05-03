@@ -272,7 +272,24 @@ class TestHeartbeat:
             state_arg = mock_set.call_args[0][1]
             assert state_arg["status"] == "busy"
             assert state_arg["current_task"] == "t1"
+            assert state_arg["capabilities"] == ""
+            assert state_arg["error_count"] == "0"
             assert "last_heartbeat" in state_arg
+
+    @pytest.mark.asyncio
+    async def test_send_heartbeat_supports_capabilities_and_error_count(self):
+        with patch("app.services.heartbeat.set_agent_state", new_callable=AsyncMock) as mock_set:
+            from app.services.heartbeat import send_heartbeat
+            await send_heartbeat(
+                "agent-1",
+                status="busy",
+                current_task="t1",
+                capabilities="draft, retrieval",
+                error_count=3,
+            )
+            state_arg = mock_set.call_args[0][1]
+            assert state_arg["capabilities"] == "draft, retrieval"
+            assert state_arg["error_count"] == "3"
 
     @pytest.mark.asyncio
     async def test_check_agent_alive_true(self):

@@ -1,6 +1,7 @@
 """Agent CRUD service layer"""
 
 import copy
+import time
 import uuid
 
 from sqlalchemy import select
@@ -18,6 +19,7 @@ from app.services.runtime_bootstrap import (
     register_persisted_agent,
     unregister_runtime_agent,
 )
+from app.services.heartbeat import HEARTBEAT_TIMEOUT_SECONDS, get_agent_state
 from app.skills.loader import SkillLoader
 from app.utils.logger import logger
 
@@ -238,6 +240,61 @@ async def list_agents(session: AsyncSession) -> list[Agent]:
 async def get_agent(session: AsyncSession, agent_id: uuid.UUID) -> Agent | None:
     """Return a single agent by ID, or None."""
     return await session.get(Agent, agent_id)
+
+
+async def get_agent_health(
+    session: AsyncSession,
+    agent_id: uuid.UUID,
+) -> dict[str, object] | None:
+    agent = await session.get(Agent, agent_id)
+    if agent is None:
+        return None
+
+    state = await get_agent_state(agent_id)
+    status = str(getattr(agent, "status", "") or "offline").strip().lower() or "offline"
+    runtime_status = "offline" if status == "offline" else "dead"
+    current_task = ""
+    current_node = ""
+    capabilities = str(getattr(agent, "capabilities", "") or "") or None
+    error_count = 0
+    last_heartbeat: float | None = None
+    heartbeat_age_seconds: float | None = None
+
+    if state:
+        current_task = str(state.get("current_task", "") or "")
+        current_node = str(state.get("current_node", "") or "")
+        capabilities = str(state.get("capabilities", "") or capabilities or "") or None
+        try:
+            error_count = max(0, int(state.get("error_count", "0") or 0))
+        except Exception:
+            error_count = 0
+        try:
+            last_heartbeat = float(state.get("last_heartbeat", "0") or 0)
+        except Exception:
+            last_heartbeat = None
+        if last_heartbeat and last_heartbeat > 0:
+            heartbeat_age_seconds = max(0.0, time.time() - last_heartbeat)
+            if heartbeat_age_seconds >= HEARTBEAT_TIMEOUT_SECONDS:
+                runtime_status = "dead"
+            else:
+                runtime_status = str(state.get("status", "") or "unknown").strip().lower() or "unknown"
+        else:
+            runtime_status = "unknown"
+
+        if error_count > 0 and runtime_status in {"idle", "busy"}:
+            runtime_status = "degraded"
+
+    return {
+        "id": agent.id,
+        "status": status,
+        "runtime_status": runtime_status,
+        "current_task": current_task,
+        "current_node": current_node,
+        "capabilities": capabilities,
+        "error_count": error_count,
+        "last_heartbeat": last_heartbeat,
+        "heartbeat_age_seconds": heartbeat_age_seconds,
+    }
 
 
 async def create_agent(session: AsyncSession, agent_in: AgentCreate) -> Agent:

@@ -23,6 +23,7 @@ from app.database import async_session_factory
 from app.models.agent import Agent
 from app.models.task import Task
 from app.services.dag_scheduler import start_scheduler
+from app.services.heartbeat import wait_for_agent_healthy
 from app.utils.logger import logger
 from app.utils.llm_client import DebugMockLLMClient, LLMClient
 
@@ -79,6 +80,7 @@ def _build_runtime_agent(agent: Agent) -> Any:
         "agent_id": agent.id,
         "name": str(agent.name or role or "agent"),
         "llm_client": _get_runtime_llm_client(),
+        "capabilities": str(getattr(agent, "capabilities", "") or ""),
     }
     if role == "orchestrator":
         return OrchestratorAgent(**common)
@@ -105,6 +107,11 @@ async def register_persisted_agent(agent: Any) -> None:
     runtime_agent = _build_runtime_agent(agent)
     agent_registry.register(runtime_agent)
     await agent_registry.start_agent(agent_id)
+    healthy = await wait_for_agent_healthy(agent_id, timeout_seconds=5.0, poll_interval=0.2)
+    if not healthy:
+        await agent_registry.stop_agent(agent_id)
+        agent_registry.unregister(agent_id)
+        raise RuntimeError(f"agent startup health check timeout: {agent_id}")
     logger.bind(agent_id=str(agent_id), role=str(getattr(agent, "role", ""))).info(
         "runtime agent registered and started"
     )

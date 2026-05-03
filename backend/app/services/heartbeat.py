@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 
@@ -27,6 +28,8 @@ async def send_heartbeat(
     status: str = "idle",
     current_task: str = "",
     current_node: str = "",
+    capabilities: str = "",
+    error_count: int = 0,
 ) -> None:
     """Agent 发送心跳 — 更新 Redis Hash 中的状态和时间戳。"""
     now = str(time.time())
@@ -35,6 +38,8 @@ async def send_heartbeat(
         "current_task": current_task,
         "current_node": current_node,
         "last_heartbeat": now,
+        "capabilities": capabilities,
+        "error_count": str(max(0, int(error_count or 0))),
     }
     await set_agent_state(agent_id, state)
     logger.bind(agent_id=str(agent_id)).debug("heartbeat sent, status={}", status)
@@ -96,3 +101,22 @@ async def find_expired_agents(
         if (now - last_hb) >= HEARTBEAT_TIMEOUT_SECONDS:
             expired.append(str(aid))
     return expired
+
+
+async def wait_for_agent_healthy(
+    agent_id: str | uuid.UUID,
+    *,
+    timeout_seconds: float = 5.0,
+    poll_interval: float = 0.2,
+) -> bool:
+    """Wait until runtime heartbeat indicates the agent is alive."""
+    deadline = time.time() + max(0.1, float(timeout_seconds))
+    while time.time() < deadline:
+        state = await get_agent_state(agent_id)
+        if state:
+            last_hb = float(state.get("last_heartbeat", "0") or 0)
+            status = str(state.get("status", "") or "").strip().lower()
+            if (time.time() - last_hb) < HEARTBEAT_TIMEOUT_SECONDS and status in {"idle", "busy"}:
+                return True
+        await asyncio.sleep(max(0.05, float(poll_interval)))
+    return False

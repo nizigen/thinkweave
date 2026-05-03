@@ -1,7 +1,8 @@
 ﻿"""Tests for Agent CRUD API."""
 
 import uuid
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+import time
 
 import pytest
 from httpx import AsyncClient
@@ -215,6 +216,30 @@ class TestReadAgents:
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
+
+    async def test_get_health_returns_runtime_snapshot(self, client: AsyncClient):
+        create_resp = await client.post("/api/agents", json=VALID_AGENT, headers=AUTH_HEADERS)
+        agent_id = create_resp.json()["id"]
+
+        now = str(time.time())
+        with patch("app.services.agent_manager.get_agent_state", new_callable=AsyncMock) as mock_state:
+            mock_state.return_value = {
+                "status": "busy",
+                "current_task": "task-1",
+                "current_node": "node-2",
+                "last_heartbeat": now,
+                "capabilities": "draft, retrieval",
+                "error_count": "2",
+            }
+            resp = await client.get(f"/api/agents/{agent_id}/health", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == agent_id
+        assert data["runtime_status"] == "degraded"
+        assert data["current_task"] == "task-1"
+        assert data["capabilities"] == "draft, retrieval"
+        assert data["error_count"] == 2
 
 
 class TestUpdateDelete:

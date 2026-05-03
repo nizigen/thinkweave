@@ -44,6 +44,7 @@ class BaseAgent(ABC):
         role: str,
         layer: int,
         llm_client: BaseLLMClient,
+        capabilities: str | None = None,
         token_tracker: TokenTracker | None = None,
         middlewares: tuple[AgentMiddleware, ...] | None = None,
     ) -> None:
@@ -52,6 +53,7 @@ class BaseAgent(ABC):
         self.role = role
         self.layer = layer
         self.llm_client = llm_client
+        self.capabilities = str(capabilities or "")
         self.token_tracker = token_tracker
         self.middlewares: tuple[AgentMiddleware, ...] = (
             middlewares if middlewares is not None else DEFAULT_MIDDLEWARES
@@ -63,6 +65,7 @@ class BaseAgent(ABC):
         self._heartbeat_status = "idle"
         self._heartbeat_task = ""
         self._heartbeat_node = ""
+        self._task_error_count = 0
 
     # ------------------------------------------------------------------
     # 子类必须实现
@@ -131,6 +134,8 @@ class BaseAgent(ABC):
             status=self._heartbeat_status,
             current_task=self._heartbeat_task,
             current_node=self._heartbeat_node,
+            capabilities=self.capabilities,
+            error_count=self._task_error_count,
         )
 
     def _chunk_preview_text(self, text: str, *, max_chars: int = 500) -> list[str]:
@@ -266,6 +271,7 @@ class BaseAgent(ABC):
             )
 
         except Exception as exc:
+            self._task_error_count += 1
             error_text = str(exc).strip() or exc.__class__.__name__ or "agent_execution_failed"
             # 上报失败
             await communicator.send_task_result(

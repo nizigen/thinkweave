@@ -41,6 +41,22 @@
   - `pytest -q backend/tests/test_event_bridge.py tests/test_ws_endpoint.py` => `37 passed`
   - `pytest -q backend/tests/test_ws_manager.py tests/test_ws_integration.py -k "ws"` => `26 passed`
 
+## Phase 6 Wave 3 检查点（2026-05-03，Agent Health）
+
+- Agent 心跳状态扩展：
+  - `send_heartbeat()` 新增 `capabilities`、`error_count` 字段写入 `agent:{id}:state`。
+  - `BaseAgent` 心跳上报透传 capabilities，并累计任务错误数到 `error_count`。
+- 启动健康确认：
+  - 新增 `wait_for_agent_healthy()`，`register_persisted_agent()` 启动后等待健康心跳，超时则停止并回滚注册。
+- 管理端健康接口：
+  - 新增 `GET /api/agents/{agent_id}/health`，返回 runtime_status、heartbeat_age、current_task/current_node、error_count 等。
+  - runtime_status 规则：`idle/busy/offline/dead/degraded/unknown`。
+- 回归验证：
+  - `pytest -q backend/tests/test_communicator.py -k "heartbeat"` => `6 passed`
+  - `pytest -q backend/tests/test_agents.py -k "health or create or update"` => `11 passed`
+  - `pytest -q backend/tests/test_review_fixes.py -k "publish_heartbeat"` => `1 passed`
+  - `pytest -q backend/tests/test_agent_core.py -k "handle_message"` => `3 passed`
+
 ## Step 9 系统诊断与改进方案（2026-05-03）
 
 **诊断方式:** 通过 AI 生成的 OPC UA 报告文章缺陷反推系统代码架构问题

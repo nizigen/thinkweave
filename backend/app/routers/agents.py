@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.schemas.agent import (
     AgentCreate,
+    AgentHealthRead,
     AgentRead,
     AgentStatusUpdate,
     ModelOptionRead,
@@ -76,6 +77,18 @@ async def get_agent(
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agent
+
+
+@router.get("/{agent_id}/health", response_model=AgentHealthRead)
+async def get_agent_health(
+    agent_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    _user_id: str = Depends(require_admin_user_id),
+):
+    detail = await agent_manager.get_agent_health(session, agent_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return detail
 
 
 @router.patch("/{agent_id}/status", response_model=AgentRead)
