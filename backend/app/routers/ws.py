@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+import re
 import uuid as _uuid
 from urllib.parse import urlparse
 
@@ -14,7 +15,7 @@ from app.database import get_session
 from app.schemas.ws_event import ConnectedEvent
 from app.models.task import Task
 from app.security.auth import _parse_token_user_map, _parse_admin_users, _resolve_user_id_for_token
-from app.services.event_bridge import event_bridge
+from app.services.event_bridge import HIGH_PRIORITY_EVENT_TYPES, event_bridge
 from app.services.redis_streams import get_latest_stream_id, task_events_key
 from app.services.ws_manager import ws_manager, ConnectionLimitError
 from app.utils.logger import logger
@@ -23,6 +24,7 @@ router = APIRouter(tags=["websocket"])
 
 MAX_WS_MESSAGE_SIZE = 1024  # 1 KB — pong messages are tiny
 MONITOR_CONTRACT_VERSION = "stage-observability-v1"
+STREAM_ID_PATTERN = re.compile(r"^\d+-\d+$")
 
 
 async def get_task_exists(task_id: str, session: AsyncSession) -> Task | None:
@@ -104,6 +106,15 @@ def _is_allowed_ws_origin(origin: str, host: str) -> bool:
     return bool(origin_host and request_host and origin_host == request_host)
 
 
+def _is_valid_stream_id(value: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    if raw == "$":
+        return True
+    return bool(STREAM_ID_PATTERN.match(raw))
+
+
 async def get_task_event_cursor(task_id: str) -> str:
     return await get_latest_stream_id(task_events_key(task_id))
 
@@ -113,6 +124,7 @@ async def websocket_task(
     task_id: str,
     websocket: WebSocket,
     token: str = Query(default=""),
+    last_event_id: str = Query(default=""),
 ):
     # --- Validate task_id format ---
     try:
@@ -173,6 +185,7 @@ async def websocket_task(
         await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER)
         return
 
+    last_acked_event_id = str(last_event_id or "").strip() if _is_valid_stream_id(last_event_id) else ""
     try:
         try:
             start_from_id = await get_task_event_cursor(task_id)
@@ -191,10 +204,23 @@ async def websocket_task(
                     payload={
                         "monitor_contract_version": MONITOR_CONTRACT_VERSION,
                         "start_from_id": start_from_id,
+                        "replay_from_id": last_acked_event_id or None,
+                        "ack_required_types": sorted(HIGH_PRIORITY_EVENT_TYPES),
                     },
                 ).model_dump()
             )
         )
+        if last_acked_event_id:
+            replay_events = await event_bridge.replay_events(
+                task_id,
+                start_from_id=last_acked_event_id,
+            )
+            for replay_event in replay_events:
+                await websocket.send_text(json.dumps(replay_event, ensure_ascii=False))
+            try:
+                start_from_id = await get_task_event_cursor(task_id)
+            except Exception:
+                start_from_id = "$"
         ws_manager.activate(task_id, websocket)
         await event_bridge.ensure_started(task_id, start_from_id=start_from_id)
         heartbeat_task = asyncio.create_task(
@@ -212,6 +238,22 @@ async def websocket_task(
                 continue
             if msg.get("type") == "pong":
                 ws_manager.record_pong(websocket)
+                continue
+            if msg.get("type") == "ack":
+                event_id = str(msg.get("event_id") or "").strip()
+                if _is_valid_stream_id(event_id):
+                    last_acked_event_id = event_id
+                continue
+            if msg.get("type") == "replay":
+                replay_cursor = str(msg.get("last_event_id") or "").strip() or last_acked_event_id
+                if not _is_valid_stream_id(replay_cursor):
+                    continue
+                replay_events = await event_bridge.replay_events(
+                    task_id,
+                    start_from_id=replay_cursor,
+                )
+                for replay_event in replay_events:
+                    await websocket.send_text(json.dumps(replay_event, ensure_ascii=False))
     except WebSocketDisconnect:
         log.info("WS client disconnected")
     finally:

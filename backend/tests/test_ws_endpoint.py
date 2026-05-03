@@ -1,6 +1,7 @@
 """WebSocket 端点集成测试"""
 
 import asyncio
+import json
 import time
 import uuid
 
@@ -466,3 +467,103 @@ async def test_ws_closes_on_oversized_message():
 
     websocket.close.assert_awaited_once_with(code=status.WS_1009_MESSAGE_TOO_BIG)
     mock_mgr.record_pong.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ws_replays_events_from_last_event_id_before_activation():
+    task_id = str(uuid.uuid4())
+    task = _mock_task(task_id=task_id, owner_id="user-1")
+    websocket = MagicMock()
+    websocket.headers = {"authorization": "Bearer test"}
+    sent_payloads: list[dict] = []
+
+    async def send_text(payload: str):
+        sent_payloads.append(json.loads(payload))
+
+    async def receive_text():
+        raise WebSocketDisconnect(code=1000)
+
+    websocket.accept = AsyncMock()
+    websocket.send_text = AsyncMock(side_effect=send_text)
+    websocket.receive_text = AsyncMock(side_effect=receive_text)
+    websocket.close = AsyncMock()
+
+    with (
+        patch("app.routers.ws.get_session", _fake_session),
+        patch("app.routers.ws.get_task_exists", new_callable=AsyncMock, return_value=task),
+        patch("app.routers.ws._authenticate_ws_token", return_value="user-1"),
+        patch("app.routers.ws.get_task_event_cursor", new_callable=AsyncMock, return_value="11-0"),
+        patch("app.routers.ws.ws_manager") as mock_mgr,
+        patch("app.routers.ws.event_bridge") as mock_bridge,
+    ):
+        mock_mgr.connect = AsyncMock()
+        mock_mgr.activate = MagicMock()
+        mock_mgr.disconnect = MagicMock()
+        mock_mgr.get_connections = MagicMock(return_value=set())
+        mock_mgr.run_heartbeat = AsyncMock()
+        mock_bridge.replay_events = AsyncMock(
+            return_value=[
+                {
+                    "type": "state_transition",
+                    "task_id": task_id,
+                    "event_id": "10-0",
+                    "payload": {"from_state": "outline", "to_state": "writing"},
+                }
+            ]
+        )
+        mock_bridge.ensure_started = AsyncMock()
+        mock_bridge.stop = AsyncMock()
+
+        await websocket_task(task_id, websocket, token="test", last_event_id="9-0")
+
+    assert sent_payloads[0]["type"] == "connected"
+    assert sent_payloads[1]["type"] == "state_transition"
+    mock_bridge.replay_events.assert_awaited_once_with(task_id, start_from_id="9-0")
+
+
+@pytest.mark.asyncio
+async def test_ws_replay_command_uses_last_acked_event_id():
+    task_id = str(uuid.uuid4())
+    task = _mock_task(task_id=task_id, owner_id="user-1")
+    websocket = MagicMock()
+    websocket.headers = {"authorization": "Bearer test"}
+
+    incoming = iter(
+        [
+            json.dumps({"type": "ack", "event_id": "15-0"}),
+            json.dumps({"type": "replay"}),
+            WebSocketDisconnect(code=1000),
+        ]
+    )
+
+    async def receive_text():
+        item = next(incoming)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    websocket.accept = AsyncMock()
+    websocket.send_text = AsyncMock()
+    websocket.receive_text = AsyncMock(side_effect=receive_text)
+    websocket.close = AsyncMock()
+
+    with (
+        patch("app.routers.ws.get_session", _fake_session),
+        patch("app.routers.ws.get_task_exists", new_callable=AsyncMock, return_value=task),
+        patch("app.routers.ws._authenticate_ws_token", return_value="user-1"),
+        patch("app.routers.ws.get_task_event_cursor", new_callable=AsyncMock, return_value="20-0"),
+        patch("app.routers.ws.ws_manager") as mock_mgr,
+        patch("app.routers.ws.event_bridge") as mock_bridge,
+    ):
+        mock_mgr.connect = AsyncMock()
+        mock_mgr.activate = MagicMock()
+        mock_mgr.disconnect = MagicMock()
+        mock_mgr.get_connections = MagicMock(return_value=set())
+        mock_mgr.run_heartbeat = AsyncMock()
+        mock_bridge.replay_events = AsyncMock(return_value=[])
+        mock_bridge.ensure_started = AsyncMock()
+        mock_bridge.stop = AsyncMock()
+
+        await websocket_task(task_id, websocket, token="test")
+
+    mock_bridge.replay_events.assert_awaited_once_with(task_id, start_from_id="15-0")

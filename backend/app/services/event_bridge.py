@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from app.schemas.ws_event import (
     AgentStatusEvent,
@@ -130,6 +130,13 @@ EVENT_BUILDERS: dict[str, KnownEventFactory] = {
     "state_event": _build_state_transition,
 }
 
+HIGH_PRIORITY_EVENT_TYPES: set[str] = {
+    "state_transition",
+    "review_score",
+    "consistency_result",
+    "task_done",
+}
+
 
 def normalize_task_event(message: StreamMessage) -> TaskEvent | None:
     try:
@@ -234,6 +241,10 @@ class TaskEventBridge:
                         latest_id = message.message_id
                         failure_count = 0
                         continue
+                    event.event_id = message.message_id
+                    if event.type in HIGH_PRIORITY_EVENT_TYPES:
+                        event.payload = dict(event.payload)
+                        event.payload["priority"] = "high"
 
                     try:
                         await persist_monitor_recovery_event(
@@ -286,6 +297,31 @@ class TaskEventBridge:
                 current = self._tasks.get(task_id)
                 if current is asyncio.current_task():
                     self._tasks.pop(task_id, None)
+
+    async def replay_events(
+        self,
+        task_id: str,
+        *,
+        start_from_id: str,
+        max_messages: int = 200,
+    ) -> list[dict[str, Any]]:
+        stream = task_events_key(task_id)
+        messages = await self._reader(
+            {stream: start_from_id},
+            count=max(1, int(max_messages)),
+            block=0,
+        )
+        out: list[dict[str, Any]] = []
+        for message in messages:
+            event = normalize_task_event(message)
+            if event is None:
+                continue
+            event.event_id = message.message_id
+            if event.type in HIGH_PRIORITY_EVENT_TYPES:
+                event.payload = dict(event.payload)
+                event.payload["priority"] = "high"
+            out.append(event.model_dump())
+        return out
 
 
 event_bridge = TaskEventBridge()

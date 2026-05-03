@@ -239,6 +239,7 @@ async def test_run_broadcasts_normalized_events(ws_manager_mock):
     task_id, payload = ws_manager_mock.broadcast.await_args.args
     assert task_id == "task-1"
     assert payload["type"] == "node_update"
+    assert payload["event_id"] == "1-0"
 
 
 @pytest.mark.asyncio
@@ -540,3 +541,36 @@ async def test_flow_controller_noop_when_stage_already_ahead():
 
     assert changed is False
     state_store.transition_fsm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_replay_events_returns_normalized_payloads_with_event_id(ws_manager_mock):
+    from app.services.event_bridge import TaskEventBridge
+
+    reader = AsyncMock(
+        return_value=[
+            StreamMessage(
+                stream="task:task-1:events",
+                message_id="5-0",
+                data={
+                    "msg_id": "m5",
+                    "msg_type": "state_transition",
+                    "from_agent": "fsm",
+                    "to_agent": "",
+                    "task_id": "task-1",
+                    "node_id": "",
+                    "payload": '{"from_state":"outline","to_state":"writing"}',
+                    "timestamp": "125.0",
+                    "ttl": "60",
+                },
+            )
+        ]
+    )
+    bridge = TaskEventBridge(ws_manager=ws_manager_mock, reader=reader, block_ms=1)
+    events = await bridge.replay_events("task-1", start_from_id="4-0")
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["type"] == "state_transition"
+    assert event["event_id"] == "5-0"
+    assert event["payload"]["priority"] == "high"

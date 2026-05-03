@@ -27,6 +27,20 @@
   - `pytest -q backend/tests/test_dag_scheduler.py -k "node_completed"` => `3 passed`
   - `pytest -q backend/tests/test_long_text_fsm.py -k "transition_emits_dag_update"` => `1 passed`
 
+## Phase 6 Wave 3 检查点（2026-05-03，ACK/replay）
+
+- WebSocket 协议新增 `last_event_id` 回放入口与客户端 ACK 支持：
+  - `GET /ws/task/{task_id}?last_event_id=<stream-id>` 会在连接建立后先回放该游标之后的事件，再进入实时订阅。
+  - 客户端可发送 `{"type":"ack","event_id":"<stream-id>"}` 更新本连接 ACK 游标。
+  - 客户端可发送 `{"type":"replay","last_event_id":"<stream-id>"}` 或 `{"type":"replay"}`（使用最近 ACK）请求补发。
+- `TaskEvent` 新增 `event_id` 字段，桥接层在广播与回放时附带 Redis Stream message id。
+- `TaskEventBridge` 新增：
+  - `HIGH_PRIORITY_EVENT_TYPES`（`state_transition/review_score/consistency_result/task_done`）
+  - `replay_events()` 读取并归一化历史事件，给高优先级事件打 `payload.priority=high`。
+- 回归验证：
+  - `pytest -q backend/tests/test_event_bridge.py tests/test_ws_endpoint.py` => `37 passed`
+  - `pytest -q backend/tests/test_ws_manager.py tests/test_ws_integration.py -k "ws"` => `26 passed`
+
 ## Step 9 系统诊断与改进方案（2026-05-03）
 
 **诊断方式:** 通过 AI 生成的 OPC UA 报告文章缺陷反推系统代码架构问题

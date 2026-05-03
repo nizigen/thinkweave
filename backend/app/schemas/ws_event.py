@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class TaskEvent(BaseModel):
     type: str
     task_id: str
+    event_id: str | None = None
     node_id: str = ""
     from_agent: str = ""
     timestamp: float = 0.0
