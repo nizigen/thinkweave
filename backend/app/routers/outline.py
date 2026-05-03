@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.models.task import Outline, Task
 from app.security.auth import require_user_id
+from app.services.state_store import StateStore, StateTransitionConflictError
 
 router = APIRouter(prefix="/api/tasks", tags=["outline"])
 
@@ -87,8 +88,20 @@ async def confirm_outline(
     else:
         outline.content = body.content
         outline.confirmed = True
-    # 推进 FSM 状态
-    task.fsm_state = "writing"
-    await db.commit()
+    # 推进 FSM 状态（统一走 StateStore 边界）
+    store = StateStore()
+    try:
+        await store.transition_fsm(
+            session=db,
+            task_id=task_id,
+            from_state="outline_review",
+            to_state="writing",
+            reason="outline_confirmed_by_user",
+            created_by=user_id or "user",
+            metadata={"outline_confirmed": True},
+            checkpoint_data=task.checkpoint_data if isinstance(task.checkpoint_data, dict) else None,
+        )
+    except StateTransitionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.refresh(outline)
     return OutlineRead.model_validate(outline)

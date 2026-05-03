@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import re
 import uuid
@@ -15,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import communicator
 from app.memory.session import SessionMemory
 from app.models.task import Task
+from app.services.state_store import StateStore, StateTransitionConflictError
 from app.services.writer_output import extract_writer_markdown, extract_writer_sections
 from app.utils.logger import logger
 
@@ -123,15 +126,22 @@ class LongTextFSM:
         state: LongTextState = LongTextState.INIT,
         checkpoint_policy: CheckpointPolicy = CheckpointPolicy.FULL,
         event_sender: Callable[..., Awaitable[Any]] | None = None,
+        state_store: StateStore | None = None,
     ) -> None:
         self.task_id = task_id
         self._state = state
         self._checkpoint_policy = checkpoint_policy
         self._event_sender = event_sender or communicator.send_task_event
+        self._state_store = state_store or StateStore()
         self._review_retry_counts: dict[int, int] = {}
         self._consistency_retry_count: int = 0
         self._completed_chapters: set[int] = set()
         self.session_memory_namespace: str = ""
+        self._fsm_path: list[str] = [state.value]
+        self._retry_count_by_node: dict[str, int] = {}
+        self.session_memory_snapshot_ref: str | None = None
+        self.topic_territory_hash: str | None = None
+        self.agent_context_cache_ref: str | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -193,16 +203,33 @@ class LongTextFSM:
 
         old = self._state
         self._state = target
+        if not self._fsm_path or self._fsm_path[-1] != target.value:
+            self._fsm_path.append(target.value)
 
         log = logger.bind(task_id=str(self.task_id))
         log.info("FSM transition: {} -> {}", old.value, target.value)
 
-        # Persist state + checkpoint atomically (optimistic lock on old state)
-        await self._persist_and_checkpoint(
-            session,
-            expected_old_state=old,
-            commit=commit,
-        )
+        # Persist state + checkpoint atomically via StateStore boundary.
+        checkpoint_data = await self._build_checkpoint_payload(session=session)
+        try:
+            await self._state_store.transition_fsm(
+                session=session,
+                task_id=self.task_id,
+                from_state=old.value,
+                to_state=target.value,
+                reason="fsm_transition",
+                created_by="fsm",
+                metadata={
+                    "gate_passed": gate_passed,
+                },
+                checkpoint_data=checkpoint_data,
+                commit=commit,
+            )
+        except StateTransitionConflictError as exc:
+            self._state = old
+            if self._fsm_path and self._fsm_path[-1] == target.value:
+                self._fsm_path.pop()
+            raise ValueError(str(exc)) from exc
         if self._event_sender is not None:
             try:
                 await self._event_sender(
@@ -256,21 +283,33 @@ class LongTextFSM:
         """Build a checkpoint dict (serialisable to JSONB)."""
         base = {
             "fsm_state": self._state.value,
+            "fsm_path": list(self._fsm_path),
             "checkpoint_policy": self._checkpoint_policy.value,
             "checkpoint_at": datetime.now(UTC).isoformat(),
+            "last_checkpoint_time": datetime.now(UTC).isoformat(),
             "session_memory_namespace": self.session_memory_namespace,
+            "session_memory_snapshot_ref": self.session_memory_snapshot_ref,
+            "topic_territory_hash": self.topic_territory_hash,
+            "agent_context_cache_ref": self.agent_context_cache_ref,
+            "retry_count_by_node": dict(self._retry_count_by_node),
+            "completed_nodes": [],
+            "pending_nodes": [],
+            "failed_nodes": [],
         }
 
         if self._checkpoint_policy is CheckpointPolicy.SLIM:
+            base["checkpoint_integrity_hash"] = self._compute_checkpoint_integrity_hash(base)
             return base
 
         if self._checkpoint_policy is CheckpointPolicy.MANDATORY:
-            return {
+            payload = {
                 **base,
                 "completed_chapters": sorted(self._completed_chapters),
             }
+            payload["checkpoint_integrity_hash"] = self._compute_checkpoint_integrity_hash(payload)
+            return payload
 
-        return {
+        payload = {
             **base,
             "completed_chapters": sorted(self._completed_chapters),
             "review_retry_count": {
@@ -278,6 +317,24 @@ class LongTextFSM:
             },
             "consistency_retry_count": self._consistency_retry_count,
         }
+        payload["checkpoint_integrity_hash"] = self._compute_checkpoint_integrity_hash(payload)
+        return payload
+
+    @staticmethod
+    def _compute_checkpoint_integrity_hash(payload: dict[str, Any]) -> str:
+        hash_basis = {
+            "fsm_state": payload.get("fsm_state"),
+            "fsm_path": payload.get("fsm_path", []),
+            "completed_chapters": payload.get("completed_chapters", []),
+            "review_retry_count": payload.get("review_retry_count", {}),
+            "consistency_retry_count": payload.get("consistency_retry_count", 0),
+            "retry_count_by_node": payload.get("retry_count_by_node", {}),
+            "topic_territory_hash": payload.get("topic_territory_hash"),
+            "session_memory_snapshot_ref": payload.get("session_memory_snapshot_ref"),
+            "agent_context_cache_ref": payload.get("agent_context_cache_ref"),
+        }
+        raw = json.dumps(hash_basis, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _natural_title_key(title: str) -> list[Any]:
@@ -317,6 +374,29 @@ class LongTextFSM:
     ) -> None:
         """Persist the current FSM snapshot to ``tasks.checkpoint_data``."""
         await self._persist_and_checkpoint(session, commit=commit)
+
+    async def _build_checkpoint_payload(
+        self,
+        *,
+        session: AsyncSession,
+    ) -> dict[str, Any]:
+        payload = self.get_checkpoint_data()
+        try:
+            node_snapshot = await self._build_node_state_snapshot(session=session)
+        except Exception:
+            node_snapshot = {
+                "completed_nodes": [],
+                "pending_nodes": [],
+                "failed_nodes": [],
+                "retry_count_by_node": {},
+            }
+        payload["completed_nodes"] = node_snapshot["completed_nodes"]
+        payload["pending_nodes"] = node_snapshot["pending_nodes"]
+        payload["failed_nodes"] = node_snapshot["failed_nodes"]
+        payload["retry_count_by_node"] = node_snapshot["retry_count_by_node"]
+        self._retry_count_by_node = dict(node_snapshot["retry_count_by_node"])
+        payload["checkpoint_integrity_hash"] = self._compute_checkpoint_integrity_hash(payload)
+        return payload
 
     # ------------------------------------------------------------------
     # Resume (class method)
@@ -377,6 +457,28 @@ class LongTextFSM:
             except (TypeError, ValueError):
                 fsm._consistency_retry_count = 0
             fsm.session_memory_namespace = str(cp.get("session_memory_namespace", "") or "")
+            fsm._fsm_path = [
+                str(item).strip()
+                for item in cp.get("fsm_path", [])
+                if str(item).strip()
+            ] or [state.value]
+            retry_count_by_node = cp.get("retry_count_by_node", {})
+            if isinstance(retry_count_by_node, dict):
+                fsm._retry_count_by_node = {
+                    str(k): int(v)
+                    for k, v in retry_count_by_node.items()
+                    if str(k).strip()
+                }
+            fsm.session_memory_snapshot_ref = str(cp.get("session_memory_snapshot_ref") or "") or None
+            fsm.topic_territory_hash = str(cp.get("topic_territory_hash") or "") or None
+            fsm.agent_context_cache_ref = str(cp.get("agent_context_cache_ref") or "") or None
+            expected_hash = str(cp.get("checkpoint_integrity_hash") or "").strip()
+            if expected_hash:
+                actual_hash = cls._compute_checkpoint_integrity_hash(cp)
+                if expected_hash != actual_hash:
+                    raise ValueError(
+                        f"Task {task_id} checkpoint integrity mismatch"
+                    )
 
         log = logger.bind(task_id=str(task_id))
         log.info("FSM resumed at state={}", state.value)
@@ -398,7 +500,7 @@ class LongTextFSM:
         ensures the row still has the expected state.  If another coroutine
         already changed it, ``rowcount == 0`` and we raise.
         """
-        data = self.get_checkpoint_data()
+        data = await self._build_checkpoint_payload(session=session)
         stmt = (
             update(Task)
             .where(Task.id == self.task_id)
@@ -419,6 +521,41 @@ class LongTextFSM:
             await session.commit()
         else:
             await session.flush()
+
+    async def _build_node_state_snapshot(
+        self,
+        *,
+        session: AsyncSession,
+    ) -> dict[str, Any]:
+        from app.models.task_node import TaskNode
+
+        rows = await session.execute(
+            select(TaskNode.id, TaskNode.status, TaskNode.retry_count)
+            .where(TaskNode.task_id == self.task_id)
+        )
+        completed_nodes: list[str] = []
+        pending_nodes: list[str] = []
+        failed_nodes: list[str] = []
+        retry_count_by_node: dict[str, int] = {}
+        all_rows = rows.all()
+        if inspect.isawaitable(all_rows):
+            all_rows = await all_rows
+        for node_id, status, retry_count in all_rows:
+            key = str(node_id)
+            retry_count_by_node[key] = int(retry_count or 0)
+            status_norm = str(status or "").strip().lower()
+            if status_norm in {"done", "completed", "skipped"}:
+                completed_nodes.append(key)
+            elif status_norm == "failed":
+                failed_nodes.append(key)
+            else:
+                pending_nodes.append(key)
+        return {
+            "completed_nodes": completed_nodes,
+            "pending_nodes": pending_nodes,
+            "failed_nodes": failed_nodes,
+            "retry_count_by_node": retry_count_by_node,
+        }
 
     async def initialize_session_memory(
         self,

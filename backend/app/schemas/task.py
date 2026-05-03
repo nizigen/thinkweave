@@ -68,6 +68,7 @@ class TaskNodeRead(BaseModel):
     status: str
     depends_on: list[uuid.UUID] = Field(default_factory=list)
     retry_count: int
+    version: int = 0
     started_at: datetime | None
     finished_at: datetime | None
     required_capabilities: list[str] = Field(default_factory=list)

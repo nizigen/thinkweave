@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Text, SmallInteger, DateTime, ForeignKey
+from sqlalchemy import String, Text, SmallInteger, DateTime, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +35,7 @@ class TaskNode(Base):
     )
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )

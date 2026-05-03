@@ -1,3 +1,19 @@
+## Phase 6 Wave 1 执行中（2026-05-03）
+
+- 新增 `backend/app/services/state_store.py`，提供状态协调边界：
+  - `transition_fsm()`：`from_state` 校验 + 事务写入 + `transition_logs` 审计记录 + `state_transition` 事件
+  - `update_node_status()`：基于 `TaskNode.version` 的乐观锁更新（冲突抛 `ConcurrentModificationError`）
+- `TaskNode` 模型新增 `version` 字段（默认 0），并添加迁移：
+  - `backend/migrations/versions/e6f7a8b9c0d1_add_task_node_version_for_optimistic_locking.py`
+- `DAGScheduler` 关键写路径已接入乐观锁：
+  - `on_node_completed` / `on_node_failed` 使用 `StateStore.update_node_status`
+  - 冲突按“过期回调”处理，避免并发覆盖节点输出
+- `LongTextFSM` checkpoint 扩展：
+  - 新增 `fsm_path`、`completed_nodes/pending_nodes/failed_nodes`、`retry_count_by_node`
+  - 新增 `session_memory_snapshot_ref`、`topic_territory_hash`、`agent_context_cache_ref`
+  - 新增 `checkpoint_integrity_hash`，`resume()` 时做完整性校验
+- `outline` 确认接口改为通过 `StateStore.transition_fsm` 推进 `outline_review -> writing`，移除直接 `task.fsm_state=` 写法。
+
 ## Step 9 系统诊断与改进方案（2026-05-03）
 
 **诊断方式:** 通过 AI 生成的 OPC UA 报告文章缺陷反推系统代码架构问题

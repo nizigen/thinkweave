@@ -1038,11 +1038,29 @@ class LongTextFSM:
 # tasks.checkpoint_data JSONB 示例
 {
     "fsm_state": "reviewing",
+    "fsm_path": ["init", "outline", "outline_review", "writing", "reviewing"],
     "completed_chapters": [0, 1, 3],       # 已完成章节索引
     "review_retry_count": {1: 2, 4: 1},    # 章节索引 → 已重试次数
     "consistency_retry_count": 0,
-    "active_nodes": ["uuid-1", "uuid-2"],   # 仍在执行的节点ID
-    "checkpoint_at": "2026-03-07T12:00:00Z"
+    "completed_nodes": ["uuid-done-1"],
+    "pending_nodes": ["uuid-pending-1"],
+    "failed_nodes": ["uuid-failed-1"],
+    "retry_count_by_node": {"uuid-pending-1": 1},
+    "session_memory_snapshot_ref": "mem:snapshot:task-x",
+    "topic_territory_hash": "sha256:...",
+    "agent_context_cache_ref": "ctx:cache:task-x",
+    "transition_logs": [
+        {
+            "from_state": "outline_review",
+            "to_state": "writing",
+            "reason": "outline_confirmed_by_user",
+            "created_by": "user-id",
+            "created_at": "2026-05-03T22:00:00Z"
+        }
+    ],
+    "checkpoint_at": "2026-03-07T12:00:00Z",
+    "last_checkpoint_time": "2026-03-07T12:00:00Z",
+    "checkpoint_integrity_hash": "sha256..."
 }
 ```
 
@@ -1088,6 +1106,7 @@ CREATE TABLE task_nodes (
     depends_on      UUID[],
     result          TEXT,
     retry_count     SMALLINT DEFAULT 0,
+    version         INTEGER DEFAULT 0, -- optimistic locking version
     started_at      TIMESTAMP,
     finished_at     TIMESTAMP
 );

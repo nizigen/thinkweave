@@ -45,9 +45,11 @@ from app.services.stage_contracts import (
     get_stage_contract,
     resolve_stage_code,
 )
+from app.services.state_store import ConcurrentModificationError, StateStore
 from app.services import communicator
 from app.services.heartbeat import HEARTBEAT_TIMEOUT_SECONDS, get_all_agent_states
 from app.services.report_persistence import persist_completed_report
+from app.services.retry_policy import RetryPolicy
 from app.services.redis_streams import (
     MessageEnvelope,
     add_timeout_watch,
@@ -388,6 +390,7 @@ class DAGScheduler:
     def __init__(self, task_id: uuid.UUID) -> None:
         self.task_id = task_id
         self._stop = asyncio.Event()
+        self._state_store = StateStore()
 
         # 并发信号量
         self._llm_semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
@@ -642,15 +645,23 @@ class DAGScheduler:
                 log.info("stale completion callback ignored")
                 return
 
-            await session.execute(
-                update(TaskNode)
-                .where(TaskNode.id == node_id)
-                .values(
-                    status=STATUS_DONE,
-                    result=result,
-                    finished_at=datetime.now(UTC).replace(tzinfo=None),
+            try:
+                await self._state_store.update_node_status(
+                    session=session,
+                    node_id=node_id,
+                    expected_version=int(getattr(node, "version", 0) or 0),
+                    expected_status=STATUS_RUNNING,
+                    expected_assigned_agent=agent_id,
+                    values={
+                        "status": STATUS_DONE,
+                        "result": result,
+                        "finished_at": datetime.now(UTC).replace(tzinfo=None),
+                    },
+                    commit=False,
                 )
-            )
+            except ConcurrentModificationError:
+                log.info("stale completion callback ignored (optimistic lock conflict)")
+                return
             # 释放 Agent
             await session.execute(
                 update(Agent)
@@ -732,7 +743,12 @@ class DAGScheduler:
             )
 
             force_permanent_failure = str(error or "").startswith("BUDGET_EXCEEDED:")
-            new_retry = MAX_RETRIES if force_permanent_failure else (node.retry_count + 1)
+            retry_decision = RetryPolicy.runtime_failure(
+                current_retry_count=int(getattr(node, "retry_count", 0) or 0),
+                max_retries=MAX_RETRIES,
+                force_terminal=force_permanent_failure,
+            )
+            new_retry = int(retry_decision.next_retry_count)
 
             # Stop-loss: for writer timeout loops, emit deterministic local fallback
             # after one retry and force DAG forward instead of endless rotation.
@@ -763,16 +779,24 @@ class DAGScheduler:
                     if fallback_payload is not None
                     else fallback_md
                 )
-                await session.execute(
-                    update(TaskNode)
-                    .where(TaskNode.id == node_id)
-                    .values(
-                        status=STATUS_DONE,
-                        retry_count=new_retry,
-                        result=fallback_result,
-                        finished_at=datetime.now(UTC).replace(tzinfo=None),
+                try:
+                    await self._state_store.update_node_status(
+                        session=session,
+                        node_id=node_id,
+                        expected_version=int(getattr(node, "version", 0) or 0),
+                        expected_status=STATUS_RUNNING,
+                        expected_assigned_agent=agent_id,
+                        values={
+                            "status": STATUS_DONE,
+                            "retry_count": new_retry,
+                            "result": fallback_result,
+                            "finished_at": datetime.now(UTC).replace(tzinfo=None),
+                        },
+                        commit=False,
                     )
-                )
+                except ConcurrentModificationError:
+                    log.info("stale failure callback ignored (optimistic lock conflict)")
+                    return
                 await session.commit()
                 await set_dag_node_status(self.task_id, str(node_id), STATUS_DONE)
                 await self._clear_timeout_watch(node_id)
@@ -786,39 +810,66 @@ class DAGScheduler:
                 self._schedule_event.set()
                 return
 
-            if new_retry < MAX_RETRIES:
+            if retry_decision.should_retry:
                 # 重试：回到 ready 队列
-                await session.execute(
-                    update(TaskNode)
-                    .where(TaskNode.id == node_id)
-                    .values(
-                        status=STATUS_READY,
-                        retry_count=new_retry,
-                        assigned_agent=None,
+                try:
+                    next_version = await self._state_store.update_node_status(
+                        session=session,
+                        node_id=node_id,
+                        expected_version=int(getattr(node, "version", 0) or 0),
+                        expected_status=STATUS_RUNNING,
+                        expected_assigned_agent=agent_id,
+                        values={
+                            "status": STATUS_READY,
+                            "retry_count": new_retry,
+                            "assigned_agent": None,
+                        },
+                        commit=False,
                     )
-                )
+                    node.version = next_version
+                except ConcurrentModificationError:
+                    log.info("stale failure callback ignored (optimistic lock conflict)")
+                    return
                 await session.commit()
                 await set_dag_node_status(self.task_id, str(node_id), STATUS_READY)
                 await self._clear_timeout_watch(node_id)
 
                 self._running_nodes.pop(node_id, None)
                 self._node_roles.pop(node_id, None)
-                log.warning("node failed (retry {}/{}): {}", new_retry, MAX_RETRIES, error)
+                log.warning(
+                    "node failed (retry {}/{} in {}s): {}",
+                    new_retry,
+                    MAX_RETRIES,
+                    retry_decision.backoff_seconds,
+                    error,
+                )
 
                 # 推入就绪队列，优先级降低
                 await push_ready_node(str(node_id), priority=float(new_retry))
             else:
                 # 超过最大重试次数
-                await session.execute(
-                    update(TaskNode)
-                    .where(TaskNode.id == node_id)
-                    .values(
-                        status=STATUS_FAILED,
-                        retry_count=new_retry,
-                        result=f"FAILED after {MAX_RETRIES} retries: {error}",
-                        finished_at=datetime.now(UTC).replace(tzinfo=None),
+                try:
+                    await self._state_store.update_node_status(
+                        session=session,
+                        node_id=node_id,
+                        expected_version=int(getattr(node, "version", 0) or 0),
+                        expected_status=STATUS_RUNNING,
+                        expected_assigned_agent=agent_id,
+                        values={
+                            "status": STATUS_FAILED,
+                            "retry_count": new_retry,
+                            "result": (
+                                f"FAILED after {MAX_RETRIES} retries: {error}; "
+                                f"retry_scope=runtime_execution; "
+                                f"next_action=fsm_semantic_or_terminal"
+                            ),
+                            "finished_at": datetime.now(UTC).replace(tzinfo=None),
+                        },
+                        commit=False,
                     )
-                )
+                except ConcurrentModificationError:
+                    log.info("stale failure callback ignored (optimistic lock conflict)")
+                    return
                 await session.commit()
                 await set_dag_node_status(self.task_id, str(node_id), STATUS_FAILED)
                 await self._clear_timeout_watch(node_id)
@@ -1373,6 +1424,7 @@ class DAGScheduler:
             "routing_reason": routing_reason,
             "routing_mode": routing_mode,
         }
+        expected_version = int(getattr(node, "version", 0) or 0)
 
         result = await session.execute(
             update(TaskNode)
@@ -1380,11 +1432,13 @@ class DAGScheduler:
                 TaskNode.id == node_id,
                 TaskNode.status == STATUS_READY,
                 TaskNode.assigned_agent.is_(None),
+                TaskNode.version == expected_version,
             )
             .values(
                 status=STATUS_RUNNING,
                 assigned_agent=agent.id,
                 started_at=datetime.now(UTC).replace(tzinfo=None),
+                version=expected_version + 1,
             )
         )
         if result.rowcount != 1:
@@ -1419,11 +1473,13 @@ class DAGScheduler:
                         TaskNode.id == node_id,
                         TaskNode.status == STATUS_RUNNING,
                         TaskNode.assigned_agent == agent_id,
+                        TaskNode.version == int(getattr(current_node, "version", 0) or 0),
                     )
                     .values(
                         status=STATUS_READY,
                         assigned_agent=None,
                         started_at=None,
+                        version=int(getattr(current_node, "version", 0) or 0) + 1,
                     )
                 )
             await session.execute(
