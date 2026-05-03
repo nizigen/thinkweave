@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.schemas.task import DAGSchema
-from app.services.task_decomposer import decompose_task
+from app.services.task_decomposer import decompose_task_with_trace
 from app.utils.llm_client import BaseLLMClient
 
 STAGES: list[tuple[str, str]] = [
@@ -42,7 +42,7 @@ class PipelineOrchestrator:
         depth: str,
         target_words: int,
     ) -> tuple[DAGSchema, dict[str, Any]]:
-        dag = await decompose_task(
+        dag, decomposition_trace = await decompose_task_with_trace(
             title=title,
             mode=mode,
             depth=depth,
@@ -56,6 +56,7 @@ class PipelineOrchestrator:
                 "active_stage": "OUTLINE",
                 "mode": "stage_orchestrated",
                 "execution_graph": "dag_preserved",
-            }
+            },
+            "decomposition_trace": decomposition_trace,
         }
         return dag, meta

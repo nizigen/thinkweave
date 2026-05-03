@@ -12,6 +12,7 @@ from typing import Optional
 from app.schemas.task import (
     BatchDeleteRequest,
     BatchDeleteResult,
+    DecompositionAuditRead,
     TaskControlRetryRequest,
     TaskControlSkipRequest,
     TaskCreate,
@@ -113,6 +114,23 @@ async def get_task(
 ):
     """获取任务详情（含DAG节点树）"""
     detail = await task_service.get_task_detail(
+        session,
+        task_id,
+        user_id=auth.user_id,
+        is_admin=auth.is_admin,
+    )
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return detail
+
+
+@router.get("/{task_id}/decomposition-audit", response_model=DecompositionAuditRead)
+async def get_task_decomposition_audit(
+    task_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    detail = await task_service.get_task_decomposition_audit(
         session,
         task_id,
         user_id=auth.user_id,

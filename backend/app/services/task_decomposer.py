@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections import deque
+import copy
 import re
+from typing import Any
 
 from app.config import settings
 from app.schemas.task import DAGSchema, VALID_DEPTHS, VALID_MODES, ValidationResult
@@ -574,6 +576,31 @@ def _compact_quick_short_dag(
 # ---------------------------------------------------------------------------
 
 _prompt_loader = PromptLoader()
+DECOMPOSER_VERSION = "thinkweave.decomposer.v2"
+
+
+def _dag_dump(dag: DAGSchema) -> dict[str, Any]:
+    return {"nodes": [node.model_dump() for node in dag.nodes]}
+
+
+def _append_repair_action(
+    actions: list[dict[str, Any]],
+    *,
+    step: str,
+    before: DAGSchema,
+    after: DAGSchema,
+) -> None:
+    before_dump = _dag_dump(before)
+    after_dump = _dag_dump(after)
+    if before_dump == after_dump:
+        return
+    actions.append(
+        {
+            "step": step,
+            "before_nodes": len(before.nodes),
+            "after_nodes": len(after.nodes),
+        }
+    )
 
 
 async def decompose_task(
@@ -587,6 +614,30 @@ async def decompose_task(
     max_retries: int | None = None,
     fallback_models: list[str] | None = None,
 ) -> DAGSchema:
+    dag, _trace = await decompose_task_with_trace(
+        title=title,
+        mode=mode,
+        depth=depth,
+        target_words=target_words,
+        llm_client=llm_client,
+        model=model,
+        max_retries=max_retries,
+        fallback_models=fallback_models,
+    )
+    return dag
+
+
+async def decompose_task_with_trace(
+    *,
+    title: str,
+    mode: str,
+    depth: str = "standard",
+    target_words: int = 10000,
+    llm_client: BaseLLMClient,
+    model: str | None = None,
+    max_retries: int | None = None,
+    fallback_models: list[str] | None = None,
+) -> tuple[DAGSchema, dict[str, Any]]:
     """
     Validate input, load the prompt, call the LLM, and verify the DAG.
 
@@ -620,6 +671,20 @@ async def decompose_task(
         target_words=str(target_words),
     )
 
+    trace: dict[str, Any] = {
+        "decomposer_version": DECOMPOSER_VERSION,
+        "decomposition_input": {
+            "title": title,
+            "mode": mode,
+            "depth": depth,
+            "target_words": target_words,
+        },
+        "prompt_template": "orchestrator/decompose",
+        "validation_issues": [],
+        "repair_actions": [],
+        "raw_llm_output": None,
+    }
+
     # Ask the LLM for the DAG JSON.
     logger.bind(title=title, mode=mode, depth=depth).info(
         "Decomposing task via LLM"
@@ -633,26 +698,57 @@ async def decompose_task(
             fallback_models=fallback_models,
             schema=DAGSchema,
         )
+        trace["raw_llm_output"] = copy.deepcopy(raw)
         # chat_json with schema returns model_dump() dict.
         dag = parse_dag_response(raw)
-        dag = _ensure_research_gate(dag)
-        dag = _ensure_depth_chapter_count(dag, depth=depth, target_words=target_words)
-        dag = _inject_long_form_expansion_nodes(dag, target_words=target_words)
-        dag = _compact_quick_short_dag(dag, depth=depth, target_words=target_words)
+        before = dag
+        after = _ensure_research_gate(before)
+        _append_repair_action(trace["repair_actions"], step="ensure_research_gate", before=before, after=after)
+        dag = after
+        before = dag
+        after = _ensure_depth_chapter_count(before, depth=depth, target_words=target_words)
+        _append_repair_action(trace["repair_actions"], step="ensure_depth_chapter_count", before=before, after=after)
+        dag = after
+        before = dag
+        after = _inject_long_form_expansion_nodes(before, target_words=target_words)
+        _append_repair_action(trace["repair_actions"], step="inject_long_form_expansion_nodes", before=before, after=after)
+        dag = after
+        before = dag
+        after = _compact_quick_short_dag(before, depth=depth, target_words=target_words)
+        _append_repair_action(trace["repair_actions"], step="compact_quick_short_dag", before=before, after=after)
+        dag = after
         # Ensure the returned DAG is acyclic.
         validate_dag_acyclic(dag)
+        trace["normalized_dag"] = _dag_dump(dag)
         logger.bind(node_count=len(dag.nodes)).info("Task decomposed successfully")
-        return dag
+        return dag, trace
     except LLMUnavailableError:
         raise
     except Exception as exc:  # noqa: BLE001 - fallback should never crash task creation.
         logger.bind(title=title, mode=mode, depth=depth).warning(
             "LLM decomposition failed, using fallback DAG: {}", exc
         )
+        trace["validation_issues"] = [str(exc)]
         dag = _build_fallback_dag(title)
-        dag = _ensure_research_gate(dag)
-        dag = _ensure_depth_chapter_count(dag, depth=depth, target_words=target_words)
-        dag = _inject_long_form_expansion_nodes(dag, target_words=target_words)
-        dag = _compact_quick_short_dag(dag, depth=depth, target_words=target_words)
+        trace["repair_actions"].append(
+            {"step": "fallback_dag", "reason": str(exc)}
+        )
+        before = dag
+        after = _ensure_research_gate(before)
+        _append_repair_action(trace["repair_actions"], step="ensure_research_gate", before=before, after=after)
+        dag = after
+        before = dag
+        after = _ensure_depth_chapter_count(before, depth=depth, target_words=target_words)
+        _append_repair_action(trace["repair_actions"], step="ensure_depth_chapter_count", before=before, after=after)
+        dag = after
+        before = dag
+        after = _inject_long_form_expansion_nodes(before, target_words=target_words)
+        _append_repair_action(trace["repair_actions"], step="inject_long_form_expansion_nodes", before=before, after=after)
+        dag = after
+        before = dag
+        after = _compact_quick_short_dag(before, depth=depth, target_words=target_words)
+        _append_repair_action(trace["repair_actions"], step="compact_quick_short_dag", before=before, after=after)
+        dag = after
+        trace["normalized_dag"] = _dag_dump(dag)
         logger.bind(node_count=len(dag.nodes)).info("Fallback DAG generated")
-        return dag
+        return dag, trace

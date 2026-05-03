@@ -216,3 +216,12 @@ def _default_auth_settings():
     yield
     settings.task_auth_tokens = old_tokens
     settings.admin_user_ids = old_admins
+
+
+@pytest.fixture(autouse=True)
+def _disable_rate_limit_for_tests():
+    """Keep task API tests deterministic without external Redis dependency."""
+    old_disable = settings.disable_rate_limit
+    settings.disable_rate_limit = True
+    yield
+    settings.disable_rate_limit = old_disable

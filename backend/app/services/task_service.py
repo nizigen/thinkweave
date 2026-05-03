@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session_factory
 from app.models.agent import Agent
 from app.models.task import Task
+from app.models.task_decomposition_audit import TaskDecompositionAudit
 from app.models.task_node import TaskNode
-from app.schemas.task import DAGSchema, TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
+from app.schemas.task import DAGSchema, DecompositionAuditRead, TaskCreate, TaskDetailRead, TaskNodeRead, TaskRead
 from app.services.checkpoint_control import normalize_checkpoint_data
 from app.services.dag_scheduler import start_scheduler
 from app.services.entry_stage import build_entry_metadata
@@ -31,6 +32,79 @@ _TERMINAL_TASK_STATUSES = {
     "cancelled",
     "canceled",
 }
+
+
+def _build_decomposition_audit_summary(
+    trace: dict[str, Any] | None,
+    *,
+    attempt_no: int,
+) -> dict[str, Any]:
+    payload = dict(trace) if isinstance(trace, dict) else {}
+    normalized = payload.get("normalized_dag")
+    node_count = 0
+    if isinstance(normalized, dict):
+        nodes = normalized.get("nodes")
+        if isinstance(nodes, list):
+            node_count = len(nodes)
+    repair_actions = payload.get("repair_actions")
+    validation_issues = payload.get("validation_issues")
+    return {
+        "attempt_no": int(attempt_no),
+        "decomposer_version": str(payload.get("decomposer_version") or ""),
+        "node_count": node_count,
+        "repair_actions_count": len(repair_actions) if isinstance(repair_actions, list) else 0,
+        "validation_issues_count": len(validation_issues) if isinstance(validation_issues, list) else 0,
+    }
+
+
+async def _persist_decomposition_audit(
+    session: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    trace: dict[str, Any] | None,
+) -> int:
+    payload = dict(trace) if isinstance(trace, dict) else {}
+    result = await session.execute(
+        select(TaskDecompositionAudit.attempt_no)
+        .where(TaskDecompositionAudit.task_id == task_id)
+        .order_by(TaskDecompositionAudit.attempt_no.desc())
+        .limit(1)
+    )
+    latest = result.scalar_one_or_none()
+    attempt_no = int(latest or 0) + 1
+    audit = TaskDecompositionAudit(
+        task_id=task_id,
+        attempt_no=attempt_no,
+        decomposition_input=(
+            payload.get("decomposition_input")
+            if isinstance(payload.get("decomposition_input"), dict)
+            else {}
+        ),
+        raw_llm_output=(
+            payload.get("raw_llm_output")
+            if isinstance(payload.get("raw_llm_output"), dict)
+            else None
+        ),
+        normalized_dag=(
+            payload.get("normalized_dag")
+            if isinstance(payload.get("normalized_dag"), dict)
+            else {}
+        ),
+        validation_issues=(
+            payload.get("validation_issues")
+            if isinstance(payload.get("validation_issues"), list)
+            else []
+        ),
+        repair_actions=(
+            payload.get("repair_actions")
+            if isinstance(payload.get("repair_actions"), list)
+            else []
+        ),
+        decomposer_version=str(payload.get("decomposer_version") or "unknown"),
+    )
+    session.add(audit)
+    await session.flush()
+    return attempt_no
 
 
 def _build_blocking_reason(task: Task, nodes: list[TaskNodeRead]) -> str | None:
@@ -428,6 +502,37 @@ async def create_task(
     )
     checkpoint.update(pipeline_meta)
     task.checkpoint_data = checkpoint
+    decomposition_trace = (
+        pipeline_meta.get("decomposition_trace")
+        if isinstance(pipeline_meta, dict)
+        else None
+    )
+    audit_persisted = True
+    try:
+        async with session.begin_nested():
+            attempt_no = await _persist_decomposition_audit(
+                session,
+                task_id=task.id,
+                trace=decomposition_trace if isinstance(decomposition_trace, dict) else None,
+            )
+    except Exception:
+        logger.bind(task_id=str(task.id)).opt(exception=True).warning(
+            "failed to persist decomposition audit detail"
+        )
+        attempt_no = 1
+        audit_persisted = False
+    checkpoint = (
+        dict(task.checkpoint_data)
+        if isinstance(task.checkpoint_data, dict)
+        else {}
+    )
+    summary = _build_decomposition_audit_summary(
+        decomposition_trace if isinstance(decomposition_trace, dict) else None,
+        attempt_no=attempt_no,
+    )
+    summary["detail_persisted"] = audit_persisted
+    checkpoint["decomposition_audit_summary"] = summary
+    task.checkpoint_data = checkpoint
     routing_snapshot = await _build_routing_snapshot(session, dag=dag)
     if routing_snapshot is not None:
         checkpoint = (
@@ -564,6 +669,15 @@ async def create_task(
         stage_progress=_build_stage_progress(node_reads),
         evidence_summary=evidence_summary,
         citation_summary=citation_summary,
+        decomposition_audit_summary=dict(
+            (
+                normalize_checkpoint_data(
+                    task.checkpoint_data,
+                    ensure_control_maps=True,
+                ).get("decomposition_audit_summary")
+            )
+            or {}
+        ),
     )
 
 
@@ -629,7 +743,79 @@ async def get_task_detail(
     evidence_summary, citation_summary = _build_evidence_and_citation_summary(nodes)
     task_read.evidence_summary = evidence_summary
     task_read.citation_summary = citation_summary
+    task_read.decomposition_audit_summary = dict(
+        normalize_checkpoint_data(
+            task.checkpoint_data,
+            ensure_control_maps=True,
+        ).get("decomposition_audit_summary")
+        or {}
+    )
     return task_read
+
+
+async def get_task_decomposition_audit(
+    session: AsyncSession,
+    task_id: uuid.UUID,
+    *,
+    user_id: str = "",
+    is_admin: bool = False,
+) -> DecompositionAuditRead | None:
+    task = await session.get(Task, task_id)
+    if task is None:
+        return None
+    if not task_visible_to_user(task, user_id=user_id, is_admin=is_admin):
+        return None
+
+    try:
+        result = await session.execute(
+            select(TaskDecompositionAudit)
+            .where(TaskDecompositionAudit.task_id == task_id)
+            .order_by(TaskDecompositionAudit.attempt_no.desc())
+            .limit(1)
+        )
+        audit = result.scalar_one_or_none()
+    except Exception:
+        audit = None
+
+    if audit is not None:
+        raw_output = audit.raw_llm_output if is_admin else None
+        return DecompositionAuditRead(
+            task_id=task_id,
+            attempt_no=int(audit.attempt_no),
+            decomposition_input=dict(audit.decomposition_input or {}),
+            raw_llm_output=dict(raw_output or {}) if isinstance(raw_output, dict) else None,
+            normalized_dag=dict(audit.normalized_dag or {}),
+            validation_issues=[str(item) for item in (audit.validation_issues or [])],
+            repair_actions=[
+                dict(item) for item in (audit.repair_actions or [])
+                if isinstance(item, dict)
+            ],
+            decomposer_version=str(audit.decomposer_version or ""),
+            created_at=audit.created_at,
+        )
+
+    checkpoint = normalize_checkpoint_data(task.checkpoint_data, ensure_control_maps=True)
+    pipeline = checkpoint.get("pipeline")
+    trace = pipeline.get("decomposition_trace") if isinstance(pipeline, dict) else None
+    if not isinstance(trace, dict):
+        return None
+    summary = checkpoint.get("decomposition_audit_summary")
+    attempt_no = int((summary or {}).get("attempt_no", 1)) if isinstance(summary, dict) else 1
+    raw_output = trace.get("raw_llm_output") if is_admin else None
+    return DecompositionAuditRead(
+        task_id=task_id,
+        attempt_no=attempt_no,
+        decomposition_input=dict(trace.get("decomposition_input") or {}),
+        raw_llm_output=dict(raw_output or {}) if isinstance(raw_output, dict) else None,
+        normalized_dag=dict(trace.get("normalized_dag") or {}),
+        validation_issues=[str(item) for item in (trace.get("validation_issues") or [])],
+        repair_actions=[
+            dict(item) for item in (trace.get("repair_actions") or [])
+            if isinstance(item, dict)
+        ],
+        decomposer_version=str(trace.get("decomposer_version") or ""),
+        created_at=None,
+    )
 
 
 async def persist_monitor_recovery_event(

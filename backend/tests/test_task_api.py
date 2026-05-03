@@ -19,6 +19,7 @@ from app.models.task import Task
 from app.models.task_node import TaskNode
 from app.routers.tasks import get_llm_client
 from app.services.task_service import persist_monitor_recovery_event
+from app.utils.llm_client import LLMUnavailableError
 from tests.conftest import MockLLMClient
 
 
@@ -128,6 +129,9 @@ class TestCreateTask:
         assert all("routing_mode" in n for n in data["nodes"])
         assert all("routing_reason" in n for n in data["nodes"])
         assert all("routing_status" in n for n in data["nodes"])
+        assert "decomposition_audit_summary" in data
+        assert data["decomposition_audit_summary"]["attempt_no"] >= 1
+        assert data["decomposition_audit_summary"]["node_count"] >= 1
 
         assert any(c["role"] == "orchestrator" for c in mock_llm.call_log)
 
@@ -248,6 +252,10 @@ class TestCreateTaskWithRuntimeLlmSelection:
         monkeypatch.setattr(settings, "mock_llm_enabled", False)
         monkeypatch.setattr(settings, "openai_api_key", "sk-xxx")
         monkeypatch.setattr(settings, "deepseek_api_key", "sk-xxx")
+        monkeypatch.setattr(
+            "app.utils.llm_client.LLMClient.chat_json",
+            AsyncMock(side_effect=LLMUnavailableError("mock unavailable")),
+        )
 
         resp = await client.post("/api/tasks", json=VALID_PAYLOAD, headers=AUTH_HEADERS)
 
@@ -400,6 +408,33 @@ class TestGetTask:
             settings.task_auth_tokens = old_tokens
             settings.admin_user_ids = old_admins
         assert resp.status_code == 404
+
+    async def test_get_task_decomposition_audit_for_owner_masks_raw_output(
+        self, client: AsyncClient
+    ):
+        detail = await _create_task_detail(client)
+        resp = await client.get(
+            f"/api/tasks/{detail['id']}/decomposition-audit",
+            headers=AUTH_HEADERS,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["task_id"] == detail["id"]
+        assert data["attempt_no"] >= 1
+        assert data["normalized_dag"]["nodes"]
+        assert data["raw_llm_output"] is None
+
+    async def test_get_task_decomposition_audit_admin_can_view_raw_output(
+        self, client: AsyncClient
+    ):
+        detail = await _create_task_detail(client)
+        resp = await client.get(
+            f"/api/tasks/{detail['id']}/decomposition-audit",
+            headers={"Authorization": "Bearer token-admin"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data.get("raw_llm_output"), dict)
 
 
 class TestListTasks:

@@ -91,6 +91,19 @@ class TaskDetailRead(TaskRead):
     stage_progress: dict[str, int] = Field(default_factory=dict)
     evidence_summary: dict[str, int] = Field(default_factory=dict)
     citation_summary: dict[str, int] = Field(default_factory=dict)
+    decomposition_audit_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class DecompositionAuditRead(BaseModel):
+    task_id: uuid.UUID
+    attempt_no: int
+    decomposition_input: dict[str, Any] = Field(default_factory=dict)
+    raw_llm_output: dict[str, Any] | None = None
+    normalized_dag: dict[str, Any] = Field(default_factory=dict)
+    validation_issues: list[str] = Field(default_factory=list)
+    repair_actions: list[dict[str, Any]] = Field(default_factory=list)
+    decomposer_version: str
+    created_at: datetime | None = None
 
 
 class TaskControlSkipRequest(BaseModel):
