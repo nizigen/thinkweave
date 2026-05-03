@@ -45,6 +45,7 @@ from app.services.stage_contracts import (
     get_stage_contract,
     resolve_stage_code,
 )
+from app.services.flow_controller import FlowController
 from app.services.state_store import ConcurrentModificationError, StateStore
 from app.services import communicator
 from app.services.heartbeat import HEARTBEAT_TIMEOUT_SECONDS, get_all_agent_states
@@ -102,30 +103,6 @@ SUCCESS_NODE_STATUSES = frozenset({STATUS_DONE, STATUS_SKIPPED})
 # Agent 状态常量
 AGENT_IDLE = "idle"
 AGENT_BUSY = "busy"
-
-FSM_STAGE_ORDER: dict[str, int] = {
-    "init": 0,
-    "outline": 1,
-    "outline_review": 2,
-    "writing": 3,
-    "pre_review_integrity": 4,
-    "reviewing": 5,
-    "re_review": 6,
-    "re_revise": 7,
-    "consistency": 8,
-    "final_integrity": 9,
-    "done": 10,
-    "failed": 10,
-}
-
-ROLE_TO_FSM_STAGE: dict[str, str] = {
-    "outline": "outline",
-    "researcher": "outline_review",
-    "writer": "writing",
-    "reviewer": "reviewing",
-    "consistency": "consistency",
-}
-
 
 def _parse_capability_tokens(raw: str | None) -> set[str]:
     if not raw:
@@ -391,6 +368,7 @@ class DAGScheduler:
         self.task_id = task_id
         self._stop = asyncio.Event()
         self._state_store = StateStore()
+        self._flow_controller = FlowController(state_store=self._state_store)
 
         # 并发信号量
         self._llm_semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
@@ -685,23 +663,11 @@ class DAGScheduler:
         self._schedule_event.set()
 
     async def _maybe_advance_fsm_state(self, node_role: str) -> None:
-        role = str(node_role or "").strip().lower()
-        target_stage = ROLE_TO_FSM_STAGE.get(role)
-        if not target_stage:
-            return
         async with async_session_factory() as session:
-            task = await session.get(Task, self.task_id)
-            if task is None:
-                return
-            current = str(getattr(task, "fsm_state", "") or "init").strip().lower()
-            current_order = FSM_STAGE_ORDER.get(current, 0)
-            target_order = FSM_STAGE_ORDER.get(target_stage, 0)
-            if target_order <= current_order:
-                return
-            await session.execute(
-                update(Task)
-                .where(Task.id == self.task_id)
-                .values(fsm_state=target_stage)
+            await self._flow_controller.on_node_completed(
+                session=session,
+                task_id=self.task_id,
+                node_role=node_role,
             )
             await session.commit()
 

@@ -234,6 +234,16 @@ class LongTextFSM:
             try:
                 await self._event_sender(
                     task_id=self.task_id,
+                    msg_type="state_event",
+                    payload={
+                        "from_state": old.value,
+                        "to_state": target.value,
+                        "trigger": "fsm_transition",
+                        "gate_passed": gate_passed,
+                    },
+                )
+                await self._event_sender(
+                    task_id=self.task_id,
                     msg_type="dag_update",
                     payload={
                         "from_state": old.value,

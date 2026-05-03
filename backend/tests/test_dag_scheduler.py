@@ -1014,6 +1014,40 @@ class TestOnNodeCompleted:
 
         assert scheduler._schedule_event.is_set()
 
+    @pytest.mark.asyncio
+    async def test_node_completed_delegates_fsm_progression_to_flow_controller(
+        self, scheduler: DAGScheduler
+    ):
+        node_id = make_uuid()
+        agent_id = make_uuid()
+        scheduler._running_nodes[node_id] = agent_id
+        scheduler._node_roles[node_id] = "writer"
+        fake_node = FakeNode(
+            node_id=node_id,
+            status=STATUS_RUNNING,
+            assigned_agent=agent_id,
+            agent_role="writer",
+        )
+
+        scheduler._flow_controller.on_node_completed = AsyncMock(return_value=True)
+        with (
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.remove_timeout_watch", new_callable=AsyncMock),
+            patch.object(scheduler, "_activate_dependents", new_callable=AsyncMock),
+        ):
+            mock_session = AsyncMock()
+            mock_session.get = AsyncMock(return_value=fake_node)
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await scheduler.on_node_completed(node_id, "result text", agent_id)
+
+        scheduler._flow_controller.on_node_completed.assert_awaited_once()
+        kwargs = scheduler._flow_controller.on_node_completed.await_args.kwargs
+        assert kwargs["task_id"] == scheduler.task_id
+        assert kwargs["node_role"] == "writer"
+
 
 # ---------------------------------------------------------------------------
 # Test: on_node_failed

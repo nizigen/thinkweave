@@ -14,6 +14,19 @@
   - 新增 `checkpoint_integrity_hash`，`resume()` 时做完整性校验
 - `outline` 确认接口改为通过 `StateStore.transition_fsm` 推进 `outline_review -> writing`，移除直接 `task.fsm_state=` 写法。
 
+## Phase 6 Wave 3 检查点（2026-05-03）
+
+- 新增 `backend/app/services/flow_controller.py`，建立 FSM 与 DAG 之间的协调边界：
+  - `on_node_completed(session, task_id, node_role)` 负责按角色推进阶段（`outline/researcher/writer/reviewer/consistency`）
+  - 通过 `StateStore.transition_fsm` 完成审计化迁移，避免调度器直接写 `tasks.fsm_state`
+- `DAGScheduler._maybe_advance_fsm_state()` 已改为委托 `FlowController`，保持节点调度行为不变，仅替换状态推进路径。
+- `LongTextFSM.transition()` 新增 `state_event` 事件（兼容保留 `dag_update`），用于下游实时订阅状态迁移。
+- `event_bridge` 新增 `state_transition/state_event` 事件归一化并广播为 WebSocket `state_transition` 事件类型。
+- 回归验证：
+  - `pytest -q backend/tests/test_event_bridge.py` => `18 passed`
+  - `pytest -q backend/tests/test_dag_scheduler.py -k "node_completed"` => `3 passed`
+  - `pytest -q backend/tests/test_long_text_fsm.py -k "transition_emits_dag_update"` => `1 passed`
+
 ## Step 9 系统诊断与改进方案（2026-05-03）
 
 **诊断方式:** 通过 AI 生成的 OPC UA 报告文章缺陷反推系统代码架构问题

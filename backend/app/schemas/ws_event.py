@@ -50,3 +50,7 @@ class ConsistencyResultEvent(TaskEvent):
 
 class DagUpdateEvent(TaskEvent):
     type: Literal["dag_update"] = "dag_update"
+
+
+class StateTransitionEvent(TaskEvent):
+    type: Literal["state_transition"] = "state_transition"

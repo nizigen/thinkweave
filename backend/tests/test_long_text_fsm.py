@@ -308,10 +308,15 @@ class TestFSMTransitionExecution:
 
         await fsm.transition(LongTextState.OUTLINE, session=session)
 
-        sender.assert_awaited_once()
-        assert sender.await_args.kwargs["msg_type"] == "dag_update"
-        assert sender.await_args.kwargs["payload"]["from_state"] == "init"
-        assert sender.await_args.kwargs["payload"]["to_state"] == "outline"
+        assert sender.await_count == 2
+        first = sender.await_args_list[0].kwargs
+        second = sender.await_args_list[1].kwargs
+        assert first["msg_type"] == "state_event"
+        assert first["payload"]["from_state"] == "init"
+        assert first["payload"]["to_state"] == "outline"
+        assert second["msg_type"] == "dag_update"
+        assert second["payload"]["from_state"] == "init"
+        assert second["payload"]["to_state"] == "outline"
 
     @pytest.mark.asyncio
     async def test_sequential_transitions(self, db_session):

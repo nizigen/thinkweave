@@ -13,6 +13,7 @@ from app.schemas.ws_event import (
     LogEvent,
     NodeUpdateEvent,
     ReviewScoreEvent,
+    StateTransitionEvent,
     TaskDoneEvent,
     TaskEvent,
 )
@@ -105,6 +106,16 @@ def _build_dag_update(envelope: MessageEnvelope) -> TaskEvent:
     )
 
 
+def _build_state_transition(envelope: MessageEnvelope) -> TaskEvent:
+    return StateTransitionEvent(
+        task_id=envelope.task_id,
+        node_id=envelope.node_id,
+        from_agent=envelope.from_agent,
+        timestamp=envelope.timestamp,
+        payload=envelope.payload,
+    )
+
+
 EVENT_BUILDERS: dict[str, KnownEventFactory] = {
     "status_update": _build_node_update,
     "node_update": _build_node_update,
@@ -115,6 +126,8 @@ EVENT_BUILDERS: dict[str, KnownEventFactory] = {
     "review_score": _build_review_score,
     "consistency_result": _build_consistency_result,
     "dag_update": _build_dag_update,
+    "state_transition": _build_state_transition,
+    "state_event": _build_state_transition,
 }
 
 

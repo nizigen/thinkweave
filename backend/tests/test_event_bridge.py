@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -464,3 +465,78 @@ async def test_run_persists_monitor_recovery_events_before_broadcast(ws_manager_
     assert persist_mock.await_args_list[0].kwargs["event_type"] == "chapter_preview"
     assert persist_mock.await_args_list[1].kwargs["event_type"] == "review_score"
     assert ws_manager_mock.broadcast.await_count == 2
+
+
+def test_normalize_state_transition_maps_to_state_transition_event():
+    from app.services.event_bridge import normalize_task_event
+
+    message = StreamMessage(
+        stream="task:task-1:events",
+        message_id="8-0",
+        data={
+            "msg_id": "m-state-1",
+            "msg_type": "state_transition",
+            "from_agent": "fsm",
+            "to_agent": "",
+            "task_id": "task-1",
+            "node_id": "",
+            "payload": '{"from_state":"outline_review","to_state":"writing"}',
+            "timestamp": "125.0",
+            "ttl": "60",
+        },
+    )
+
+    event = normalize_task_event(message)
+
+    assert event is not None
+    assert event.type == "state_transition"
+    assert event.payload["from_state"] == "outline_review"
+    assert event.payload["to_state"] == "writing"
+
+
+@pytest.mark.asyncio
+async def test_flow_controller_advances_fsm_stage_for_completed_role():
+    from app.services.flow_controller import FlowController
+
+    task = type("TaskStub", (), {})()
+    task.fsm_state = "outline_review"
+    task.checkpoint_data = {"k": "v"}
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=task)
+
+    state_store = AsyncMock()
+    controller = FlowController(state_store=state_store)
+    changed = await controller.on_node_completed(
+        session=session,
+        task_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        node_role="writer",
+    )
+
+    assert changed is True
+    state_store.transition_fsm.assert_awaited_once()
+    kwargs = state_store.transition_fsm.await_args.kwargs
+    assert kwargs["from_state"] == "outline_review"
+    assert kwargs["to_state"] == "writing"
+    assert kwargs["reason"] == "flow_controller_node_completed"
+
+
+@pytest.mark.asyncio
+async def test_flow_controller_noop_when_stage_already_ahead():
+    from app.services.flow_controller import FlowController
+
+    task = type("TaskStub", (), {})()
+    task.fsm_state = "consistency"
+    task.checkpoint_data = {}
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=task)
+
+    state_store = AsyncMock()
+    controller = FlowController(state_store=state_store)
+    changed = await controller.on_node_completed(
+        session=session,
+        task_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        node_role="writer",
+    )
+
+    assert changed is False
+    state_store.transition_fsm.assert_not_awaited()
