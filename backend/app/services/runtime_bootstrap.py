@@ -21,6 +21,8 @@ from app.agents.writer_agent import WriterAgent
 from app.config import settings
 from app.database import async_session_factory
 from app.models.agent import Agent
+from app.models.task import Task
+from app.services.dag_scheduler import start_scheduler
 from app.utils.logger import logger
 from app.utils.llm_client import DebugMockLLMClient, LLMClient
 
@@ -140,6 +142,38 @@ async def bootstrap_runtime_agents() -> int:
                 ).warning("runtime bootstrap failed for agent")
         await session.commit()
     logger.info("runtime bootstrap complete: started={}", started)
+    return started
+
+
+async def bootstrap_active_task_schedulers() -> int:
+    """Resume schedulers for active tasks after process restart."""
+    started = 0
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Task.id, Task.status, Task.checkpoint_data).where(
+                Task.status.in_(("pending", "running"))
+            )
+        )
+        rows = list(result.all())
+
+    for task_id, _status, checkpoint_data in rows:
+        control = {}
+        if isinstance(checkpoint_data, dict):
+            maybe_control = checkpoint_data.get("control")
+            if isinstance(maybe_control, dict):
+                control = maybe_control
+        control_status = str(control.get("status", "active") or "active").lower()
+        if control_status in {"paused", "pause_requested"}:
+            continue
+        try:
+            await start_scheduler(task_id)
+            started += 1
+        except Exception:
+            logger.bind(task_id=str(task_id)).opt(exception=True).warning(
+                "failed to resume scheduler during bootstrap"
+            )
+
+    logger.info("task scheduler bootstrap complete: started={}", started)
     return started
 
 

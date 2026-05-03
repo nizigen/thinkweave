@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import Task
+from app.models.task_node import TaskNode
 from app.services.long_text_fsm import (
     CheckpointPolicy,
     TRANSITIONS,
@@ -329,6 +330,65 @@ class TestFSMTransitionExecution:
             LongTextState.DONE, session=db_session, gate_passed=True
         )
         assert fsm.state is LongTextState.DONE
+
+
+class TestFinalizeOutputAssembly:
+    @pytest.mark.asyncio
+    async def test_finalize_output_orders_by_chapter_and_skips_non_chapter_nodes(
+        self,
+        db_session: AsyncSession,
+    ):
+        task = await _create_task(db_session)
+        db_session.add_all(
+            [
+                TaskNode(
+                    task_id=task.id,
+                    title="自动补写轮次1：全稿扩写与篇幅补足（目标补写约1200字）",
+                    agent_role="writer",
+                    status="done",
+                    result='{"chapter_title":"全稿扩写","content_markdown":"[TIMEOUT_FALLBACK]","paragraphs":[{"text":"[TIMEOUT_FALLBACK]","citation_keys":[]}]}',
+                ),
+                TaskNode(
+                    task_id=task.id,
+                    title="第2章：方法与执行",
+                    agent_role="writer",
+                    status="done",
+                    result='{"chapter_title":"第2章：方法与执行","content_markdown":"第二章正文说明执行方法。","paragraphs":[{"text":"第二章正文说明执行方法。","citation_keys":[]}]}',
+                ),
+                TaskNode(
+                    task_id=task.id,
+                    title="第1章：问题定义",
+                    agent_role="writer",
+                    status="done",
+                    result='{"chapter_title":"第1章：问题定义","content_markdown":"第一章正文定义问题边界。","paragraphs":[{"text":"第一章正文定义问题边界。","citation_keys":[]}]}',
+                ),
+            ]
+        )
+        await db_session.flush()
+
+        fsm = LongTextFSM(task_id=task.id)
+        word_count = await fsm.finalize_output(session=db_session)
+
+        await db_session.refresh(task)
+        text = str(task.output_text or "")
+        assert "## 第1章：问题定义" in text
+        assert "## 第2章：方法与执行" in text
+        assert text.index("## 第1章：问题定义") < text.index("## 第2章：方法与执行")
+        assert "[TIMEOUT_FALLBACK]" not in text
+        assert word_count > 0
+
+    def test_count_words_excludes_markdown_and_json_scaffold(self):
+        text = """# 标题
+
+## 第1章：测试
+
+{"chapter_title":"第1章","content_markdown":"ignored"}
+
+这是正文内容 alpha beta。
+"""
+        count = LongTextFSM._count_words(text)
+        assert count >= 8
+        assert count < 20
 
     @pytest.mark.asyncio
     async def test_transition_to_failed_from_any_non_terminal(self, db_session):

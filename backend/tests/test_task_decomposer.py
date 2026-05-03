@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import patch
 
 from app.schemas.task import DAGNodeSchema, DAGSchema, VALID_DEPTHS, VALID_MODES
 from app.services.task_decomposer import (
@@ -191,13 +192,14 @@ class TestParseDAGResponse:
                     ]
                 }
 
-        dag = await decompose_task(
-            title="long form ai system report with deep evidence",
-            mode="report",
-            depth="deep",
-            target_words=20000,
-            llm_client=_ChapterLLM(),
-        )
+        with patch("app.services.task_decomposer.settings.enable_planned_expansion_nodes", True):
+            dag = await decompose_task(
+                title="long form ai system report with deep evidence",
+                mode="report",
+                depth="deep",
+                target_words=20000,
+                llm_client=_ChapterLLM(),
+            )
 
         writer_titles = [node.title for node in dag.nodes if node.role == "writer"]
         assert any("扩写" in title for title in writer_titles)

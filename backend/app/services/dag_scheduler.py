@@ -36,6 +36,7 @@ from app.services.evidence_pool import (
 from app.services.node_schema import coerce_output_to_role_schema, has_valid_schema_for_role
 from app.services.writer_output import (
     extract_writer_markdown,
+    is_valid_writer_output_text,
     make_fallback_writer_payload,
     serialize_writer_payload,
 )
@@ -46,6 +47,7 @@ from app.services.stage_contracts import (
 )
 from app.services import communicator
 from app.services.heartbeat import HEARTBEAT_TIMEOUT_SECONDS, get_all_agent_states
+from app.services.report_persistence import persist_completed_report
 from app.services.redis_streams import (
     MessageEnvelope,
     add_timeout_watch,
@@ -252,21 +254,11 @@ def _count_text_units(text: str) -> int:
 
 def _build_timeout_writer_markdown(*, chapter_title: str, min_units: int) -> str:
     title = str(chapter_title or "章节").strip() or "章节"
-    scaffold = [
-        f"{title}首先需要明确问题边界与适用场景，避免把不同条件下的现象混为同一结论。",
-        "在执行层面，可按“目标拆解、职责分配、数据采集、过程复盘”组织推进路径，并定义每一步的验收标准。",
-        "在证据层面，应将关键判断映射到可核验指标，至少包含基线值、阶段目标值和偏差解释三类信息。",
-        "在风险层面，需同步描述失败条件、回退策略和补救动作，确保方案在异常场景下仍可执行。",
-        "在跨章节衔接层面，本章结论应明确输入输出接口，避免与后续章节产生语义重复或逻辑冲突。",
-    ]
-    body: list[str] = scaffold[:]
-    max_rounds = 64
-    idx = 0
-    while _count_text_units("\n\n".join(body)) < max(600, int(min_units or 0)) and len(body) < max_rounds:
-        sentence = scaffold[idx % len(scaffold)]
-        body.append(f"{sentence}（补充轮次{idx + 1}）")
-        idx += 1
-    return "\n\n".join(body)
+    return (
+        f"{title}\n\n"
+        "[TIMEOUT_FALLBACK] writer node exhausted retries due timeout/length/schema checks. "
+        "This placeholder is excluded from final body assembly."
+    )
 
 
 def _extract_word_budget_hint(text: str) -> int | None:
@@ -2025,6 +2017,34 @@ class DAGScheduler:
                 return content
         return ""
 
+    async def _collect_writer_chapter_units(
+        self,
+        session: AsyncSession,
+    ) -> list[tuple[int, int]]:
+        """Return per-chapter best observed units sorted by chapter index."""
+        result = await session.execute(
+            select(TaskNode.title, TaskNode.result)
+            .where(
+                TaskNode.task_id == self.task_id,
+                TaskNode.agent_role == "writer",
+                TaskNode.result.is_not(None),
+            )
+        )
+        best_units: dict[int, int] = {}
+        for raw_title, raw_result in result.all():
+            title = str(raw_title or "")
+            chapter_index, _ = self._parse_chapter_meta(title)
+            if chapter_index is None or chapter_index <= 0:
+                continue
+            markdown = extract_writer_markdown(str(raw_result or ""))
+            units = _count_text_units(markdown)
+            if units <= 0:
+                continue
+            current = best_units.get(chapter_index, 0)
+            if units > current:
+                best_units[chapter_index] = units
+        return sorted(best_units.items(), key=lambda item: item[0])
+
     async def _revert_assignment_after_side_effect_failure(
         self,
         *,
@@ -3036,39 +3056,54 @@ class DAGScheduler:
                     )
                 task = await session.get(Task, self.task_id)
                 target_words = 0
+                depth = ""
                 try:
                     target_words = int(getattr(task, "target_words", 0) or 0)
                 except Exception:
                     target_words = 0
+                try:
+                    depth = str(getattr(task, "depth", "") or "").strip().lower()
+                except Exception:
+                    depth = ""
                 if word_count is not None and target_words > 0:
                     min_required = int(target_words * MIN_TARGET_WORD_RATIO)
                     if word_count < min_required:
-                        created = await self._enqueue_auto_expansion_wave(
+                        allow_auto_expand, expand_reason = await self._allow_auto_expansion_after_finalize(
                             session=session,
+                            task=task,
                             target_words=target_words,
                             current_words=word_count,
+                            depth=depth,
                         )
-                        if created:
-                            await session.execute(
-                                update(Task)
-                                .where(Task.id == self.task_id)
-                                .values(
-                                    status="pending",
-                                    error_message=None,
+                        if allow_auto_expand:
+                            created = await self._enqueue_auto_expansion_wave(
+                                session=session,
+                                target_words=target_words,
+                                current_words=word_count,
+                            )
+                            if created:
+                                await session.execute(
+                                    update(Task)
+                                    .where(Task.id == self.task_id)
+                                    .values(
+                                        status="pending",
+                                        error_message=None,
+                                    )
                                 )
-                            )
-                            await session.commit()
-                            self._schedule_event.set()
-                            logger.bind(task_id=str(self.task_id)).warning(
-                                "Output below target words ({} < {}), auto-expansion wave scheduled",
-                                word_count,
-                                min_required,
-                            )
-                            return "extended"
+                                await session.commit()
+                                self._schedule_event.set()
+                                logger.bind(task_id=str(self.task_id)).warning(
+                                    "Output below target words ({} < {}), auto-expansion wave scheduled",
+                                    word_count,
+                                    min_required,
+                                )
+                                return "extended"
                         fail_reason = (
                             f"Output below target words: got={word_count}, "
                             f"required_min={min_required}, target={target_words}"
                         )
+                        if expand_reason:
+                            fail_reason = f"{fail_reason}; auto_expand_blocked={expand_reason}"
             except Exception:
                 logger.bind(task_id=str(self.task_id)).opt(exception=True).warning(
                     "failed to finalize task output before mark done"
@@ -3086,6 +3121,8 @@ class DAGScheduler:
             )
             await session.commit()
 
+        completed_output_text: str | None = None
+        completed_title: str | None = None
         try:
             await communicator.send_status_update(
                 task_id=self.task_id,
@@ -3110,7 +3147,81 @@ class DAGScheduler:
         if fail_reason:
             logger.bind(task_id=str(self.task_id)).error("task failed at finalize gate: {}", fail_reason)
             return "failed"
+        async with async_session_factory() as session:
+            task = await session.get(Task, self.task_id)
+            if task is not None:
+                completed_output_text = str(getattr(task, "output_text", "") or "")
+                completed_title = str(getattr(task, "title", "") or "")
+        if completed_output_text:
+            try:
+                persist_completed_report(
+                    task_id=self.task_id,
+                    title=completed_title or "",
+                    output_text=completed_output_text,
+                )
+            except Exception:
+                logger.bind(task_id=str(self.task_id)).opt(exception=True).warning(
+                    "failed to persist completed report to local file"
+                )
         return "completed"
+
+    async def _allow_auto_expansion_after_finalize(
+        self,
+        *,
+        session: AsyncSession,
+        task: Task | None,
+        target_words: int,
+        current_words: int,
+        depth: str,
+    ) -> tuple[bool, str]:
+        """Decide whether finalize gate may enqueue auto-expansion wave.
+
+        Konruns-style alignment:
+        - quick tasks should not create finalize-time global expansion waves
+        - zero usable output should fail fast instead of wave loops
+        - only expand when there are enough usable primary chapter drafts
+        """
+        if not settings.enable_finalize_auto_expansion:
+            return False, "disabled_by_policy"
+        if target_words <= 0:
+            return False, "invalid_target"
+        if current_words <= 0:
+            return False, "no_usable_output"
+        if depth == "quick":
+            return False, "quick_depth_disabled"
+
+        rows = await session.execute(
+            select(TaskNode.title, TaskNode.result, TaskNode.status)
+            .where(TaskNode.task_id == self.task_id)
+            .where(TaskNode.agent_role == "writer")
+        )
+        primary_usable = 0
+        for title_raw, result_raw, status_raw in rows.all():
+            status = str(status_raw or "").strip().lower()
+            if status != STATUS_DONE:
+                continue
+            title = str(title_raw or "")
+            if not self._is_primary_writer_title(title):
+                continue
+            text = str(result_raw or "")
+            if not text:
+                continue
+            markdown = extract_writer_markdown(text)
+            if not markdown:
+                continue
+            # Be tolerant: accept valid structured output OR substantial markdown text.
+            if is_valid_writer_output_text(text) or _count_text_units(markdown) >= 600:
+                primary_usable += 1
+
+        if primary_usable < 2:
+            return False, "insufficient_primary_chapters"
+
+        gap = max(0, target_words - current_words)
+        gap_ratio = gap / max(1, target_words)
+        # Avoid huge wave-chasing; if far below target, fail and let caller rerun.
+        if gap_ratio > 0.45:
+            return False, "gap_too_large"
+        return True, "ok"
 
     async def _enqueue_auto_expansion_wave(
         self,
@@ -3162,25 +3273,52 @@ class DAGScheduler:
         )
 
         inserted_ids: list[uuid.UUID] = []
-        for idx in range(expansion_nodes):
-            suffix = f"（分片{idx + 1}/{expansion_nodes}）" if expansion_nodes > 1 else ""
-            title = (
-                f"自动补写轮次{wave_no}：全稿扩写与篇幅补足{suffix}"
-                f"（目标补写约{per_node_budget}字）"
-            )
-            node_id = uuid.uuid4()
-            inserted_ids.append(node_id)
-            session.add(
-                TaskNode(
-                    id=node_id,
-                    task_id=self.task_id,
-                    title=title,
-                    agent_role="writer",
-                    status=STATUS_READY,
-                    depends_on=[],
-                    retry_count=0,
+        chapter_units = await self._collect_writer_chapter_units(session)
+        candidate_chapters: list[int] = [
+            chapter_index
+            for chapter_index, _ in sorted(chapter_units, key=lambda item: (item[1], item[0]))
+        ]
+
+        if candidate_chapters:
+            for idx in range(min(expansion_nodes, len(candidate_chapters))):
+                chapter_index = int(candidate_chapters[idx])
+                title = (
+                    f"第{chapter_index}章：自动补写轮次{wave_no}"
+                    f"（目标补写约{per_node_budget}字）"
                 )
-            )
+                node_id = uuid.uuid4()
+                inserted_ids.append(node_id)
+                session.add(
+                    TaskNode(
+                        id=node_id,
+                        task_id=self.task_id,
+                        title=title,
+                        agent_role="writer",
+                        status=STATUS_READY,
+                        depends_on=[],
+                        retry_count=0,
+                    )
+                )
+        else:
+            for idx in range(expansion_nodes):
+                suffix = f"（分片{idx + 1}/{expansion_nodes}）" if expansion_nodes > 1 else ""
+                title = (
+                    f"自动补写轮次{wave_no}：全稿扩写与篇幅补足{suffix}"
+                    f"（目标补写约{per_node_budget}字）"
+                )
+                node_id = uuid.uuid4()
+                inserted_ids.append(node_id)
+                session.add(
+                    TaskNode(
+                        id=node_id,
+                        task_id=self.task_id,
+                        title=title,
+                        agent_role="writer",
+                        status=STATUS_READY,
+                        depends_on=[],
+                        retry_count=0,
+                    )
+                )
         task = await session.get(Task, self.task_id)
         if task is not None:
             checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))

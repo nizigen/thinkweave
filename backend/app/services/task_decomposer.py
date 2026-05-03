@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 import re
 
+from app.config import settings
 from app.schemas.task import DAGSchema, VALID_DEPTHS, VALID_MODES, ValidationResult
 from app.utils.llm_client import BaseLLMClient, LLMUnavailableError
 from app.utils.logger import logger
@@ -309,6 +310,8 @@ def _inject_long_form_expansion_nodes(dag: DAGSchema, *, target_words: int) -> D
     This mirrors the "initial draft + expansion rounds" strategy seen in
     mature multi-agent writing pipelines, while keeping schema unchanged.
     """
+    if not settings.enable_planned_expansion_nodes:
+        return dag
     if target_words < _LONG_FORM_EXPANSION_THRESHOLD or not dag.nodes:
         return dag
 

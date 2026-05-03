@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import UTC, datetime
@@ -290,8 +291,22 @@ class LongTextFSM:
     def _count_words(text: str) -> int:
         if not text:
             return 0
-        han_count = len(re.findall(r"[\u4e00-\u9fff]", text))
-        latin_count = len(re.findall(r"[a-zA-Z]+", text))
+        body = re.sub(r"```[\s\S]*?```", " ", str(text or ""))
+        prose_lines: list[str] = []
+        for raw_line in body.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                continue
+            if line in {"{", "}", "[", "]"}:
+                continue
+            if re.match(r'^"[A-Za-z0-9_]+":', line):
+                continue
+            prose_lines.append(line)
+        prose = "\n".join(prose_lines)
+        han_count = len(re.findall(r"[\u4e00-\u9fff]", prose))
+        latin_count = len(re.findall(r"[a-zA-Z]+", prose))
         return han_count + latin_count
 
     async def checkpoint(
@@ -450,23 +465,61 @@ class LongTextFSM:
         nodes = list(result.scalars().all())
         nodes.sort(key=lambda node: self._natural_title_key(node.title or ""))
 
+        chapter_nodes: dict[int, dict[str, Any]] = {}
         assembly_parts: list[str] = []
-        parts: list[str] = []
+        fallback_parts: list[str] = []
         for node in nodes:
             raw = str(node.result or "")
             if not raw or not self._is_usable_writer_output(raw):
                 continue
-            chapter_title = self._chapter_title_from_node_title(str(node.title or ""))
+            node_title = str(node.title or "")
+            chapter_index, chapter_title = self._parse_chapter_meta(node_title)
             section_blocks = self._sections_to_markdown_blocks(
                 extract_writer_sections(raw, default_heading=chapter_title),
                 default_heading=chapter_title,
             )
             markdown = "\n\n".join(block for block in section_blocks if block).strip()
             if markdown:
-                if "Assembly编辑收敛" in str(node.title or ""):
-                    assembly_parts.append(markdown)
-                parts.append(markdown)
-        base_text = "\n\n".join(parts)
+                if "Assembly编辑收敛" in node_title:
+                    assembly_markdown = extract_writer_markdown(raw).strip() or markdown
+                    assembly_parts.append(assembly_markdown)
+                if chapter_index is not None and chapter_index > 0:
+                    word_units = self._count_words(markdown)
+                    existing = chapter_nodes.get(chapter_index)
+                    existing_units = int(existing.get("word_units", 0)) if existing else -1
+                    if (
+                        existing is None
+                        or word_units > existing_units
+                        or (
+                            word_units == existing_units
+                            and getattr(node, "finished_at", None)
+                            and (
+                                existing.get("finished_at") is None
+                                or getattr(node, "finished_at", None) >= existing.get("finished_at")
+                            )
+                        )
+                    ):
+                        chapter_nodes[chapter_index] = {
+                            "markdown": markdown,
+                            "word_units": word_units,
+                            "finished_at": getattr(node, "finished_at", None),
+                        }
+                else:
+                    if self._is_nonchapter_primary_title(node_title):
+                        fallback_parts.append(markdown)
+
+        ordered_parts = [
+            str(chapter_nodes[idx]["markdown"]).strip()
+            for idx in sorted(chapter_nodes.keys())
+            if str(chapter_nodes[idx].get("markdown") or "").strip()
+        ]
+        fallback_nonchapter_parts = [part for part in fallback_parts if part]
+        if ordered_parts and fallback_nonchapter_parts:
+            ordered_parts.extend(fallback_nonchapter_parts)
+        elif not ordered_parts:
+            ordered_parts = fallback_nonchapter_parts
+
+        base_text = "\n\n".join(ordered_parts)
         output_text = base_text
         if assembly_parts:
             assembly_text = assembly_parts[-1]
@@ -495,9 +548,10 @@ class LongTextFSM:
             await session.flush()
 
         logger.bind(task_id=str(self.task_id)).info(
-            "Output finalized: {} chapters (usable={}, assembly_parts={}), {} words",
+            "Output finalized: {} nodes (chapter_groups={}, usable_parts={}, assembly_parts={}), {} words",
             len(nodes),
-            len(parts),
+            len(chapter_nodes),
+            len(ordered_parts),
             len(assembly_parts),
             word_count,
         )
@@ -519,6 +573,14 @@ class LongTextFSM:
             return False
         if "i don't have the specific details" in head:
             return False
+        if "failed after" in head:
+            return False
+        if "timeout fallback" in lowered:
+            return False
+        if "本地补写占位" in candidate:
+            return False
+        if "补充轮次" in candidate and "首先需要明确问题边界与适用场景" in candidate:
+            return False
         return True
 
     @staticmethod
@@ -532,6 +594,69 @@ class LongTextFSM:
         return text
 
     @staticmethod
+    def _parse_chapter_meta(title: str) -> tuple[int | None, str]:
+        text = str(title or "").strip()
+        if not text:
+            return None, ""
+        for pattern in (
+            r"第\s*(\d+)\s*章[:：]?\s*(.*)",
+            r"(?i)\bchapter\s*(\d+)\b[:：\-]?\s*(.*)",
+            r"(?i)\bch(?:apter)?\.?\s*(\d+)\b[:：\-]?\s*(.*)",
+        ):
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            chapter_index = int(match.group(1))
+            chapter_title = str(match.group(2) or "").strip() or text
+            return chapter_index, chapter_title
+        return None, text
+
+    @staticmethod
+    def _is_nonchapter_primary_title(title: str) -> bool:
+        text = str(title or "").strip()
+        if not text:
+            return False
+        blocked_markers = (
+            "自动补写轮次",
+            "全稿扩写",
+            "汇编",
+            "assembly",
+            "一致性",
+            "审查",
+            "复核",
+            "补写",
+        )
+        lowered = text.lower()
+        for marker in blocked_markers:
+            if marker.isascii():
+                if marker in lowered:
+                    return False
+            elif marker in text:
+                return False
+        return True
+
+    @staticmethod
+    def _is_low_quality_paragraph(text: str) -> bool:
+        body = str(text or "").strip()
+        if not body:
+            return True
+        lowered = body.lower()
+        if "failed after" in lowered:
+            return True
+        if "execution timeout" in lowered or "timeout fallback" in lowered:
+            return True
+        if "本地补写占位" in body:
+            return True
+        if "补充轮次" in body:
+            return True
+        if (
+            "首先需要明确问题边界与适用场景" in body
+            and "目标拆解、职责分配、数据采集、过程复盘" in body
+        ):
+            return True
+        return False
+
+    @staticmethod
     def _looks_like_json_blob(text: str) -> bool:
         sample = str(text or "").strip()
         if not sample:
@@ -541,6 +666,32 @@ class LongTextFSM:
         if '"paragraphs"' in sample and ('"chapter_title"' in sample or '"content_markdown"' in sample):
             return True
         return False
+
+    @staticmethod
+    def _extract_nested_json_paragraphs(text: str) -> list[str]:
+        body = str(text or "").strip()
+        if not body:
+            return []
+        if not ((body.startswith("{") and body.endswith("}")) or (body.startswith("[") and body.endswith("]"))):
+            return []
+        try:
+            parsed = json.loads(body)
+        except Exception:
+            return []
+        if isinstance(parsed, dict):
+            raw_paragraphs = parsed.get("paragraphs")
+            if not isinstance(raw_paragraphs, list):
+                return []
+            out: list[str] = []
+            for item in raw_paragraphs:
+                if isinstance(item, dict):
+                    line = str(item.get("text") or "").strip()
+                else:
+                    line = str(item or "").strip()
+                if line:
+                    out.append(line)
+            return out
+        return []
 
     @classmethod
     def _sections_to_markdown_blocks(
@@ -558,7 +709,16 @@ class LongTextFSM:
                 if not isinstance(paragraph, dict):
                     continue
                 text = str(paragraph.get("text") or "").strip()
-                if not text or cls._looks_like_json_blob(text):
+                if not text:
+                    continue
+                nested_paragraphs = cls._extract_nested_json_paragraphs(text)
+                if nested_paragraphs:
+                    for nested_text in nested_paragraphs:
+                        if cls._is_low_quality_paragraph(nested_text):
+                            continue
+                        paragraph_texts.append(nested_text)
+                    continue
+                if cls._looks_like_json_blob(text) or cls._is_low_quality_paragraph(text):
                     continue
                 paragraph_texts.append(text)
             if not paragraph_texts:

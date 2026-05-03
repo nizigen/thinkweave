@@ -383,6 +383,119 @@ class TestWriterBudgetHelpers:
         assert latest["expansion_nodes"] >= 1
         assert "adaptive expansion" in latest["reason"]
 
+    @pytest.mark.asyncio
+    async def test_auto_expansion_prefers_chapter_target_nodes_when_chapters_exist(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        task = SimpleNamespace(checkpoint_data={})
+        session = AsyncMock()
+        wave_rows = MagicMock()
+        wave_rows.all.return_value = []
+        chapter_rows = MagicMock()
+        chapter_rows.all.return_value = [
+            ("第1章：背景", '{"chapter_title":"第1章：背景","content_markdown":"第一章正文。","paragraphs":[{"text":"第一章正文。","citation_keys":[]}]}'),
+            ("第2章：方法", '{"chapter_title":"第2章：方法","content_markdown":"第二章正文更长一些。第二章正文更长一些。","paragraphs":[{"text":"第二章正文更长一些。第二章正文更长一些。","citation_keys":[]}]}'),
+        ]
+        session.execute = AsyncMock(side_effect=[wave_rows, chapter_rows])
+        session.get = AsyncMock(return_value=task)
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new=AsyncMock()),
+            patch("app.services.dag_scheduler.push_ready_node", new=AsyncMock()),
+        ):
+            created = await scheduler._enqueue_auto_expansion_wave(
+                session=session,
+                target_words=20000,
+                current_words=8000,
+            )
+
+        assert created is True
+        titles = [
+            str(call.args[0].title)
+            for call in session.add.call_args_list
+        ]
+        assert any(title.startswith("第1章：自动补写轮次1") for title in titles)
+
+    @pytest.mark.asyncio
+    async def test_allow_auto_expansion_disabled_for_quick_depth(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        session = AsyncMock()
+        with patch.object(settings, "enable_finalize_auto_expansion", True):
+            allowed, reason = await scheduler._allow_auto_expansion_after_finalize(
+                session=session,
+                task=None,
+                target_words=1800,
+                current_words=1200,
+                depth="quick",
+            )
+        assert allowed is False
+        assert reason == "quick_depth_disabled"
+
+    @pytest.mark.asyncio
+    async def test_allow_auto_expansion_disabled_by_policy_flag(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        session = AsyncMock()
+        with patch.object(settings, "enable_finalize_auto_expansion", False):
+            allowed, reason = await scheduler._allow_auto_expansion_after_finalize(
+                session=session,
+                task=None,
+                target_words=1800,
+                current_words=1200,
+                depth="standard",
+            )
+        assert allowed is False
+        assert reason == "disabled_by_policy"
+
+    @pytest.mark.asyncio
+    async def test_allow_auto_expansion_disabled_when_no_usable_output(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        session = AsyncMock()
+        with patch.object(settings, "enable_finalize_auto_expansion", True):
+            allowed, reason = await scheduler._allow_auto_expansion_after_finalize(
+                session=session,
+                task=None,
+                target_words=1800,
+                current_words=0,
+                depth="standard",
+            )
+        assert allowed is False
+        assert reason == "no_usable_output"
+
+    @pytest.mark.asyncio
+    async def test_allow_auto_expansion_requires_multiple_primary_chapters(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        session = AsyncMock()
+        rows = MagicMock()
+        rows.all.return_value = [
+            (
+                "第1章：背景",
+                '{"chapter_title":"第1章：背景","content_markdown":"一段较短内容","paragraphs":[{"text":"一段较短内容","citation_keys":[]}]}',
+                "done",
+            ),
+        ]
+        session.execute = AsyncMock(return_value=rows)
+        with patch.object(settings, "enable_finalize_auto_expansion", True):
+            allowed, reason = await scheduler._allow_auto_expansion_after_finalize(
+                session=session,
+                task=None,
+                target_words=10000,
+                current_words=7000,
+                depth="standard",
+            )
+        assert allowed is False
+        assert reason == "insufficient_primary_chapters"
+
 
 class TestConsistencyRepairBudget:
     def test_consistency_actionable_detection_false_when_empty(self, scheduler: DAGScheduler):
@@ -1524,10 +1637,17 @@ class TestCheckTimeouts:
                 new_callable=AsyncMock,
                 return_value=[str(node_id)],
             ),
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
             patch.object(
                 scheduler, "on_node_failed", new_callable=AsyncMock
             ) as mock_fail,
         ):
+            stale_result = MagicMock()
+            stale_result.all.return_value = []
+            mock_session = AsyncMock()
+            mock_session.execute = AsyncMock(return_value=stale_result)
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
             await scheduler._check_timeouts()
 
         mock_fail.assert_called_once_with(

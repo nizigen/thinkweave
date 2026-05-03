@@ -1,0 +1,655 @@
+﻿{
+    "id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+    "title":  "1. AI??????(OPC)???????:?????????????",
+    "mode":  "report",
+    "status":  "failed",
+    "fsm_state":  "failed",
+    "word_count":  0,
+    "depth":  "standard",
+    "target_words":  10000,
+    "error_message":  "DAG completed with failed nodes: æ¥åæ ¸å¿æ¡æ¶ä¸ç« èè§å -\u003e FAILED after 3 retries: TimeoutError",
+    "created_at":  "2026-04-29T14:29:50.116384",
+    "finished_at":  "2026-04-29T15:02:08.239169",
+    "output_text":  null,
+    "checkpoint_data":  {
+                            "control":  {
+                                            "status":  "active",
+                                            "preview_cache":  {
+
+                                                              },
+                                            "review_scores":  {
+
+                                                              }
+                                        },
+                            "pipeline":  {
+                                             "mode":  "stage_orchestrated",
+                                             "stages":  [
+                                                            {
+                                                                "code":  "SCOPING",
+                                                                "name":  "ä¸»é¢è§£æä¸æ£ç´¢è®¡å"
+                                                            },
+                                                            {
+                                                                "code":  "RESEARCH",
+                                                                "name":  "æ£ç´¢ä¸å»é"
+                                                            },
+                                                            {
+                                                                "code":  "OUTLINE",
+                                                                "name":  "æçº²çæ"
+                                                            },
+                                                            {
+                                                                "code":  "DRAFT",
+                                                                "name":  "åç« èèç¨¿"
+                                                            },
+                                                            {
+                                                                "code":  "REVIEW",
+                                                                "name":  "å¼ç¨ç»å®ä¸ä¸è´æ§"
+                                                            },
+                                                            {
+                                                                "code":  "ASSEMBLY",
+                                                                "name":  "ç»ç¨¿æ¼è£\u0085ä¸æ¶¦è²"
+                                                            },
+                                                            {
+                                                                "code":  "QA",
+                                                                "name":  "è´¨éæ ¡éª"
+                                                            }
+                                                        ],
+                                             "version":  "thinkweave.pipeline.v1",
+                                             "active_stage":  "OUTLINE",
+                                             "execution_graph":  "dag_preserved"
+                                         },
+                            "entry_stage":  "init",
+                            "entry_inputs":  {
+                                                 "has_draft_text":  false,
+                                                 "has_review_comments":  false
+                                             },
+                            "routing_results":  {
+                                                    "b0904883-9c8c-4bc1-9ff3-2ff392a36bda":  {
+                                                                                                 "updated_at":  "2026-04-29T14:30:20.950913+00:00",
+                                                                                                 "routing_reason":  "role_fallback",
+                                                                                                 "routing_status":  "assigned"
+                                                                                             }
+                                                },
+                            "routing_snapshot":  {
+                                                     "missing_roles":  [
+
+                                                                       ],
+                                                     "required_roles":  [
+                                                                            "consistency",
+                                                                            "outline",
+                                                                            "researcher",
+                                                                            "reviewer",
+                                                                            "writer"
+                                                                        ],
+                                                     "available_roles":  [
+                                                                             "consistency",
+                                                                             "outline",
+                                                                             "researcher",
+                                                                             "reviewer",
+                                                                             "writer"
+                                                                         ],
+                                                     "missing_capabilities":  [
+
+                                                                              ],
+                                                     "strict_bind_failures":  [
+
+                                                                              ],
+                                                     "required_capabilities":  [
+
+                                                                               ],
+                                                     "available_capabilities":  [
+                                                                                    "consistency",
+                                                                                    "evidence",
+                                                                                    "outline",
+                                                                                    "research",
+                                                                                    "retrieval",
+                                                                                    "reviewer",
+                                                                                    "source_policy",
+                                                                                    "writer"
+                                                                                ]
+                                                 },
+                            "node_budget_ledger":  {
+                                                       "b0904883-9c8c-4bc1-9ff3-2ff392a36bda":  {
+                                                                                                    "role":  "outline",
+                                                                                                    "title":  "æ¥åæ ¸å¿æ¡æ¶ä¸ç« èè§å",
+                                                                                                    "stage_code":  "OUTLINE",
+                                                                                                    "updated_at":  "2026-04-29T14:30:20.901392+00:00",
+                                                                                                    "word_floor":  300,
+                                                                                                    "word_ceiling":  300,
+                                                                                                    "planned_words":  0
+                                                                                                }
+                                                   }
+                        },
+    "nodes":  [
+                  {
+                      "id":  "005590e9-0883-4eb0-b554-56adc38646bf",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "AIä¸OPCèåç ç©¶ï¼æ¦å¿µãææ¯ä¸äº§ä¸å\u0085¨æ¯",
+                      "agent_role":  "researcher",
+                      "assigned_agent":  null,
+                      "status":  "skipped",
+                      "depends_on":  [
+                                         "b0904883-9c8c-4bc1-9ff3-2ff392a36bda"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  null,
+                      "finished_at":  "2026-04-29T14:45:22.940843",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "RESEARCH",
+                      "stage_name":  "æ£ç´¢ä¸å»é"
+                  },
+                  {
+                      "id":  "11a60a35-2ab7-4545-8e6d-4018db56af43",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬ä¸ç« ï¼æªæ¥åå±è¶å¿ä¸ææ¯è·¯çº¿å¾é¢æµ",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "1a6a0da6-73c4-4ddf-a876-4c75ca5ca9fa",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:45:23.003668",
+                      "finished_at":  "2026-04-29T14:46:58.913128",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "122f3b63-8ab0-4d2c-9962-6f2e984ba755",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬å\u0085«ç« å®¡é\u0085ä¸å»ºè®®å¯è¡æ§æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "f90ee737-ab44-4474-bf1d-25b38cf4ba75",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "797aae08-90e6-48d3-9e29-bfb8d9e8453f"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:48:36.837016",
+                      "finished_at":  "2026-04-29T14:49:16.038344",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "55dea91d-53ec-4c1c-b8c0-33575391dc22",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬åç« å®¡é\u0085ä¸è®ºè¯ä¸¥è°¨æ§æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "f90ee737-ab44-4474-bf1d-25b38cf4ba75",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "8351317d-2d32-43fd-84ba-66702d5d2d1b"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:48:04.023514",
+                      "finished_at":  "2026-04-29T14:48:35.727175",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "6497eb93-8bb3-4bd5-8676-052b7535ff21",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬ä¸ç« å®¡é\u0085ä¸æ¡ä¾æ·±åº¦æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "4e787526-7f03-4675-9397-3bd269d44ec2",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "bfbbc992-8f41-40b4-b3f4-b22224417578"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:52:34.188917",
+                      "finished_at":  "2026-04-29T14:54:10.882489",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "6ec94a18-cda9-40ac-86db-50d49d386d58",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬å\u0085­ç« ï¼æ åãæ²»çä¸ä¼¦çæ¡æ¶æå»º",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "4e787526-7f03-4675-9397-3bd269d44ec2",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:45:23.038775",
+                      "finished_at":  "2026-04-29T14:47:13.177807",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "797aae08-90e6-48d3-9e29-bfb8d9e8453f",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬å\u0085«ç« ï¼ç»è®ºä¸å¯¹äº§ä¸åæ¹çæç¥å»ºè®®",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "1830be2b-a6a3-4d6e-b678-bbe0412d883d",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:45:23.074320",
+                      "finished_at":  "2026-04-29T14:48:36.801169",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "7a494540-2bfb-47e5-a12a-8075bc6e8ff1",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "æ¥åç¯å¹\u0085è¡¥è¶³ä¸ç« èè¡æ¥æ©å",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "1a6a0da6-73c4-4ddf-a876-4c75ca5ca9fa",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "c6f30e1a-0e1c-4f38-bf7e-2230eddb6348",
+                                         "7cb35e74-a3f4-4424-ab4f-aec669826ac9",
+                                         "6497eb93-8bb3-4bd5-8676-052b7535ff21",
+                                         "55dea91d-53ec-4c1c-b8c0-33575391dc22",
+                                         "b5f24c2a-07c6-47db-bc5a-8eeeea6e5f9e",
+                                         "ea8e3e41-62da-4f9c-b0b2-6dbfadf63145",
+                                         "9dd5734d-7162-4988-b831-14c853fa37d7",
+                                         "122f3b63-8ab0-4d2c-9962-6f2e984ba755",
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:57:00.854324",
+                      "finished_at":  "2026-04-29T15:01:35.120465",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "ASSEMBLY",
+                      "stage_name":  "ç»ç¨¿æ¼è£\u0085ä¸æ¶¦è²"
+                  },
+                  {
+                      "id":  "7cb35e74-a3f4-4424-ab4f-aec669826ac9",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬äºç« å®¡é\u0085ä¸ææ¯åç¡®æ§æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "f90ee737-ab44-4474-bf1d-25b38cf4ba75",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "8230bd28-2fd3-45f9-b86e-0d7106d736de"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:56:45.527403",
+                      "finished_at":  "2026-04-29T14:57:00.818534",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "8230bd28-2fd3-45f9-b86e-0d7106d736de",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬äºç« ï¼OPCææ¯ä½ç³»æ·±åº¦è§£æä¸AIèµè½æ½å",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "1a6a0da6-73c4-4ddf-a876-4c75ca5ca9fa",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  1,
+                      "started_at":  "2026-04-29T14:52:00.077906",
+                      "finished_at":  "2026-04-29T14:56:45.441342",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "8351317d-2d32-43fd-84ba-66702d5d2d1b",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬åç« ï¼èåææ¯é¢ä¸´çææä¸ç¶é¢åæ",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "4e787526-7f03-4675-9397-3bd269d44ec2",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:47:13.257915",
+                      "finished_at":  "2026-04-29T14:48:03.933965",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "9dd5734d-7162-4988-b831-14c853fa37d7",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬ä¸ç« å®¡é\u0085ä¸é¢æµåçæ§æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "f90ee737-ab44-4474-bf1d-25b38cf4ba75",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "11a60a35-2ab7-4545-8e6d-4018db56af43"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:46:58.984028",
+                      "finished_at":  "2026-04-29T14:47:26.450290",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "b02c8a1b-3c77-48ff-a83f-b8a79d086fb2",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬ä¸ç« ï¼å¼è¨ - AIä¸OPCèåçæ¶ä»£èæ¯ä¸æ ¸å¿é®é¢",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "4e787526-7f03-4675-9397-3bd269d44ec2",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:48:04.059155",
+                      "finished_at":  "2026-04-29T14:49:55.750628",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "b0904883-9c8c-4bc1-9ff3-2ff392a36bda",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "æ¥åæ ¸å¿æ¡æ¶ä¸ç« èè§å",
+                      "agent_role":  "outline",
+                      "assigned_agent":  "1830be2b-a6a3-4d6e-b678-bbe0412d883d",
+                      "status":  "failed",
+                      "depends_on":  [
+
+                                     ],
+                      "retry_count":  3,
+                      "started_at":  "2026-04-29T14:40:21.985207",
+                      "finished_at":  "2026-04-29T14:45:22.905822",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  "role_fallback",
+                      "routing_status":  "assigned",
+                      "stage_code":  "OUTLINE",
+                      "stage_name":  "æçº²çæ"
+                  },
+                  {
+                      "id":  "b5f24c2a-07c6-47db-bc5a-8eeeea6e5f9e",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬äºç« å®¡é\u0085ä¸æ°æ®æ¶ææ§æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "f90ee737-ab44-4474-bf1d-25b38cf4ba75",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "d2ee5844-786b-4968-8cdb-b8f87167c00a"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:52:01.236387",
+                      "finished_at":  "2026-04-29T14:52:44.096396",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "bab0dfdf-2cc4-4b78-8f71-8d3df9adeb88",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "å\u0085¨æä¸è´æ§ãé£æ ¼ç»ä¸ä¸æç»å®¡é\u0085",
+                      "agent_role":  "consistency",
+                      "assigned_agent":  "4a580f08-ad89-4f1b-9559-814c5ccbaa3b",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "7a494540-2bfb-47e5-a12a-8075bc6e8ff1"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T15:01:35.200806",
+                      "finished_at":  "2026-04-29T15:02:08.205715",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "ASSEMBLY",
+                      "stage_name":  "ç»ç¨¿æ¼è£\u0085ä¸æ¶¦è²"
+                  },
+                  {
+                      "id":  "bfbbc992-8f41-40b4-b3f4-b22224417578",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬ä¸ç« ï¼AIé©±å¨çOPCåºç¨åºæ¯ä¸å\u0085¸åæ¡ä¾åæ",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "1830be2b-a6a3-4d6e-b678-bbe0412d883d",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:48:36.871329",
+                      "finished_at":  "2026-04-29T14:52:34.149784",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "c6f30e1a-0e1c-4f38-bf7e-2230eddb6348",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬ä¸ç« å®¡é\u0085ä¸é»è¾æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "f90ee737-ab44-4474-bf1d-25b38cf4ba75",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "b02c8a1b-3c77-48ff-a83f-b8a79d086fb2"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:49:55.834314",
+                      "finished_at":  "2026-04-29T14:50:21.248659",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "d2ee5844-786b-4968-8cdb-b8f87167c00a",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬äºç« ï¼äº§ä¸çæãç«äºæ ¼å±ä¸ä¸»è¦åä¸è\u0085",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "4e787526-7f03-4675-9397-3bd269d44ec2",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "005590e9-0883-4eb0-b554-56adc38646bf"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:49:55.950524",
+                      "finished_at":  "2026-04-29T14:52:01.149978",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "ea8e3e41-62da-4f9c-b0b2-6dbfadf63145",
+                      "task_id":  "15970c9f-3e80-47c9-8787-0b77a88f35b0",
+                      "title":  "ç¬¬å\u0085­ç« å®¡é\u0085ä¸åè§æ§æ ¡éª",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "4a580f08-ad89-4f1b-9559-814c5ccbaa3b",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "6ec94a18-cda9-40ac-86db-50d49d386d58"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:47:13.293286",
+                      "finished_at":  "2026-04-29T14:48:25.940291",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  }
+              ],
+    "blocking_reason":  null,
+    "node_status_summary":  {
+                                "skipped":  1,
+                                "done":  18,
+                                "failed":  1
+                            },
+    "stage_progress":  {
+                           "RESEARCH":  1,
+                           "DRAFT":  8,
+                           "REVIEW":  8,
+                           "ASSEMBLY":  2,
+                           "OUTLINE":  1
+                       },
+    "evidence_summary":  {
+                             "total":  0,
+                             "with_source_url":  0,
+                             "unbound_claims":  0
+                         },
+    "citation_summary":  {
+                             "total":  7,
+                             "bound_to_evidence":  5,
+                             "uncertain_or_missing":  2
+                         }
+}

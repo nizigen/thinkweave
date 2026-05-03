@@ -1,3 +1,39 @@
+## Step 9 系统诊断与改进方案（2026-05-03）
+
+**诊断方式:** 通过 AI 生成的 OPC UA 报告文章缺陷反推系统代码架构问题
+
+**关键产物:**
+- `docs/SYSTEM_DIAGNOSIS.md` - 6 个问题的详细诊断与改进方案
+- `docs/CODE_IMPROVEMENT_CHECKLIST.md` - 13 个文件的改进清单与工作量估算
+
+**核心发现:**
+
+| 文章缺陷 | 系统问题 | 优先级 | 工作量 |
+|--------|--------|-------|-------|
+| 核心论点不聚焦 (8 个平行章节) | FSM 缺论点约束检查点 | P0 | 3-4h |
+| 缺市场背景数据 | Evidence Pool 初始化不足 + Writer 缺证据要求 | P0 | 4-6h |
+| 技术陈述缺验证 | 缺 FACT_CHECK 状态 + Fact Check Agent | P1 | 6-8h |
+| 反例和边界条件模糊 | Writer Prompt 允许模糊词 | P1 | 2-3h |
+| 实施路径不可操作 | Task Decomposer 粒度太粗 | P1 | 5-7h |
+| 建议未被执行 | FSM Consistency 缺反馈循环 | P2 | 3-4h |
+
+**总计:** 23-32 小时工作量，13 个文件修改
+
+**P0 改进方案（本周启动）:**
+1. 改 Outline Prompt 加核心论点约束
+2. FSM 中加 Premise Gate 状态（论点选择关卡）
+3. Evidence Pool 初始化补充市场数据
+4. Writer Prompt 加"@evidence[]"标记要求
+5. Reviewer Agent 加"证据充分性"维度
+
+**预期效果:** 
+- 新 Outline 应该明确陈述"核心论点"
+- WRITING 被迫关联到论点
+- 每个宏观论述都有数字支撑
+- REVIEWING 拒绝"无证据陈述"
+
+---
+
 ## Phase 5 Wave 4（2026-04-27）
 - 新增 30k 评测脚本：`scripts/longform_eval_runner.sh`
   - 输入任务详情 JSON，输出 machine-readable 指标 JSON（`length_compliance` / `instruction_adherence` / `citation_coverage` / `duplicate_rate` / `consistency_severity_budget`）。

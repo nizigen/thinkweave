@@ -7,6 +7,7 @@ from abc import ABC
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
+from app.config import settings
 from app.memory.session import SessionMemory
 from app.services import communicator
 from app.utils.logger import logger
@@ -140,7 +141,28 @@ class TimeoutMiddleware(AgentMiddleware):
         self._timeout = timeout_seconds
 
     async def before_task(self, agent: BaseAgent, ctx: dict[str, Any]) -> dict[str, Any]:
-        return {**ctx, "_timeout_seconds": self._timeout}
+        role = str(ctx.get("agent_role", "") or "").strip().lower()
+        role_default = (
+            float(max(1, settings.dag_writer_node_timeout_seconds))
+            if role == "writer"
+            else float(max(1, settings.dag_node_timeout_seconds))
+        )
+
+        payload = ctx.get("payload", {})
+        payload_timeout = payload.get("timeout_seconds") if isinstance(payload, dict) else None
+        existing_timeout = ctx.get("_timeout_seconds")
+
+        timeout = existing_timeout if existing_timeout is not None else payload_timeout
+        if timeout is None:
+            timeout = role_default if role else self._timeout
+
+        try:
+            timeout_seconds = float(timeout)
+        except Exception:
+            timeout_seconds = role_default if role else float(self._timeout)
+        timeout_seconds = float(max(1, timeout_seconds))
+
+        return {**ctx, "_timeout_seconds": timeout_seconds}
 
 
 class ContextSummaryMiddleware(AgentMiddleware):

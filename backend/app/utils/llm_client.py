@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
 from app.config import settings
@@ -41,40 +43,32 @@ class ModelConfig:
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
-    "gpt-4o": ModelConfig(
-        provider="openai",
-        model="gpt-4o",
-        supports_streaming=True,
-        supports_json_mode=True,
-        max_tokens=4096,
-        fallback="deepseek-chat",
-    ),
-    "deepseek-chat": ModelConfig(
+    "deepseek-v3.2": ModelConfig(
         provider="deepseek",
-        model="deepseek/deepseek-chat",
+        model="deepseek/deepseek-v3.2",
         supports_streaming=True,
         supports_json_mode=True,
         max_tokens=8192,
-        fallback="gpt-4o",
+        fallback=None,
     ),
-    "gpt-4o-mini": ModelConfig(
-        provider="openai",
-        model="gpt-4o-mini",
+    "deepseek-chat": ModelConfig(
+        provider="deepseek",
+        model="deepseek/deepseek-v3.2",
         supports_streaming=True,
         supports_json_mode=True,
-        max_tokens=4096,
-        fallback="gpt-4o",
+        max_tokens=8192,
+        fallback=None,
     ),
 }
 
 ROLE_MODEL_MAP: dict[str, str] = {
-    "orchestrator": "gpt-4o",
-    "manager": "deepseek-chat",
-    "outline": "gpt-4o",
-    "researcher": "gpt-4o",
-    "writer": "deepseek-chat",
-    "reviewer": "gpt-4o",
-    "consistency": "gpt-4o",
+    "orchestrator": "deepseek-v3.2",
+    "manager": "deepseek-v3.2",
+    "outline": "deepseek-v3.2",
+    "researcher": "deepseek-v3.2",
+    "writer": "deepseek-v3.2",
+    "reviewer": "deepseek-v3.2",
+    "consistency": "deepseek-v3.2",
 }
 
 
@@ -179,8 +173,41 @@ class LLMClient(BaseLLMClient):
             return True
         return normalized in {"sk-xxx", "your-api-key", "placeholder", "changeme"}
 
+    @staticmethod
+    def _resolve_http_proxy() -> str | None:
+        """Use explicit HTTP(S) proxy only; ignore SOCKS-style ALL_PROXY."""
+        for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+            value = str(os.getenv(key, "")).strip()
+            if not value:
+                continue
+            lower = value.lower()
+            if lower.startswith("http://") or lower.startswith("https://"):
+                return value
+        return None
+
     def _build_client(self, provider: str) -> AsyncOpenAI:
         request_timeout = max(5, int(getattr(settings, "llm_request_timeout_seconds", 120)))
+        proxy_url = self._resolve_http_proxy()
+        http_client = httpx.AsyncClient(
+            timeout=request_timeout,
+            trust_env=False,
+            proxy=proxy_url,
+        )
+
+        openrouter_key = str(getattr(settings, "openrouter_api_key", "") or "").strip()
+        openrouter_base = str(getattr(settings, "openrouter_base_url", "") or "").strip()
+        if (
+            openrouter_key
+            and openrouter_base
+            and not self._is_placeholder_key(openrouter_key)
+        ):
+            return AsyncOpenAI(
+                api_key=openrouter_key,
+                base_url=openrouter_base,
+                timeout=request_timeout,
+                http_client=http_client,
+            )
+
         if provider == "openai":
             if self._is_placeholder_key(settings.openai_api_key):
                 raise LLMUnavailableError(
@@ -190,6 +217,7 @@ class LLMClient(BaseLLMClient):
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_base_url,
                 timeout=request_timeout,
+                http_client=http_client,
             )
         if provider == "deepseek":
             if self._is_placeholder_key(settings.deepseek_api_key):
@@ -200,6 +228,7 @@ class LLMClient(BaseLLMClient):
                 api_key=settings.deepseek_api_key,
                 base_url=settings.deepseek_base_url,
                 timeout=request_timeout,
+                http_client=http_client,
             )
         raise LLMUnavailableError(f"Provider '{provider}' not configured")
 

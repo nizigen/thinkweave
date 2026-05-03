@@ -20,15 +20,19 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # LLM providers
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
-    default_model: str = "gpt-4o"
+    default_model: str = "deepseek-v3.2"
 
     # Concurrency controls
     max_concurrent_llm_calls: int = 5
     max_concurrent_writers: int = 3
+    enable_planned_expansion_nodes: bool = False
+    enable_finalize_auto_expansion: bool = False
 
     # LLM retry policy
     llm_max_retries: int = 3
@@ -76,6 +80,7 @@ class Settings(BaseSettings):
     model_config = {
         "env_file": _BACKEND_ENV_FILE,
         "env_file_encoding": "utf-8",
+        "extra": "ignore",
     }
 
     @property
@@ -110,9 +115,6 @@ def available_model_options(extra_models: list[str] | None = None) -> list[dict[
     """Return selectable model options for the agent management UI."""
     known_models = [
         settings.default_model,
-        "gpt-4o",
-        "gpt-4o-mini",
-        "gpt-5.2",
         "deepseek-v3.2",
         "deepseek-chat",
     ]

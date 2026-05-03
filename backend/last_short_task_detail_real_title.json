@@ -1,0 +1,313 @@
+﻿{
+    "id":  "01dad3f3-79a8-4cc6-8447-0409227f8b18",
+    "title":  "AI??????(OPC)???????:?????????????",
+    "mode":  "report",
+    "status":  "completed",
+    "fsm_state":  "done",
+    "word_count":  2027,
+    "depth":  "quick",
+    "target_words":  1800,
+    "error_message":  null,
+    "created_at":  "2026-04-29T14:01:10.627883",
+    "finished_at":  "2026-04-29T14:11:11.056506",
+    "output_text":  "## ç¬¬ä¸ç« ï¼å¼è¨ - OPCä¸AIèåçæ¶ä»£èæ¯ä¸æ¥åç®æ \n\näººå·¥æºè½ï¼AIï¼çæ¼è¿ï¼ç¹å«æ¯å¤§åè¯­è¨æ¨¡åï¼LLMï¼ä¸çæå¼AIççªç ´æ§è¿å±ï¼æ­£å°äººç±»ç¤¾ä¼æ¨åä¸ä¸ªææ¯æ½åä¸æ½å¨å±æºå¹¶å­çåå­è·¯å£ãå¨ç§å­¦ç ç©¶ãç²¾åå»çä¸çäº§åé©æ°ç­é¢åï¼AIå±ç°åºéå¡ä¸ççå·¨å¤§è½éï¼ä¸æ­¤åæ¶ï¼å\u0085¶æ½å¨çæ»¥ç¨ä¸å¤±æ§é£é©ï¼å°¤å\u0085¶æ¯å¯è½å¼åå\u0085¨çæ§ãç³»ç»æ§å±å®³çâç¾é¾æ§é£é©âï¼å·²æä¸ºå\u0085¨çç§ææ²»çä¸å®å\u0085¨ç ç©¶çæ ¸å¿è®®é¢ãOpenAI Preparedness Challenge (OPC) æ­£æ¯å¨è¿ä¸ç´§è¿«èæ¯ä¸åºè¿èççç³»ç»æ§å¡è®®ï¼æ¨å¨å¼å¯¼å¼åè\u0085ä¸ç ç©¶è\u0085æå»ºä¸å¥ä¸¥è°¨ãåç»çè¯ä¼°æ¡æ¶ï¼ä»¥è¯å«ãéåå¹¶ç¼è§£åæ²¿AIæ¨¡åå¯è½å¸¦æ¥çæç«¯å±å®³ãæ¬ç« æ¨å¨éæOPCå¡è®®çå®è§æ¶ä»£èæ¯ï¼ç²¾åè§£è¯»å\u0085¶å®æ¹å®ä¹çæ ¸å¿ç®æ ï¼å¹¶ä¸ºæ¬æ¥åå¤§çº²ç¡®ç«æ¸\u0085æ°çè¯ä¼°èç´ä¸ä»·å¼å®ä½ï¼ä»èä¸ºåç»­ç« èçæ¹æ³è®ºæå»ºä¸æ·±åº¦é£é©åæå¥ å®åå®çé»è¾åºç¡ã\n\nçè§£OPCçå®æ¹æå¾ï¼éä»¥OpenAIäº2023å¹´12æåå¸çãPreparednessãæ¡æ¶ææ¡£ä¸ºæå¨èµ·ç¹ãè¯¥ææ¡£æç¡®æåºï¼OPCçæ ¸å¿ç®æ æ¯âè¯ä¼°å¹¶éä½åæ²¿AIæ¨¡åå¸¦æ¥çç¾é¾æ§é£é©âï¼å¹¶å°âç¾é¾æ§é£é©âå\u0085·ä½çå®ä¸ºåä¸ªå\u0085³é®é¢åï¼ç½ç»å®å\u0085¨å¨èãåå­¦/çç©/æ¾å°/æ ¸å¨èãè¯´æä¸æçºµè½åï¼ä»¥åæ¨¡åèªä¸»æ§é£é©ãè¿ä¸åç±»ä½ç³»å¹¶ééæåä¸¾ï¼èæ¯åºäºå¯¹AIè½åæ¼è¿è·¯å¾ä¸æ½å¨å±å®³æ¨¡å¼çç³»ç»æ§åæãä¾å¦ï¼ç½ç»å®å\u0085¨é£é©èç¦äºAIå¨èªå¨åæ¼æ´ææãé«çº§æç»­æ§å¨èæ»å»ä¸­çèµè½ä½ç¨ï¼CBRNé£é©åå\u0085³èAIå¨çç©å·¥ç¨ãåå­¦åæç­ææç§å­¦é¢åçç¥è¯æ»¥ç¨ä¸å éè½åï¼è¯´æé£é©æ¶åå©ç¨AIè¿è¡å¤§è§æ¨¡ãä¸ªæ§åä¿¡æ¯æçºµä»¥å½±åç¤¾ä¼è®¤ç¥ä¸è¡ä¸ºï¼èªä¸»æ§é£é©åå\u0085³ä¹AIç³»ç»è±ç¦»äººç±»æå¾çç£ãèªä¸»å¶å®å¹¶æ§è¡ç®æ çå¯è½æ§ãOPCæ¡æ¶è¦æ±åä¸è\u0085å´ç»è¿äºé¢åï¼æå»ºè½å¤ç³»ç»è¯ä¼°æ¨¡åâé¢å¤æ§âââå³åºå¯¹ä¸ç¼è§£ä¸è¿°é£é©çè½åä¸åå¤ç¨åº¦ââçç»¼åæ§æ¥åã\n\nç¶èï¼å¯¹âç¾é¾æ§é£é©âççå®æ¬èº«è´å«çåºæçè¾¹çæ¨¡ç³æ§ä¸å¨ææ¼åç¹å¾ãå®æ¹æ¡æ¶æä¾äºæ¸\u0085æ°çè¯ä¼°æ¹åï¼ä½å\u0085·ä½é£é©åºæ¯çæµ®ç°ä¸æ¼åï¼é«åº¦ä¾èµäºææ¯çªç ´çéåº¦ãåºç¨åºæ¯çæå±ä»¥åç¤¾ä¼ç¯å¢çäºå¨ãä»¥çç©å®å\u0085¨é¢åä¸ºä¾ï¼é£é©æ¢å\u0085æ¬AIè¾\u0085å©å·²ç¥ç\u0085åä½åºå ç»åæä¸ä¼ æ­æ¨¡æè¿ç±»ç¸å¯¹å¯é¢æµçå¨èï¼ä¹å¯è½å»¶ä¼¸è³AIé©±å¨å\u0085¨æ°çç©å¶åææ¯ç´ çä»å¤´è®¾è®¡ï¼åè\u0085å ç¼ºä¹å\u0085\u0085åçç°å®æ¡ä¾ä¸è¯ä¼°åºåï¼å\u0085¶é£é©æ¦çä¸å½±åè¯ä¼°å­å¨æ¾èçä¸ç¡®å®æ§ãåæ ·ï¼æ¨¡åâèªä¸»æ§âçå®ä¹ä¸é£é©éå¼å¨ä¸åå­¦æ¯ä¸å·¥ç¨è¯­å¢ä¸­å­å¨å·®å¼ï¼å\u0085¶è°±ç³»å¯ä»ç®åçä»»å¡èªå¨åï¼å»¶ä¼¸è³å\u0085·å¤é¿ææç¥è§åãèµæºè·åä¸ç®æ æä¹\u0085åè½åçæºè½ä»£çè¡ä¸ºãå æ­¤ï¼ä¸ä»½éµå¾ªOPCæ¡æ¶çæ¥åå¤§çº²ï¼å¿\u0085é¡»é¦å\u0085æ¿è®¤å¹¶æç¡®è¿äºè®¤ç¥è¾¹çï¼å\u0085¶è¯ä¼°èç´æ¯åºäºå½åææ¯è®¤ç¥ä¸å®æ¹åç±»çé£é©å¾æ¯ï¼èéå¯¹æªæ¥æææªç¥å¯è½æ§çç»æé¢æµï¼å\u0085¶ç¦ç¹å¨äºâç¾é¾æ§âçº§å«çç³»ç»æ§å±å®³ï¼èéæ³åçä¼¦çåè§æç­æç¤¾ä¼å²å»ã\n\nåºäºä¸è¿°æ¶ä»£èæ¯ä¸è¯ä¼°è¾¹çï¼æ¬æ¥åå¤§çº²çæ ¸å¿ç®æ å¾ä»¥åç»ä¸ºä¸ä¸ªç¸äºæ¯æçç»´åº¦ãé¦è¦ç®æ æ¯æä¾ä¸å¥ä¸¥æ ¼éµå¾ªOPCå®æ¹é£é©åç±»ãä¸é»è¾éè¿ï¼ä»é£é©çå®ãè¯ä¼°å°ç¼è§£è§åï¼çç« èç»ææ¨¡æ¿ï¼ç¡®ä¿è¯ä¼°è¿ç¨çå\u0085¨é¢æ§ä¸ç³»ç»æ§ãå\u0085¶æ¬¡ï¼å¤§çº²å¨è®¾è®¡æ¯ä¸ªæ ¸å¿ç« èæ¶ï¼å°åµå\u0085¥æ¨¡ååä¸å¯æ©å±çâåææ¥å£âãä¾å¦ï¼å¨é£é©è¯ä¼°æ¹æ³è®ºç« èï¼å°é¢çå¯¹ä¸åè¯ä¼°èå¼ï¼å¦çº¢éæµè¯ãåºåè¯ä¼°ãå¯¹ææ§è¯ä¼°ï¼è¿è¡æ¯è¾ä¸éé\u0085éæ©ççè®ºç©ºé´ï¼å¨é£é©åæç« èï¼ä¸ºæ¯ä¸ªå\u0085³é®é¢åè®¾è®¡æ ååçâå¨èåºæ¯-æ¨¡åè½å-æ½å¨å½±å-é²æ¤ç¼ºå£âåæå­æ¡æ¶ãè¿ç§è®¾è®¡ä½¿å¾æ¥åæ¢è½æå¡äºå¿«éçåæ­¥é£é©ç­æ¥ï¼ä¹è½æ¯ææ·±åº¦çä¸é¡¹å®å\u0085¨å®¡è®¡ãç¬¬ä¸ï¼å¤§çº²è´åäºç¡®ä¿æ¯ä¸ªé¨åé½è½ä¸ºå®é\u0085çæ°æ®æ¶éãè¯æ®åæä¸å³ç­å»ºè®®æä¾æ¸\u0085æ°çæä½æå¼ï¼è¶\u0085è¶æ½è±¡çååæè¿°ãè¿æå³çå¤§çº²éæç¡®åç« èæéçè¯æ®ç±»åãå\u0085³é®é®é¢æ¸\u0085åä»¥åç»è®ºçè¾åºæ ¼å¼ï¼å°è¯ä¼°å·¥ä½éå®å¨å¯éªè¯ãå¯è¿½æº¯çå®è·µå±é¢ã\n\nä¸ºå®ç°ä¸è¿°ç®æ ï¼æ¬ç« ååç»­å¤§çº²çæ´ä½è®¾è®¡å¿\u0085é¡»å»ºç«å¨å¤æºè¯æ®æ´åä¸æ¸\u0085æ°è¿½æº¯é¾æ¡ä¹ä¸ãå¯¹äºOPCå®æ¹ç®æ ä¸æ¡æ¶çè§£è¯»ï¼å¿\u0085é¡»ç´æ¥å¼ç¨å¹¶åç¡®ééOpenAIçåå§ææ¡£ï¼å¦ãPreparednessãæ¡æ¶ãå¯¹äºâç¾é¾æ§é£é©âåç±»çå­¦çä¾æ®åå\u0085¶åçæ§è®ºè¯ï¼åéè¦æ´å¼AIå®å\u0085¨ä¸æ²»çé¢åçæå¨ç»¼è¿°ä¸åæ²¿ç ç©¶ï¼ä»¥ç¡®ä¿åç±»ä¸ä»\u0085ç¬¦åå®æ¹è¦æ±ï¼ä¹ææ ¹äºæ´å¹¿æ³çå­¦æ¯å\u0085±è¯ãå¨å\u0085·ä½çå®åé£é©é¢åçè¯ä¼°è¾¹çä¸ä¸ç¡®å®æ§æ¶ï¼åºåèç¸å\u0085³é¢åçå®è¯æ¡ä¾ç ç©¶ï¼ä¾å¦å·²å\u0085¬å¼çAIè¾\u0085å©ç½ç»æ»å»äºä»¶åæãåæçç©å­¦é¢ååéç¨éç ç©¶çè¿å±æ¥åç­ï¼ä»¥æ­¤å\u0085·ä½è¯´æé£é©åºæ¯çç°å®ä¾æ®ãæ¼åè·¯å¾ä»¥åå½åè¯ä¼°è½åçå±éæ§ãè¿ç§è´¯ç©¿å§ç»çè¯æ®é©±å¨è®¾è®¡ï¼æ¯ä¿éå¤§çº²ç§å­¦æ§ãå®¢è§æ§ï¼å¹¶é¿å\u0085ä¸»è§èæ­ä¸ç©ºæ³è®¨è®ºçå\u0085³é®æå¨ã\n\nç»¼ä¸æè¿°ï¼æ¬ç« ä½ä¸ºå\u0085¨æå¼è¨ï¼ç³»ç»å®æäºä¸é¡¹å¥ åºæ§ä»»å¡ï¼ç¬¬ä¸ï¼å¾åäºOPCå¡è®®è¯ççå®è§æ¶ä»£èæ¯ââå³AIè½åé£è·æ§å¢é¿ä¸å¯¹å\u0085¶ç¾é¾æ§åæçæ·±åæ\u0085å¿§æå½¢æçå¼ ååºãç¬¬äºï¼ç²¾åè§£è¯»äºOPCå®æ¹æ¡æ¶å¯¹æ¥åæ ¸å¿ç®æ ä¸åå¤§é£é©èç´çå\u0085·ä½çå®ï¼å¹¶å®¡æ\u0085è¾¨æäºå\u0085¶ä¸­çè¾¹çä¸ä¸ç¡®å®æ§ãç¬¬ä¸ï¼ä¸ºæ¬æ¥åå¤§çº²ç¡®ç«äºâæä¾ç»æåæ¨¡æ¿ãåµå\u0085¥å¯æ©å±æ¥å£ãæå¼è¯æ®æ¶éâä¸ä½ä¸ä½çä»·å¼å®ä½ãè¿äºæ¸\u0085æ°ççå®ä¸ºåç»­ç« èæä¾äºæç¡®çé»è¾èµ·ç¹ä¸çº¦ææ¡ä»¶ï¼ç¬¬äºç« å°åºäºæ¬ç« åå®çé£é©èç´ï¼æ·±å\u0085¥æ¢è®¨å¦ä½éæ©ãæå»ºä¸éªè¯å\u0085·ä½çé£é©è¯ä¼°æ¹æ³è®ºä¸ææ ä½ç³»ï¼ç¬¬ä¸ç« å°è¿ç¨è¿äºæ¹æ³è®ºï¼å¯¹ç½ç»å®å\u0085¨ãCBRNãè¯´ææçºµåèªä¸»æ§åå¤§é£é©é¢åè¿è¡éå±æè§£ä¸æ·±åº¦åæï¼ç¬¬åç« åå°éå¯¹è¯å«åºçå\u0085³é®é£é©ç¼ºå£ä¸èå¼±ç¯èï¼è§åç³»ç»æ§çææ¯ä¸ç®¡çé²æ¤æªæ½ï¼ç¬¬äºç« æç»æ´åå\u0085¨é¨è¯ä¼°åç°ï¼å½¢æç»è®ºå¹¶æåºå\u0085·å¯è¡æ§çè¡å¨è·¯çº¿å»ºè®®ãæ´ä¸ªå¤§çº²å èå½¢æä¸ä¸ªä»âé®é¢çå®âå°âæ¹æ³æå»ºâï¼åå°âé£é©åæâãâç¼è§£è§åâç´è³âç»è®ºæ´åâçé­åé»è¾ç¯è·¯ï¼å\u0085¶æææ§ä¸å¯ä¿¡åº¦æ ¹æ¤äºæ¬ç« æå¥ å®çãè¯æ®å¯è¿½æº¯çåå®åºç¡ä¹ä¸ã",
+    "checkpoint_data":  {
+                            "control":  {
+                                            "status":  "active",
+                                            "preview_cache":  {
+
+                                                              },
+                                            "review_scores":  {
+
+                                                              }
+                                        },
+                            "pipeline":  {
+                                             "mode":  "stage_orchestrated",
+                                             "stages":  [
+                                                            {
+                                                                "code":  "SCOPING",
+                                                                "name":  "ä¸»é¢è§£æä¸æ£ç´¢è®¡å"
+                                                            },
+                                                            {
+                                                                "code":  "RESEARCH",
+                                                                "name":  "æ£ç´¢ä¸å»é"
+                                                            },
+                                                            {
+                                                                "code":  "OUTLINE",
+                                                                "name":  "æçº²çæ"
+                                                            },
+                                                            {
+                                                                "code":  "DRAFT",
+                                                                "name":  "åç« èèç¨¿"
+                                                            },
+                                                            {
+                                                                "code":  "REVIEW",
+                                                                "name":  "å¼ç¨ç»å®ä¸ä¸è´æ§"
+                                                            },
+                                                            {
+                                                                "code":  "ASSEMBLY",
+                                                                "name":  "ç»ç¨¿æ¼è£\u0085ä¸æ¶¦è²"
+                                                            },
+                                                            {
+                                                                "code":  "QA",
+                                                                "name":  "è´¨éæ ¡éª"
+                                                            }
+                                                        ],
+                                             "version":  "thinkweave.pipeline.v1",
+                                             "active_stage":  "OUTLINE",
+                                             "execution_graph":  "dag_preserved"
+                                         },
+                            "entry_stage":  "init",
+                            "entry_inputs":  {
+                                                 "has_draft_text":  false,
+                                                 "has_review_comments":  false
+                                             },
+                            "evidence_pool":  {
+                                                  "mode":  "report",
+                                                  "seeds":  {
+                                                                "oa_urls":  [
+                                                                                "https://doaj.org/",
+                                                                                "https://pmc.ncbi.nlm.nih.gov/",
+                                                                                "https://europepmc.org/",
+                                                                                "https://openalex.org/",
+                                                                                "https://arxiv.org/",
+                                                                                "https://zenodo.org/",
+                                                                                "https://hal.science/",
+                                                                                "https://plos.org/"
+                                                                            ],
+                                                                "patent_urls":  [
+                                                                                    "https://patentscope.wipo.int/",
+                                                                                    "https://worldwide.espacenet.com/",
+                                                                                    "https://patents.google.com/",
+                                                                                    "https://www.uspto.gov/patents",
+                                                                                    "https://www.cnipa.gov.cn/",
+                                                                                    "https://depatisnet.dpma.de/"
+                                                                                ],
+                                                                "industry_report_urls":  [
+                                                                                             "https://www.worldbank.org/en/publication",
+                                                                                             "https://www.imf.org/en/Publications",
+                                                                                             "https://www.oecd-ilibrary.org/",
+                                                                                             "https://www.weforum.org/reports/",
+                                                                                             "https://www.mckinsey.com/featured-insights",
+                                                                                             "https://www2.deloitte.com/global/en/insights.html",
+                                                                                             "https://www.pwc.com/gx/en/insights.html",
+                                                                                             "https://www.gartner.com/en/research"
+                                                                                         ]
+                                                            },
+                                                  "summary":  {
+                                                                  "oa":  7,
+                                                                  "other":  6,
+                                                                  "total":  14,
+                                                                  "patent":  0,
+                                                                  "with_url":  14,
+                                                                  "updated_at":  "2026-04-29T14:06:43.136684+00:00"
+                                                              },
+                                                  "markdown":  "# Evidence Pool\n\n- Task ID: `01dad3f3-79a8-4cc6-8447-0409227f8b18`\n- Title: AI??????(OPC)???????:?????????????\n- Updated At: 2026-04-29 14:06:43Z\n- Policy: report_evidence_first\n- Mode: report\n- Research Keywords: OPC, OpenAI, Preparedness, Challenge, çæä¸ä»½ç»æä¸¥è°¨, å¯æ©å±çæ¥åæ ¸å¿, å¤§çº², è¯¥å¤§çº²éä¸¥æ ¼éµå¾ª, å®æ¹é£é©æ¡æ¶, å¹¶æå¯¼å®æä¸ä»½ä»\n\n## Source Seeds\n\n### oa_urls\n- https://doaj.org/\n- https://pmc.ncbi.nlm.nih.gov/\n- https://europepmc.org/\n- https://openalex.org/\n- https://arxiv.org/\n- https://zenodo.org/\n- https://hal.science/\n- https://plos.org/\n\n### patent_urls\n- https://patentscope.wipo.int/\n- https://worldwide.espacenet.com/\n- https://patents.google.com/\n- https://www.uspto.gov/patents\n- https://www.cnipa.gov.cn/\n- https://depatisnet.dpma.de/\n\n### industry_report_urls\n- https://www.worldbank.org/en/publication\n- https://www.imf.org/en/Publications\n- https://www.oecd-ilibrary.org/\n- https://www.weforum.org/reports/\n- https://www.mckinsey.com/featured-insights\n- https://www2.deloitte.com/global/en/insights.html\n- https://www.pwc.com/gx/en/insights.html\n- https://www.gartner.com/en/research\n\n## Pool Summary\n\n- Total Evidence Items: 14\n- With URL: 14\n- OA: 7\n- Patent: 0\n- Industry Report: 1\n- Fiction Reference: 0\n- Other: 6\n\n## Candidate Evidence Ledger\n\n| evidence_id | source_kind | priority | required_source_type | published_at | source_title | source_url | claim_target |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| E1 | other | high | official_report | 2023-12-18 | Preparedness | https://openai.com/index/preparedness | OPCçå®æ¹èæ¯ãæ ¸å¿ç®æ åå\u0085¶å¯¹âç¾é¾æ§é£é©âççå®ã |\n| E2 | other | high | official_report | 2023-05-22 | Governance of Superintelligence | https://cdn.openai.com/papers/frontier-ai-regulation.pdf | OpenAIå¯¹åæ²¿AIæ¨¡åå®å\u0085¨è¯ä¼°çæ¡æ¶æ§è¦æ±ï¼å\u0085æ¬è½åè¯ä¼°ãé£é©è¯ä¼°ç­ç»´åº¦ã |\n| E3 | oa | high | paper | 2022-06-27 | Survey of AI Risk Management Frameworks: A Comprehensive Review | https://arxiv.org/abs/2206.13353 | AIç¾é¾æ§é£é©çå­¦æ¯å®ä¹ãåç±»åç ç©¶ç°ç¶ã |\n| E4 | oa | high | paper | 2022-02-07 | Red Teaming Language Models to Reduce Harms: Methods, Scaling Behaviors, and Les | https://arxiv.org/abs/2202.03286 | çº¢éæµè¯ä½ä¸ºAIç³»ç»é£é©è¯ä¼°æ ¸å¿æ¹æ³è®ºçæææ§ä¸å®æ½æµç¨ã |\n| E5 | oa | medium | paper | 2022-11-16 | Holistic Evaluation of Language Models | https://arxiv.org/abs/2211.09210 | æå»ºAIè½åè¯ä¼°åºåï¼Benchmarksï¼çææä¸ç°æä½ç³»ã |\n| E6 | other | medium | official_report | 2023-09-19 | Anthropic\u0027s Responsible Scaling Policy | https://www.anthropic.com/index/anthropics-responsible-scaling-policy | Anthropicåå¸çAIå®å\u0085¨è¯ä¼°æ¡æ¶ï¼å¯ä½ä¸ºOPCæ¥åæ¹æ³è®ºè®¾è®¡çåèã |\n| E7 | other | high | paper | 2023-12-20 | AI-powered discovery of a novel antibiotic targeting a high-risk pathogen | https://www.science.org/doi/10.1126/science.adk6131 | AIå¨çç©å®å\u0085¨ï¼CBRNï¼é¢åçå\u0085·ä½é£é©åºæ¯ä¸æ¡ä¾ç ç©¶ã |\n| E8 | oa | medium | paper | 2023-08-24 | LLM Agents can Autonomously Hack Websites | https://arxiv.org/abs/2308.12863 | å¤§åè¯­è¨æ¨¡åå¨ç½ç»å®å\u0085¨æ»å»ï¼å¦éé±¼ãæ¼æ´å©ç¨ï¼ä¸­æ»¥ç¨é£é©çå®è¯ç ç©¶ã |\n| E9 | oa | medium | paper | 2023-06-07 | The AI Risk Landscape: A Comprehensive Overview | https://arxiv.org/abs/2306.04723 | AIæ¨¡åèªä¸»æ§ï¼Autonomyï¼é£é©çå®ä¹ãæ½å¨å±å®³åè¯ä¼°æ¹æ³ã |\n| E10 | oa | high | paper | 2022-03-03 | Training language models to follow instructions with human feedback | https://arxiv.org/abs/2203.02155 | AIå¯¹é½ï¼Alignmentï¼ææ¯çç°ç¶ãææä¸ä¸»æµæ¹æ³ï¼å¦RLHFï¼ã |\n| E11 | oa | medium | paper | 2023-03-24 | Watermarking for Large Language Models | https://arxiv.org/abs/2303.14100 | AIç³»ç»çæ§ï¼Monitoringï¼ä¸æº¯æºï¼Attributionï¼çææ¯æ¡æ¶ä¸å®è·µã |\n| E12 | other | high | official_report | 2023-01-26 | Artificial Intelligence Risk Management Framework (AI RMF 1.0) | https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf | NIST AIé£é©ç®¡çæ¡æ¶ï¼RMFï¼ä½ä¸ºç³»ç»æ§å®å\u0085¨æ²»ççæå¨åèã |\n| E13 | other | medium | official_report | 2023-10-26 | Our approach to AI safety | https://deepmind.google/discover/blog/our-approach-to-ai-safety/ | DeepMindå\u0085³äºAIå®å\u0085¨ä¸ä¼¦çè¯ä¼°çå®è·µä¸æ¡æ¶åäº«ã |\n| E14 | industry_report | low | industry_report | 2022-08-15 | Innovation Insight for AI Trust, Risk and Security Management | https://www.gartner.com/en/documents/4018616 | è¡ä¸é¢å\u0085çAIå®å\u0085¨é¨ç½²ä¸è®¿é®æ§å¶æä½³å®è·µã |\n",
+                                                  "file_path":  "C:\\GitHub\\thinkweave\\backend\\artifacts\\evidence_pool\\task_01dad3f3-79a8-4cc6-8447-0409227f8b18.md"
+                                              },
+                            "routing_results":  {
+                                                    "92eeee30-861a-49af-ba18-408073fdd989":  {
+                                                                                                 "updated_at":  "2026-04-29T14:01:43.121305+00:00",
+                                                                                                 "routing_reason":  "role_fallback",
+                                                                                                 "routing_status":  "assigned"
+                                                                                             }
+                                                },
+                            "routing_snapshot":  {
+                                                     "missing_roles":  [
+
+                                                                       ],
+                                                     "required_roles":  [
+                                                                            "consistency",
+                                                                            "outline",
+                                                                            "researcher",
+                                                                            "reviewer",
+                                                                            "writer"
+                                                                        ],
+                                                     "available_roles":  [
+                                                                             "consistency",
+                                                                             "outline",
+                                                                             "researcher",
+                                                                             "reviewer",
+                                                                             "writer"
+                                                                         ],
+                                                     "missing_capabilities":  [
+
+                                                                              ],
+                                                     "strict_bind_failures":  [
+
+                                                                              ],
+                                                     "required_capabilities":  [
+
+                                                                               ],
+                                                     "available_capabilities":  [
+                                                                                    "consistency",
+                                                                                    "evidence",
+                                                                                    "outline",
+                                                                                    "research",
+                                                                                    "retrieval",
+                                                                                    "reviewer",
+                                                                                    "source_policy",
+                                                                                    "writer"
+                                                                                ]
+                                                 },
+                            "node_budget_ledger":  {
+                                                       "92eeee30-861a-49af-ba18-408073fdd989":  {
+                                                                                                    "role":  "outline",
+                                                                                                    "title":  "çææ¥åæ ¸å¿å¤§çº²",
+                                                                                                    "stage_code":  "OUTLINE",
+                                                                                                    "updated_at":  "2026-04-29T14:01:43.062604+00:00",
+                                                                                                    "word_floor":  300,
+                                                                                                    "word_ceiling":  300,
+                                                                                                    "planned_words":  0
+                                                                                                }
+                                                   }
+                        },
+    "nodes":  [
+                  {
+                      "id":  "18e1c354-0822-4b73-8d82-e97e4f7f5c91",
+                      "task_id":  "01dad3f3-79a8-4cc6-8447-0409227f8b18",
+                      "title":  "å\u0085¨æä¸è´æ§ä¸æç»å®¡é\u0085",
+                      "agent_role":  "consistency",
+                      "assigned_agent":  "4a580f08-ad89-4f1b-9559-814c5ccbaa3b",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "21c275b8-05e0-4ebc-ade2-dba8f3ebe51f"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:10:39.063847",
+                      "finished_at":  "2026-04-29T14:11:11.013670",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "ASSEMBLY",
+                      "stage_name":  "ç»ç¨¿æ¼è£\u0085ä¸æ¶¦è²"
+                  },
+                  {
+                      "id":  "21c275b8-05e0-4ebc-ade2-dba8f3ebe51f",
+                      "task_id":  "01dad3f3-79a8-4cc6-8447-0409227f8b18",
+                      "title":  "reviewer_ç¬¬ä¸ç« ",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  "f90ee737-ab44-4474-bf1d-25b38cf4ba75",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "637d41f7-fda6-4dfd-9ae1-f95994e1f815"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:10:02.679550",
+                      "finished_at":  "2026-04-29T14:10:39.031290",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "637d41f7-fda6-4dfd-9ae1-f95994e1f815",
+                      "task_id":  "01dad3f3-79a8-4cc6-8447-0409227f8b18",
+                      "title":  "ç¬¬ä¸ç« ï¼å¼è¨ - OPCä¸AIèåçæ¶ä»£èæ¯ä¸æ¥åç®æ ",
+                      "agent_role":  "writer",
+                      "assigned_agent":  "1a6a0da6-73c4-4ddf-a876-4c75ca5ca9fa",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "8c5081c8-2102-4cc1-8954-072447e88f38"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:06:43.190065",
+                      "finished_at":  "2026-04-29T14:10:02.594643",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "8c5081c8-2102-4cc1-8954-072447e88f38",
+                      "task_id":  "01dad3f3-79a8-4cc6-8447-0409227f8b18",
+                      "title":  "OPCä¸AIèåç ç©¶ï¼æ¶éèæ¯ãææ¯ãæ¡ä¾ä¸è¶å¿",
+                      "agent_role":  "researcher",
+                      "assigned_agent":  "4e787526-7f03-4675-9397-3bd269d44ec2",
+                      "status":  "done",
+                      "depends_on":  [
+                                         "92eeee30-861a-49af-ba18-408073fdd989"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:03:52.000328",
+                      "finished_at":  "2026-04-29T14:06:43.147765",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "RESEARCH",
+                      "stage_name":  "æ£ç´¢ä¸å»é"
+                  },
+                  {
+                      "id":  "92eeee30-861a-49af-ba18-408073fdd989",
+                      "task_id":  "01dad3f3-79a8-4cc6-8447-0409227f8b18",
+                      "title":  "çææ¥åæ ¸å¿å¤§çº²",
+                      "agent_role":  "outline",
+                      "assigned_agent":  "1830be2b-a6a3-4d6e-b678-bbe0412d883d",
+                      "status":  "done",
+                      "depends_on":  [
+
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  "2026-04-29T14:01:43.051191",
+                      "finished_at":  "2026-04-29T14:03:51.935023",
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  "role_fallback",
+                      "routing_status":  "assigned",
+                      "stage_code":  "OUTLINE",
+                      "stage_name":  "æçº²çæ"
+                  }
+              ],
+    "blocking_reason":  null,
+    "node_status_summary":  {
+                                "done":  5
+                            },
+    "stage_progress":  {
+                           "ASSEMBLY":  1,
+                           "REVIEW":  1,
+                           "DRAFT":  1,
+                           "RESEARCH":  1,
+                           "OUTLINE":  1
+                       },
+    "evidence_summary":  {
+                             "total":  0,
+                             "with_source_url":  0,
+                             "unbound_claims":  0
+                         },
+    "citation_summary":  {
+                             "total":  0,
+                             "bound_to_evidence":  0,
+                             "uncertain_or_missing":  0
+                         }
+}

@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import engine
 from app.redis_client import close_redis, redis_client
 from app.services.runtime_bootstrap import (
+    bootstrap_active_task_schedulers,
     bootstrap_runtime_agents,
     shutdown_runtime_agents,
 )
@@ -43,6 +44,12 @@ async def lifespan(app: FastAPI):
         logger.info("Runtime agents bootstrapped: {}", started)
     except Exception:
         logger.opt(exception=True).warning("Runtime agent bootstrap failed")
+
+    try:
+        resumed = await bootstrap_active_task_schedulers()
+        logger.info("Task schedulers resumed: {}", resumed)
+    except Exception:
+        logger.opt(exception=True).warning("Task scheduler bootstrap failed")
 
     yield
 

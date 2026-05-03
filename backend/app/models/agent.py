@@ -20,7 +20,7 @@ class Agent(Base):
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     layer: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     capabilities: Mapped[str | None] = mapped_column(Text, nullable=True)
-    model: Mapped[str] = mapped_column(String(100), default="gpt-4o")
+    model: Mapped[str] = mapped_column(String(100), default="deepseek-v3.2")
     agent_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="idle")
     created_at: Mapped[datetime] = mapped_column(

@@ -1,0 +1,260 @@
+﻿{
+    "id":  "d0fd59d8-0ae2-425f-acfb-4d6cdb9be162",
+    "title":  "??:????????",
+    "mode":  "report",
+    "status":  "failed",
+    "fsm_state":  "failed",
+    "word_count":  0,
+    "depth":  "quick",
+    "target_words":  1800,
+    "error_message":  "DAG deadlock: unreachable nodes",
+    "created_at":  "2026-04-29T13:56:25.766019",
+    "finished_at":  "2026-04-29T13:56:55.039520",
+    "output_text":  null,
+    "checkpoint_data":  {
+                            "control":  {
+                                            "status":  "active",
+                                            "preview_cache":  {
+
+                                                              },
+                                            "review_scores":  {
+
+                                                              }
+                                        },
+                            "pipeline":  {
+                                             "mode":  "stage_orchestrated",
+                                             "stages":  [
+                                                            {
+                                                                "code":  "SCOPING",
+                                                                "name":  "ä¸»é¢è§£æä¸æ£ç´¢è®¡å"
+                                                            },
+                                                            {
+                                                                "code":  "RESEARCH",
+                                                                "name":  "æ£ç´¢ä¸å»é"
+                                                            },
+                                                            {
+                                                                "code":  "OUTLINE",
+                                                                "name":  "æçº²çæ"
+                                                            },
+                                                            {
+                                                                "code":  "DRAFT",
+                                                                "name":  "åç« èèç¨¿"
+                                                            },
+                                                            {
+                                                                "code":  "REVIEW",
+                                                                "name":  "å¼ç¨ç»å®ä¸ä¸è´æ§"
+                                                            },
+                                                            {
+                                                                "code":  "ASSEMBLY",
+                                                                "name":  "ç»ç¨¿æ¼è£\u0085ä¸æ¶¦è²"
+                                                            },
+                                                            {
+                                                                "code":  "QA",
+                                                                "name":  "è´¨éæ ¡éª"
+                                                            }
+                                                        ],
+                                             "version":  "thinkweave.pipeline.v1",
+                                             "active_stage":  "OUTLINE",
+                                             "execution_graph":  "dag_preserved"
+                                         },
+                            "entry_stage":  "init",
+                            "entry_inputs":  {
+                                                 "has_draft_text":  false,
+                                                 "has_review_comments":  false
+                                             },
+                            "routing_results":  {
+                                                    "cb446b98-3f45-4e3a-b8d8-4e90ca82dd90":  {
+                                                                                                 "updated_at":  "2026-04-29T13:56:55.025819+00:00",
+                                                                                                 "routing_reason":  "no_alive_idle_agent",
+                                                                                                 "routing_status":  "pending_match"
+                                                                                             }
+                                                },
+                            "routing_snapshot":  {
+                                                     "missing_roles":  [
+
+                                                                       ],
+                                                     "required_roles":  [
+                                                                            "consistency",
+                                                                            "outline",
+                                                                            "researcher",
+                                                                            "reviewer",
+                                                                            "writer"
+                                                                        ],
+                                                     "available_roles":  [
+                                                                             "consistency",
+                                                                             "outline",
+                                                                             "researcher",
+                                                                             "reviewer",
+                                                                             "writer"
+                                                                         ],
+                                                     "missing_capabilities":  [
+
+                                                                              ],
+                                                     "strict_bind_failures":  [
+
+                                                                              ],
+                                                     "required_capabilities":  [
+
+                                                                               ],
+                                                     "available_capabilities":  [
+                                                                                    "consistency",
+                                                                                    "evidence",
+                                                                                    "outline",
+                                                                                    "research",
+                                                                                    "retrieval",
+                                                                                    "reviewer",
+                                                                                    "source_policy",
+                                                                                    "writer"
+                                                                                ]
+                                                 }
+                        },
+    "nodes":  [
+                  {
+                      "id":  "1c872112-f510-40ed-9487-efb91dd5ca07",
+                      "task_id":  "d0fd59d8-0ae2-425f-acfb-4d6cdb9be162",
+                      "title":  "ç¬¬1ç« å\u0085å®¹å®¡é\u0085ä¸ä¿®æ­£",
+                      "agent_role":  "reviewer",
+                      "assigned_agent":  null,
+                      "status":  "pending",
+                      "depends_on":  [
+                                         "b3e89d9e-7a7d-4473-929c-520485a1f16a"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  null,
+                      "finished_at":  null,
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "REVIEW",
+                      "stage_name":  "å®¡æ¥ä¸ä¸è´æ§åç½®"
+                  },
+                  {
+                      "id":  "b3e89d9e-7a7d-4473-929c-520485a1f16a",
+                      "task_id":  "d0fd59d8-0ae2-425f-acfb-4d6cdb9be162",
+                      "title":  "ç¬¬1ç« ï¼è®®é¢èæ¯ä¸é®é¢ç¼èµ·",
+                      "agent_role":  "writer",
+                      "assigned_agent":  null,
+                      "status":  "pending",
+                      "depends_on":  [
+                                         "dd951033-cf09-4f3d-807c-813fe74ec1f1"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  null,
+                      "finished_at":  null,
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "DRAFT",
+                      "stage_name":  "åç« èèç¨¿"
+                  },
+                  {
+                      "id":  "cb446b98-3f45-4e3a-b8d8-4e90ca82dd90",
+                      "task_id":  "d0fd59d8-0ae2-425f-acfb-4d6cdb9be162",
+                      "title":  "æ¥åæ ¸å¿æ¡æ¶ä¸ç« èè§å",
+                      "agent_role":  "outline",
+                      "assigned_agent":  null,
+                      "status":  "ready",
+                      "depends_on":  [
+
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  null,
+                      "finished_at":  null,
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  "no_alive_idle_agent",
+                      "routing_status":  "pending_match",
+                      "stage_code":  "OUTLINE",
+                      "stage_name":  "æçº²çæ"
+                  },
+                  {
+                      "id":  "d040a758-592e-4066-8f9d-f667d25b4299",
+                      "task_id":  "d0fd59d8-0ae2-425f-acfb-4d6cdb9be162",
+                      "title":  "å\u0085¨ç¯ä¸è´æ§ãé»è¾ä¸é£æ ¼ç»å®¡",
+                      "agent_role":  "consistency",
+                      "assigned_agent":  null,
+                      "status":  "pending",
+                      "depends_on":  [
+                                         "1c872112-f510-40ed-9487-efb91dd5ca07"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  null,
+                      "finished_at":  null,
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "ASSEMBLY",
+                      "stage_name":  "ç»ç¨¿æ¼è£\u0085ä¸æ¶¦è²"
+                  },
+                  {
+                      "id":  "dd951033-cf09-4f3d-807c-813fe74ec1f1",
+                      "task_id":  "d0fd59d8-0ae2-425f-acfb-4d6cdb9be162",
+                      "title":  "æ ¸å¿è®®é¢èæ¯ä¸å\u0085³é®è¯æ®ç ç©¶",
+                      "agent_role":  "researcher",
+                      "assigned_agent":  null,
+                      "status":  "pending",
+                      "depends_on":  [
+                                         "cb446b98-3f45-4e3a-b8d8-4e90ca82dd90"
+                                     ],
+                      "retry_count":  0,
+                      "started_at":  null,
+                      "finished_at":  null,
+                      "required_capabilities":  [
+
+                                                ],
+                      "preferred_agents":  [
+
+                                           ],
+                      "routing_mode":  "auto",
+                      "routing_reason":  null,
+                      "routing_status":  null,
+                      "stage_code":  "RESEARCH",
+                      "stage_name":  "æ£ç´¢ä¸å»é"
+                  }
+              ],
+    "blocking_reason":  null,
+    "node_status_summary":  {
+                                "pending":  4,
+                                "ready":  1
+                            },
+    "stage_progress":  {
+                           "REVIEW":  1,
+                           "DRAFT":  1,
+                           "OUTLINE":  1,
+                           "ASSEMBLY":  1,
+                           "RESEARCH":  1
+                       },
+    "evidence_summary":  {
+                             "total":  0,
+                             "with_source_url":  0,
+                             "unbound_claims":  0
+                         },
+    "citation_summary":  {
+                             "total":  0,
+                             "bound_to_evidence":  0,
+                             "uncertain_or_missing":  0
+                         }
+}

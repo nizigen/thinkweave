@@ -1,0 +1,28 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - heading "ThinkWeave" [level=1] [ref=e5]
+    - navigation [ref=e6]:
+      - link "任务创建" [ref=e7] [cursor=pointer]:
+        - /url: /
+      - link "Agent 管理" [ref=e8] [cursor=pointer]:
+        - /url: /agents
+      - link "历史任务" [ref=e9] [cursor=pointer]:
+        - /url: /history
+  - main [ref=e10]:
+    - generic [ref=e11]:
+      - heading "新建任务" [level=2] [ref=e12]
+      - generic [ref=e13]: 标题
+      - textbox "输入主题标题" [ref=e14]: playwright短任务落盘验证-终稿地址
+      - generic [ref=e15]: 模式
+      - combobox [ref=e16]:
+        - option "report" [selected]
+        - option "novel"
+        - option "custom"
+      - generic [ref=e17]: 深度
+      - combobox [ref=e18]:
+        - option "quick" [selected]
+        - option "standard"
+        - option "deep"
+      - generic [ref=e19]: 目标字数
+      - spinbutton [ref=e20]: "800"
+      - button "创建中..." [disabled] [ref=e23] [cursor=pointer]
