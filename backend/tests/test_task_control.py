@@ -81,6 +81,8 @@ def test_resume_only_allowed_for_paused_control_state() -> None:
 def test_resume_rejected_for_terminal_task_even_if_paused() -> None:
     with pytest.raises(TaskControlError):
         ensure_resume_allowed(_build_task(status="done", control_status="paused"))
+    with pytest.raises(TaskControlError):
+        ensure_resume_allowed(_build_task(status="completed", control_status="paused"))
 
 
 def test_skip_requires_node_id() -> None:
@@ -571,6 +573,27 @@ async def test_retry_node_rejects_terminal_task_status() -> None:
             )
 
 
+@pytest.mark.asyncio
+async def test_retry_node_rejects_completed_task_status() -> None:
+    task_id = uuid.uuid4()
+    node = _build_node("failed")
+    task = SimpleNamespace(status="completed", checkpoint_data={"control": {"status": "active"}})
+    session = AsyncMock()
+
+    with (
+        patch("app.services.task_control._get_visible_task", new=AsyncMock(return_value=task)),
+        patch("app.services.task_control._load_task_nodes", new=AsyncMock(return_value=[node])),
+    ):
+        with pytest.raises(TaskControlError, match="retry not allowed for task status 'completed'"):
+            await retry_node(
+                session,
+                task_id,
+                node_id=node.id,
+                user_id="user-1",
+                is_admin=False,
+            )
+
+
 def test_skip_and_retry_public_contract_are_task_scoped_async_handlers() -> None:
     assert inspect.iscoroutinefunction(skip_node)
     assert inspect.iscoroutinefunction(retry_node)
@@ -647,6 +670,36 @@ async def test_admin_resume_from_checkpoint_sets_control_active() -> None:
             session,
             task_id,
             reason="resume after fix",
+            user_id="admin-user",
+            is_admin=True,
+        )
+
+    assert detail["status"] == "pending"
+    assert task.checkpoint_data["control"]["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_admin_resume_from_checkpoint_reopens_completed_task() -> None:
+    task_id = uuid.uuid4()
+    task = SimpleNamespace(status="completed", checkpoint_data={"control": {"status": "paused"}})
+    session = AsyncMock()
+    communicator = MagicMock()
+    communicator.send_task_event = AsyncMock()
+    communicator.send_status_update = AsyncMock()
+
+    with (
+        patch("app.services.task_control._get_visible_task", new=AsyncMock(return_value=task)),
+        patch(
+            "app.services.task_control._commit_and_refresh_detail",
+            new=AsyncMock(return_value={"id": str(task_id), "status": "pending"}),
+        ),
+        patch("app.services.task_control.get_scheduler", return_value=None, create=True),
+        patch("app.services.task_control.communicator", communicator, create=True),
+    ):
+        detail = await admin_resume_from_checkpoint(
+            session,
+            task_id,
+            reason="resume completed task for manual rerun",
             user_id="admin-user",
             is_admin=True,
         )

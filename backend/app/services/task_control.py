@@ -24,6 +24,7 @@ from app.utils.logger import logger
 PAUSABLE_TASK_STATUSES = {"pending", "running"}
 SKIPPABLE_NODE_STATUSES = {"pending", "ready", "running"}
 RETRYABLE_NODE_STATUSES = {"failed", "skipped"}
+TERMINAL_TASK_STATUSES = {"done", "completed", "failed", "cancelled", "canceled"}
 
 
 class TaskControlError(Exception):
@@ -81,7 +82,7 @@ def ensure_resume_allowed(task: Any) -> None:
 
 def _ensure_task_not_terminal(task: Any, *, action: str) -> None:
     status = str(getattr(task, "status", "") or "")
-    if status in {"done", "failed"}:
+    if status in TERMINAL_TASK_STATUSES:
         raise TaskControlError(f"{action} not allowed for task status '{status}'")
 
 
@@ -655,7 +656,7 @@ async def admin_resume_from_checkpoint(
         is_admin=is_admin,
     )
     control = _merge_control_update(task, status="active", command_type="resume_from_checkpoint")
-    if str(getattr(task, "status", "") or "") in {"failed", "done"}:
+    if str(getattr(task, "status", "") or "") in TERMINAL_TASK_STATUSES:
         task.status = "pending"
     detail = await _commit_and_refresh_detail(
         session,

@@ -518,7 +518,12 @@ async def test_ws_replays_events_from_last_event_id_before_activation():
 
     assert sent_payloads[0]["type"] == "connected"
     assert sent_payloads[1]["type"] == "state_transition"
-    mock_bridge.replay_events.assert_awaited_once_with(task_id, start_from_id="9-0")
+    mock_bridge.replay_events.assert_awaited_once_with(
+        task_id,
+        start_from_id="9-0",
+        max_messages=200,
+    )
+    mock_bridge.ensure_started.assert_awaited_once_with(task_id, start_from_id="10-0")
 
 
 @pytest.mark.asyncio
@@ -566,4 +571,8 @@ async def test_ws_replay_command_uses_last_acked_event_id():
 
         await websocket_task(task_id, websocket, token="test")
 
-    mock_bridge.replay_events.assert_awaited_once_with(task_id, start_from_id="15-0")
+    mock_bridge.replay_events.assert_awaited_once_with(
+        task_id,
+        start_from_id="15-0",
+        max_messages=200,
+    )

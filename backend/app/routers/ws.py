@@ -25,6 +25,8 @@ router = APIRouter(tags=["websocket"])
 MAX_WS_MESSAGE_SIZE = 1024  # 1 KB — pong messages are tiny
 MONITOR_CONTRACT_VERSION = "stage-observability-v1"
 STREAM_ID_PATTERN = re.compile(r"^\d+-\d+$")
+REPLAY_BATCH_SIZE = 200
+REPLAY_MAX_EVENTS = 5000
 
 
 async def get_task_exists(task_id: str, session: AsyncSession) -> Task | None:
@@ -119,6 +121,32 @@ async def get_task_event_cursor(task_id: str) -> str:
     return await get_latest_stream_id(task_events_key(task_id))
 
 
+async def _replay_from_cursor(task_id: str, websocket: WebSocket, start_cursor: str) -> str:
+    cursor = str(start_cursor or "").strip()
+    if not _is_valid_stream_id(cursor):
+        return cursor
+
+    replayed = 0
+    while replayed < REPLAY_MAX_EVENTS:
+        batch = min(REPLAY_BATCH_SIZE, REPLAY_MAX_EVENTS - replayed)
+        replay_events = await event_bridge.replay_events(
+            task_id,
+            start_from_id=cursor,
+            max_messages=batch,
+        )
+        if not replay_events:
+            break
+        for replay_event in replay_events:
+            await websocket.send_text(json.dumps(replay_event, ensure_ascii=False))
+        replayed += len(replay_events)
+        last_event_id = str(replay_events[-1].get("event_id") or "").strip()
+        if _is_valid_stream_id(last_event_id):
+            cursor = last_event_id
+        if len(replay_events) < batch:
+            break
+    return cursor
+
+
 @router.websocket("/ws/task/{task_id}")
 async def websocket_task(
     task_id: str,
@@ -211,16 +239,11 @@ async def websocket_task(
             )
         )
         if last_acked_event_id:
-            replay_events = await event_bridge.replay_events(
+            start_from_id = await _replay_from_cursor(
                 task_id,
-                start_from_id=last_acked_event_id,
+                websocket,
+                last_acked_event_id,
             )
-            for replay_event in replay_events:
-                await websocket.send_text(json.dumps(replay_event, ensure_ascii=False))
-            try:
-                start_from_id = await get_task_event_cursor(task_id)
-            except Exception:
-                start_from_id = "$"
         ws_manager.activate(task_id, websocket)
         await event_bridge.ensure_started(task_id, start_from_id=start_from_id)
         heartbeat_task = asyncio.create_task(
@@ -248,12 +271,11 @@ async def websocket_task(
                 replay_cursor = str(msg.get("last_event_id") or "").strip() or last_acked_event_id
                 if not _is_valid_stream_id(replay_cursor):
                     continue
-                replay_events = await event_bridge.replay_events(
+                await _replay_from_cursor(
                     task_id,
-                    start_from_id=replay_cursor,
+                    websocket,
+                    replay_cursor,
                 )
-                for replay_event in replay_events:
-                    await websocket.send_text(json.dumps(replay_event, ensure_ascii=False))
     except WebSocketDisconnect:
         log.info("WS client disconnected")
     finally:
