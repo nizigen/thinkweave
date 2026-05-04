@@ -49,11 +49,11 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
         supports_streaming=True,
         supports_json_mode=True,
         max_tokens=8192,
-        fallback="deepseek-v3.2",
+        fallback=None,
     ),
     "deepseek-v3.2": ModelConfig(
         provider="deepseek",
-        model="deepseek/deepseek-v3.2",
+        model="deepseek/deepseek-v4-flash",
         supports_streaming=True,
         supports_json_mode=True,
         max_tokens=8192,
@@ -61,7 +61,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     ),
     "deepseek-chat": ModelConfig(
         provider="deepseek",
-        model="deepseek/deepseek-v3.2",
+        model="deepseek/deepseek-v4-flash",
         supports_streaming=True,
         supports_json_mode=True,
         max_tokens=8192,
