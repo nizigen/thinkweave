@@ -41,6 +41,7 @@
 2. 证据绑定：
    - 核心论断必须进入 evidence_trace。
    - citation_ledger 对每个关键陈述给出 support（evidence_id 或 uncertainty）。
+   - 市场/商业/技术类宏观主张必须绑定 evidence_id；无法绑定时，正文和映射中都写 `@evidence[MISSING: reason]`。
 3. 段落质量：
    - 每段一个主论点，必须有推进关系。
    - 相邻段不能重复同一论点，只换表述。
@@ -86,6 +87,10 @@
   "evidence_trace": [
     {{"claim": "关键论断", "evidence_ids": ["E1", "E2"]}}
   ],
+  "claim_evidence_map": [
+    {{"claim": "宏观主张", "evidence_ids": ["E1"], "support_status": "supported|missing"}}
+  ],
+  "missing_evidence_items": ["缺失证据描述，含 @evidence[MISSING: reason]"],
   "boundary_notes": ["章节边界提醒"],
   "citation_ledger": [
     {{"statement": "重要陈述", "support": "evidence_id 或 uncertainty", "source_url": "https://... (可空)"}}
@@ -97,5 +102,5 @@
 1. JSON 字段齐全且类型正确（重点检查 `heading + paragraphs`）。
 2. paragraphs 总体篇幅达到目标预期（接近 node_target_words，若为空则接近 target_words）。
 3. 未出现三级标题。
-4. evidence_trace 与 citation_ledger 非空且可追踪。
+4. evidence_trace、claim_evidence_map 与 citation_ledger 非空且可追踪。
 5. 无编造来源、无流程泄漏、无明显模板腔。

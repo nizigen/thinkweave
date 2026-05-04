@@ -4,8 +4,11 @@ import uuid
 
 from app.services.evidence_pool import (
     classify_source_url,
+    evidence_category_coverage,
     evidence_pool_markdown,
+    infer_required_category,
     normalize_evidence_ledger,
+    required_evidence_categories,
 )
 
 
@@ -61,3 +64,51 @@ def test_evidence_pool_markdown_contains_seed_sections_and_table():
     assert "### industry_report_urls" in md
     assert "| evidence_id | source_kind |" in md
     assert "E2" in md
+    assert "## Required Evidence Categories" in md
+
+
+def test_required_evidence_categories_for_report_mode():
+    categories = required_evidence_categories(mode="report", topic="opc ua")
+    assert categories == [
+        "market_data",
+        "technical_specs",
+        "case_studies",
+        "counterexamples",
+        "implementation_costs",
+    ]
+
+
+def test_infer_required_category_from_claim_target():
+    category = infer_required_category(
+        claim_target="市场规模和增速测算",
+        required_source_type="industry_report",
+        source_kind="industry_report",
+        source_title="Global market report",
+    )
+    assert category == "market_data"
+
+
+def test_evidence_category_coverage_reports_missing_categories():
+    coverage = evidence_category_coverage(
+        evidence_items=[
+            {
+                "evidence_id": "E1",
+                "claim_target": "行业市场规模",
+                "required_source_type": "industry_report",
+                "source_kind": "industry_report",
+                "source_title": "Market size",
+                "required_category": "market_data",
+            },
+            {
+                "evidence_id": "E2",
+                "claim_target": "标准协议参数",
+                "required_source_type": "paper",
+                "source_kind": "oa",
+                "source_title": "Technical specs",
+                "required_category": "technical_specs",
+            },
+        ],
+        required_categories=required_evidence_categories(mode="report", topic="opc ua"),
+    )
+    assert coverage["is_ready_for_writing"] is False
+    assert "case_studies" in coverage["missing_categories"]

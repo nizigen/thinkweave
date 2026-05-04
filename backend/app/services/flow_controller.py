@@ -14,15 +14,16 @@ FSM_STAGE_ORDER: dict[str, int] = {
     "init": 0,
     "outline": 1,
     "outline_review": 2,
-    "writing": 3,
-    "pre_review_integrity": 4,
-    "reviewing": 5,
-    "re_review": 6,
-    "re_revise": 7,
-    "consistency": 8,
-    "final_integrity": 9,
-    "done": 10,
-    "failed": 10,
+    "premise_gate": 3,
+    "writing": 4,
+    "pre_review_integrity": 5,
+    "reviewing": 6,
+    "re_review": 7,
+    "re_revise": 8,
+    "consistency": 9,
+    "final_integrity": 10,
+    "done": 11,
+    "failed": 11,
 }
 
 ROLE_TO_FSM_STAGE: dict[str, str] = {
@@ -58,6 +59,9 @@ class FlowController:
             return False
 
         current = str(getattr(task, "fsm_state", "") or "init").strip().lower()
+        if current == "outline_review" and target_stage == "writing":
+            # Enforce premise gate before any path can reach writing.
+            target_stage = "premise_gate"
         current_order = FSM_STAGE_ORDER.get(current, 0)
         target_order = FSM_STAGE_ORDER.get(target_stage, 0)
         if target_order <= current_order:

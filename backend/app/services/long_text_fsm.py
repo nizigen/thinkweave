@@ -31,6 +31,7 @@ class LongTextState(str, Enum):
     INIT = "init"
     OUTLINE = "outline"
     OUTLINE_REVIEW = "outline_review"
+    PREMISE_GATE = "premise_gate"
     WRITING = "writing"
     PRE_REVIEW_INTEGRITY = "pre_review_integrity"
     REVIEWING = "reviewing"
@@ -62,7 +63,8 @@ class CheckpointPolicy(str, Enum):
 TRANSITIONS: dict[str, tuple[str, ...]] = {
     "init": ("outline", "failed"),
     "outline": ("outline_review", "failed"),
-    "outline_review": ("writing", "failed"),
+    "outline_review": ("premise_gate", "failed"),
+    "premise_gate": ("writing", "outline", "failed"),
     "writing": ("pre_review_integrity", "failed"),
     "pre_review_integrity": ("reviewing", "re_revise", "failed"),
     "reviewing": ("re_review", "consistency", "failed"),
@@ -81,6 +83,7 @@ TRANSITIONS: dict[str, tuple[str, ...]] = {
 MAX_REVIEW_RETRIES = 3
 MAX_CONSISTENCY_RETRIES = 2
 REVIEW_PASS_THRESHOLD = 70
+PREMISE_GATE_MAX_PRIMARY_CHAPTERS_DEFAULT = 3
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +191,12 @@ class LongTextFSM:
             raise InvalidTransitionError(self._state, target)
 
         # Guardrails for mandatory quality gates.
+        if (
+            self._state is LongTextState.PREMISE_GATE
+            and target is LongTextState.WRITING
+            and gate_passed is not True
+        ):
+            raise TransitionGuardError(self._state, target)
         if (
             self._state is LongTextState.PRE_REVIEW_INTEGRITY
             and target is LongTextState.REVIEWING
@@ -375,6 +384,71 @@ class LongTextFSM:
         han_count = len(re.findall(r"[\u4e00-\u9fff]", prose))
         latin_count = len(re.findall(r"[a-zA-Z]+", prose))
         return han_count + latin_count
+
+    @staticmethod
+    def evaluate_premise_gate(
+        outline_content: str,
+        *,
+        max_primary_chapters: int = PREMISE_GATE_MAX_PRIMARY_CHAPTERS_DEFAULT,
+    ) -> dict[str, Any]:
+        """Evaluate whether outline is focused enough to enter WRITING."""
+        parsed = LongTextFSM._extract_outline_contract(outline_content)
+        core_thesis = str(parsed.get("core_thesis") or "").strip()
+        chapters = parsed.get("primary_chapters")
+        chapter_rows = chapters if isinstance(chapters, list) else []
+        contribution_missing: list[int] = []
+        for idx, chapter in enumerate(chapter_rows, start=1):
+            if not isinstance(chapter, dict):
+                contribution_missing.append(idx)
+                continue
+            contribution = str(
+                chapter.get("thesis_contribution")
+                or chapter.get("contribution")
+                or ""
+            ).strip()
+            if not contribution:
+                contribution_missing.append(idx)
+
+        issues: list[str] = []
+        if not core_thesis:
+            issues.append("missing_core_thesis")
+        if not chapter_rows:
+            issues.append("missing_primary_chapters")
+        if len(chapter_rows) > int(max_primary_chapters):
+            issues.append("primary_chapters_exceed_limit")
+        if contribution_missing:
+            issues.append("missing_thesis_contribution")
+
+        return {
+            "passed": not issues,
+            "issues": issues,
+            "core_thesis": core_thesis,
+            "primary_chapter_count": len(chapter_rows),
+            "missing_contribution_indexes": contribution_missing,
+            "max_primary_chapters": int(max_primary_chapters),
+        }
+
+    @staticmethod
+    def _extract_outline_contract(outline_content: str) -> dict[str, Any]:
+        text = str(outline_content or "").strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        fenced = re.search(r"```json\s*([\s\S]*?)```", text, flags=re.IGNORECASE)
+        if fenced:
+            try:
+                parsed = json.loads(fenced.group(1).strip())
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+        return {}
 
     async def checkpoint(
         self,

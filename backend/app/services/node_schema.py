@@ -131,6 +131,19 @@ def _coerce_reviewer_output(content: str) -> str:
             _normalize_int(parsed.get("boundary_compliance_score"), 0)
         ),
         "non_overlap_score": _clamp_score(_normalize_int(parsed.get("non_overlap_score"), 0)),
+        "source_policy_compliance_score": _clamp_score(
+            _normalize_int(parsed.get("source_policy_compliance_score"), 0)
+        ),
+        "specificity_score": _clamp_score(_normalize_int(parsed.get("specificity_score"), 0)),
+        "source_attribution_score": _clamp_score(
+            _normalize_int(parsed.get("source_attribution_score"), 0)
+        ),
+        "unsupported_claims": parsed.get("unsupported_claims")
+        if isinstance(parsed.get("unsupported_claims"), list)
+        else [],
+        "missing_sources": parsed.get("missing_sources")
+        if isinstance(parsed.get("missing_sources"), list)
+        else [],
         "strongest_counterargument": str(parsed.get("strongest_counterargument") or "").strip(),
     }
     return json.dumps(payload, ensure_ascii=False)

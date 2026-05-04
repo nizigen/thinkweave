@@ -16,12 +16,15 @@ def test_parse_writer_payload_accepts_valid_json():
         "content_markdown": "## 小节\n正文内容",
         "key_points": ["a", "b"],
         "evidence_trace": [{"claim": "c1", "evidence_ids": ["e1"]}],
+        "claim_evidence_map": [{"claim": "c1", "evidence_ids": ["e1"]}],
+        "missing_evidence_items": [],
         "boundary_notes": ["n1"],
     }
     parsed = parse_writer_payload(json.dumps(payload, ensure_ascii=False))
     assert parsed is not None
     assert parsed["chapter_title"] == "第1章"
     assert parsed["content_markdown"].startswith("## 小节")
+    assert parsed["claim_evidence_map"][0]["support_status"] == "supported"
 
 
 def test_parse_writer_payload_rejects_missing_content():
@@ -51,6 +54,8 @@ def test_make_fallback_writer_payload():
     assert payload is not None
     assert payload["chapter_title"] == "第3章"
     assert payload["content_markdown"] == "正文"
+    assert payload["claim_evidence_map"] == []
+    assert payload["missing_evidence_items"] == []
 
 
 def test_parse_writer_payload_keeps_citation_ledger():

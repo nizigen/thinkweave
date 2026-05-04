@@ -259,9 +259,20 @@ class TestOutlineConfirmFlow:
     ):
         """确认大纲后任务状态更新，大纲 confirmed=True"""
         task = await _create_task(client, REPORT_PAYLOAD)
-        outline_content = "# 大纲\n## 第一章\n## 第二章"
+        outline_content = (
+            '{"core_thesis":"通过证据驱动降低系统性风险。",'
+            '"primary_chapters":[{"chapter_title":"第1章","thesis_contribution":"定义风险"},'
+            '{"chapter_title":"第2章","thesis_contribution":"证据与机制"},'
+            '{"chapter_title":"第3章","thesis_contribution":"实施与约束"}]}'
+        )
         await _simulate_outline_ready(db_session, task["id"], outline_content)
-        new_content = "# 修改大纲\n## 第一章 引言\n## 第二章 核心内容\n## 第三章 总结"
+        new_content = (
+            '{"core_thesis":"通过证据驱动降低系统性风险。",'
+            '"primary_chapters":[{"chapter_title":"第1章：问题界定","thesis_contribution":"定义目标与边界"},'
+            '{"chapter_title":"第2章：证据与机制","thesis_contribution":"展示支持性证据"},'
+            '{"chapter_title":"第3章：落地路径","thesis_contribution":"给出实施约束与路径"}],'
+            '"optional_chapters":[]}'
+        )
         resp = await client.post(
             f"/api/tasks/{task['id']}/outline/confirm",
             json={"content": new_content},

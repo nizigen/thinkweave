@@ -24,7 +24,7 @@ def test_consistency_check_claims_prompt_contract():
             "verified|weak|unverifiable",
             '"claims": [',
             '"status": "verified|weak|unverifiable"',
-            "默认正文语言为简体中文",
+            "默认中文表述",
         ],
     )
 
@@ -49,7 +49,72 @@ def test_reviewer_prompt_contract():
     )
     _assert_contains_all(
         content,
-        ['"must_fix": [', '"strongest_counterargument":', "score >= 70"],
+        [
+            '"must_fix": [',
+            '"strongest_counterargument":',
+            "score >= 72",
+            '"specificity_score":',
+            '"source_attribution_score":',
+            '"unsupported_claims":',
+            '"missing_sources":',
+        ],
+    )
+
+
+def test_outline_prompt_contract_requires_premise_gate_fields():
+    loader = PromptLoader()
+    content = loader.load(
+        "outline",
+        "generate",
+        title="topic",
+        mode="report",
+        depth="standard",
+        target_words=10000,
+        draft_text="",
+        review_comments="",
+        style_requirements="",
+        source_policy="",
+        research_keywords="",
+        evidence_pool_summary="",
+        evidence_pool_markdown="",
+    )
+    _assert_contains_all(
+        content,
+        ["core_thesis", "primary_chapters", "optional_chapters", "thesis_contribution"],
+    )
+
+
+def test_writer_prompt_contract_requires_claim_evidence_mapping():
+    loader = PromptLoader()
+    content = loader.load(
+        "writer",
+        "write_chapter",
+        chapter_index="1",
+        chapter_title="Chapter",
+        stage_code="DRAFT",
+        schema_version="v2",
+        stage_contract="",
+        full_outline="",
+        chapter_description="",
+        context_bridges="",
+        memory_context="",
+        topic_claims="",
+        assigned_evidence="",
+        source_policy="",
+        research_protocol="",
+        research_keywords="",
+        evidence_pool_summary="",
+        evidence_pool_markdown="",
+        target_words="1200",
+        task_target_words="10000",
+        node_target_words="1200",
+        is_assembly_editor="false",
+        title_level_rule="<=2",
+        evidence_rule="strict",
+    )
+    _assert_contains_all(
+        content,
+        ["claim_evidence_map", "missing_evidence_items", "@evidence[MISSING:"],
     )
 
 

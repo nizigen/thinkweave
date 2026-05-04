@@ -49,6 +49,22 @@ _FICTION_REFERENCE_SEED_URLS = [
     "https://www.poetryfoundation.org/",
 ]
 
+_REPORT_REQUIRED_EVIDENCE_CATEGORIES = [
+    "market_data",
+    "technical_specs",
+    "case_studies",
+    "counterexamples",
+    "implementation_costs",
+]
+
+_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "market_data": ("market", "tam", "sam", "som", "市场", "规模", "需求", "增速", "adoption"),
+    "technical_specs": ("spec", "standard", "patent", "protocol", "技术", "标准", "参数", "性能"),
+    "case_studies": ("case", "deployment", "implementation", "应用", "案例", "落地", "试点"),
+    "counterexamples": ("counter", "limitation", "failure", "risk", "反例", "失败", "局限", "风险"),
+    "implementation_costs": ("cost", "budget", "tco", "roi", "opex", "capex", "成本", "预算", "收益"),
+}
+
 
 def _normalize_mode(mode: str | None) -> str:
     return str(mode or "").strip().lower()
@@ -127,9 +143,96 @@ def normalize_evidence_ledger(raw: Any) -> list[dict[str, str]]:
                 "required_source_type": required_source_type,
                 "priority": priority,
                 "source_kind": classify_source_url(source_url),
+                "required_category": infer_required_category(
+                    claim_target=claim_target,
+                    required_source_type=required_source_type,
+                    source_kind=classify_source_url(source_url),
+                    source_title=source_title,
+                ),
             }
         )
     return out
+
+
+def required_evidence_categories(*, mode: str | None, topic: str = "") -> list[str]:
+    normalized_mode = _normalize_mode(mode)
+    if normalized_mode != "report":
+        return []
+    _ = str(topic or "").strip().lower()
+    return list(_REPORT_REQUIRED_EVIDENCE_CATEGORIES)
+
+
+def infer_required_category(
+    *,
+    claim_target: str = "",
+    required_source_type: str = "",
+    source_kind: str = "",
+    source_title: str = "",
+) -> str:
+    text = " ".join(
+        [
+            str(claim_target or ""),
+            str(required_source_type or ""),
+            str(source_kind or ""),
+            str(source_title or ""),
+        ]
+    ).lower()
+    if not text.strip():
+        return "unclassified"
+
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        if any(keyword in text for keyword in keywords):
+            return category
+    return "unclassified"
+
+
+def evidence_category_coverage(
+    *,
+    evidence_items: list[dict[str, str]],
+    required_categories: list[str],
+) -> dict[str, Any]:
+    required = [str(item).strip() for item in required_categories if str(item).strip()]
+    counts = {category: 0 for category in required}
+    unclassified = 0
+    for item in evidence_items:
+        category = str(item.get("required_category") or "").strip()
+        if not category:
+            category = infer_required_category(
+                claim_target=str(item.get("claim_target") or ""),
+                required_source_type=str(item.get("required_source_type") or ""),
+                source_kind=str(item.get("source_kind") or ""),
+                source_title=str(item.get("source_title") or ""),
+            )
+        if category in counts:
+            counts[category] += 1
+        else:
+            unclassified += 1
+    missing = [category for category in required if counts.get(category, 0) <= 0]
+    return {
+        "required_categories": required,
+        "category_counts": counts,
+        "missing_categories": missing,
+        "is_ready_for_writing": len(missing) == 0,
+        "unclassified_items": unclassified,
+    }
+
+
+def evidence_pool_summary(
+    *,
+    title: str,
+    mode: str | None,
+    evidence_items: list[dict[str, str]],
+) -> dict[str, Any]:
+    required = required_evidence_categories(mode=mode, topic=title)
+    coverage = evidence_category_coverage(
+        evidence_items=evidence_items,
+        required_categories=required,
+    )
+    base_counts = evidence_pool_counts(evidence_items)
+    return {
+        **base_counts,
+        **coverage,
+    }
 
 
 def evidence_pool_counts(items: list[dict[str, str]]) -> dict[str, int]:
@@ -171,6 +274,11 @@ def evidence_pool_markdown(
     mode: str | None = None,
 ) -> str:
     counts = evidence_pool_counts(evidence_items)
+    required_categories = required_evidence_categories(mode=mode, topic=title)
+    coverage = evidence_category_coverage(
+        evidence_items=evidence_items,
+        required_categories=required_categories,
+    )
     seeds = evidence_pool_seeds(mode=mode)
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
     keyword_line = ", ".join(str(k).strip() for k in (research_keywords or []) if str(k).strip())
@@ -205,19 +313,26 @@ def evidence_pool_markdown(
             f"- Fiction Reference: {counts['fiction_reference']}",
             f"- Other: {counts['other']}",
             "",
+            "## Required Evidence Categories",
+            "",
+            f"- Required: {', '.join(required_categories) if required_categories else 'n/a'}",
+            f"- Missing: {', '.join(coverage['missing_categories']) if coverage['missing_categories'] else 'none'}",
+            f"- Ready For Writing: {'yes' if coverage['is_ready_for_writing'] else 'no'}",
+            "",
             "## Candidate Evidence Ledger",
             "",
-            "| evidence_id | source_kind | priority | required_source_type | published_at | source_title | source_url | claim_target |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| evidence_id | source_kind | required_category | priority | required_source_type | published_at | source_title | source_url | claim_target |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for item in evidence_items:
         claim = re.sub(r"\s+", " ", str(item.get("claim_target") or "").strip())[:120]
         title_text = re.sub(r"\s+", " ", str(item.get("source_title") or "").strip())[:80]
         lines.append(
-            "| {evidence_id} | {source_kind} | {priority} | {required_source_type} | {published_at} | {source_title} | {source_url} | {claim_target} |".format(
+            "| {evidence_id} | {source_kind} | {required_category} | {priority} | {required_source_type} | {published_at} | {source_title} | {source_url} | {claim_target} |".format(
                 evidence_id=item.get("evidence_id", ""),
                 source_kind=item.get("source_kind", "other"),
+                required_category=item.get("required_category", "unclassified"),
                 priority=item.get("priority", ""),
                 required_source_type=item.get("required_source_type", ""),
                 published_at=item.get("published_at", ""),
@@ -227,7 +342,7 @@ def evidence_pool_markdown(
             )
         )
     if not evidence_items:
-        lines.append("| - | - | - | - | - | - | - | - |")
+        lines.append("| - | - | - | - | - | - | - | - | - |")
     return "\n".join(lines).strip() + "\n"
 
 

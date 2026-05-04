@@ -86,6 +86,28 @@ def _normalize_string_list(raw: Any) -> list[str]:
     return out
 
 
+def _normalize_claim_evidence_map(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        claim = str(item.get("claim") or "").strip()
+        evidence_ids = _normalize_string_list(item.get("evidence_ids"))
+        support_status = str(item.get("support_status") or "").strip()
+        if not claim and not evidence_ids:
+            continue
+        out.append(
+            {
+                "claim": claim,
+                "evidence_ids": evidence_ids,
+                "support_status": support_status or ("supported" if evidence_ids else "missing"),
+            }
+        )
+    return out
+
+
 def _split_markdown_paragraphs(markdown: str) -> list[str]:
     text = str(markdown or "").strip()
     if not text:
@@ -210,6 +232,9 @@ def parse_writer_payload(text: str) -> dict[str, Any] | None:
                 }
             )
 
+    claim_evidence_map = _normalize_claim_evidence_map(parsed.get("claim_evidence_map"))
+    missing_evidence_items = _normalize_string_list(parsed.get("missing_evidence_items"))
+
     return {
         "chapter_title": heading,
         "heading": heading,
@@ -217,6 +242,8 @@ def parse_writer_payload(text: str) -> dict[str, Any] | None:
         "content_markdown": content_markdown,
         "key_points": key_points,
         "evidence_trace": evidence_trace,
+        "claim_evidence_map": claim_evidence_map,
+        "missing_evidence_items": missing_evidence_items,
         "boundary_notes": boundary_notes,
         "citation_ledger": citation_ledger,
     }
@@ -365,6 +392,8 @@ def make_fallback_writer_payload(*, chapter_title: str, content_markdown: str) -
         "content_markdown": markdown,
         "key_points": [],
         "evidence_trace": [],
+        "claim_evidence_map": [],
+        "missing_evidence_items": [],
         "boundary_notes": [],
         "citation_ledger": [],
     }
@@ -390,6 +419,8 @@ def serialize_writer_payload(payload: dict[str, Any]) -> str:
         "content_markdown": content,
         "key_points": _normalize_string_list(payload.get("key_points")),
         "evidence_trace": payload.get("evidence_trace") if isinstance(payload.get("evidence_trace"), list) else [],
+        "claim_evidence_map": _normalize_claim_evidence_map(payload.get("claim_evidence_map")),
+        "missing_evidence_items": _normalize_string_list(payload.get("missing_evidence_items")),
         "boundary_notes": _normalize_string_list(payload.get("boundary_notes")),
         "citation_ledger": payload.get("citation_ledger") if isinstance(payload.get("citation_ledger"), list) else [],
     }

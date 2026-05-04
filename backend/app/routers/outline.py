@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.models.task import Outline, Task
 from app.security.auth import require_user_id
+from app.services.long_text_fsm import LongTextFSM
 from app.services.state_store import StateStore, StateTransitionConflictError
 
 router = APIRouter(prefix="/api/tasks", tags=["outline"])
@@ -67,7 +68,7 @@ async def confirm_outline(
     db: AsyncSession = Depends(get_session),
     user_id: str = Depends(require_user_id),
 ):
-    """用户确认（或编辑后确认）大纲，推进 FSM 进入写作阶段"""
+    """用户确认（或编辑后确认）大纲，先经过 premise gate 再推进写作。"""
     task = await _get_task_for_user(task_id, user_id, db)
     if task.fsm_state != "outline_review":
         raise HTTPException(
@@ -95,12 +96,44 @@ async def confirm_outline(
             session=db,
             task_id=task_id,
             from_state="outline_review",
-            to_state="writing",
+            to_state="premise_gate",
             reason="outline_confirmed_by_user",
             created_by=user_id or "user",
             metadata={"outline_confirmed": True},
             checkpoint_data=task.checkpoint_data if isinstance(task.checkpoint_data, dict) else None,
         )
+    except StateTransitionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    gate_result = LongTextFSM.evaluate_premise_gate(body.content)
+    try:
+        if gate_result.get("passed"):
+            await store.transition_fsm(
+                session=db,
+                task_id=task_id,
+                from_state="premise_gate",
+                to_state="writing",
+                reason="premise_gate_passed",
+                created_by=user_id or "user",
+                metadata={"premise_gate": gate_result},
+            )
+        else:
+            await store.transition_fsm(
+                session=db,
+                task_id=task_id,
+                from_state="premise_gate",
+                to_state="outline",
+                reason="premise_gate_failed",
+                created_by=user_id or "user",
+                metadata={"premise_gate": gate_result},
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Premise gate failed, outline returned for revision",
+                    "premise_gate": gate_result,
+                },
+            )
     except StateTransitionConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.refresh(outline)

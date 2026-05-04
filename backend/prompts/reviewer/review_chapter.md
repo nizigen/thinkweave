@@ -21,6 +21,8 @@
 4. boundary_compliance
 5. non_overlap
 6. source_policy_compliance
+7. specificity
+8. source_attribution
 
 ## 评分与判定规则（硬约束）
 1. 若存在核心事实无证据支撑：`evidence_sufficiency_score <= 60`。
@@ -29,7 +31,9 @@
 4. 若发现 source_policy 违规：`source_policy_compliance_score <= 60`。
 5. 若存在三级及以上标题（`###` / `1.1.1`）：`coherence_score <= 60` 且 must_fix 必须包含该问题。
 6. 默认中文正文；若存在无必要英文整句滥用：`coherence_score <= 65` 且 must_fix 必须包含该问题。
-7. 只有在 `score >= 72` 且 `must_fix` 为空时，`pass` 才能为 true。
+7. 若泛化表达无法核验、缺少定量和限定条件：`specificity_score <= 60`。
+8. 若关键陈述没有明确来源归因或 missing 标记：`source_attribution_score <= 60`。
+9. 只有在 `score >= 72` 且 `must_fix` 为空时，`pass` 才能为 true。
 
 ## 反馈要求
 1. must_fix 必须是可执行动作（可直接交给 writer 修复）。
@@ -47,6 +51,10 @@
   "boundary_compliance_score": 90,
   "non_overlap_score": 80,
   "source_policy_compliance_score": 88,
+  "specificity_score": 82,
+  "source_attribution_score": 86,
+  "unsupported_claims": ["缺证据主张A"],
+  "missing_sources": ["陈述B缺来源URL或evidence_id"],
   "must_fix": ["问题A", "问题B"],
   "strongest_counterargument": "对本章核心论点的最强反驳",
   "feedback": "具体可执行的修订建议",

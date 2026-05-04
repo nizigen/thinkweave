@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -286,6 +288,54 @@ async def test_reviewer_agent_supplies_scope_and_overlap_fields():
     assert "overlap_findings" in user_prompt
     assert "background" in user_prompt
     assert "Smith 2024" in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_enforces_evidence_dimensions_and_blocks_pass_on_low_scores():
+    llm = MockLLMClient()
+    llm.chat = AsyncMock(
+        return_value=json.dumps(
+            {
+                "score": 88,
+                "must_fix": [],
+                "feedback": "ok",
+                "pass": True,
+                "accuracy_score": 80,
+                "coherence_score": 80,
+                "evidence_sufficiency_score": 55,
+                "boundary_compliance_score": 80,
+                "non_overlap_score": 80,
+                "specificity_score": 58,
+                "source_attribution_score": 59,
+                "strongest_counterargument": "counter",
+            },
+            ensure_ascii=False,
+        )
+    )
+    agent = ReviewerAgent(
+        agent_id=uuid.uuid4(),
+        name="reviewer-policy",
+        llm_client=llm,
+        middlewares=(),
+    )
+
+    result = await agent.handle_task(
+        {
+            "task_id": "t1",
+            "title": "Review chapter",
+            "payload": {
+                "chapter_index": 1,
+                "chapter_title": "Intro",
+                "chapter_content": "content",
+            },
+        }
+    )
+    parsed = json.loads(result)
+    assert parsed["pass"] is False
+    assert parsed["score"] <= 59
+    assert "unsupported_claims" in parsed
+    assert "missing_sources" in parsed
+    assert len(parsed["must_fix"]) >= 1
 
 
 @pytest.mark.asyncio

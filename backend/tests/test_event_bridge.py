@@ -517,7 +517,7 @@ async def test_flow_controller_advances_fsm_stage_for_completed_role():
     state_store.transition_fsm.assert_awaited_once()
     kwargs = state_store.transition_fsm.await_args.kwargs
     assert kwargs["from_state"] == "outline_review"
-    assert kwargs["to_state"] == "writing"
+    assert kwargs["to_state"] == "premise_gate"
     assert kwargs["reason"] == "flow_controller_node_completed"
 
 

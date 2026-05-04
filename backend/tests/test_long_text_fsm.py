@@ -11,6 +11,7 @@ Organized by component:
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -75,6 +76,7 @@ class TestLongTextState:
             "init",
             "outline",
             "outline_review",
+            "premise_gate",
             "writing",
             "pre_review_integrity",
             "reviewing",
@@ -106,8 +108,11 @@ class TestTransitionMap:
     def test_outline_can_go_to_outline_review(self):
         assert "outline_review" in TRANSITIONS["outline"]
 
-    def test_outline_review_can_go_to_writing(self):
-        assert "writing" in TRANSITIONS["outline_review"]
+    def test_outline_review_can_go_to_premise_gate(self):
+        assert "premise_gate" in TRANSITIONS["outline_review"]
+
+    def test_premise_gate_can_go_to_writing(self):
+        assert "writing" in TRANSITIONS["premise_gate"]
 
     def test_writing_can_go_to_reviewing(self):
         assert "pre_review_integrity" in TRANSITIONS["writing"]
@@ -148,6 +153,7 @@ class TestTransitionMap:
             "init",
             "outline",
             "outline_review",
+            "premise_gate",
             "writing",
             "pre_review_integrity",
             "reviewing",
@@ -324,7 +330,10 @@ class TestFSMTransitionExecution:
         fsm = LongTextFSM(task_id=task.id)
         await fsm.transition(LongTextState.OUTLINE, session=db_session)
         await fsm.transition(LongTextState.OUTLINE_REVIEW, session=db_session)
-        await fsm.transition(LongTextState.WRITING, session=db_session)
+        await fsm.transition(LongTextState.PREMISE_GATE, session=db_session)
+        await fsm.transition(
+            LongTextState.WRITING, session=db_session, gate_passed=True
+        )
         await fsm.transition(LongTextState.PRE_REVIEW_INTEGRITY, session=db_session)
         await fsm.transition(
             LongTextState.REVIEWING, session=db_session, gate_passed=True
@@ -399,7 +408,7 @@ class TestFinalizeOutputAssembly:
     async def test_transition_to_failed_from_any_non_terminal(self, db_session):
         non_terminal = [
             LongTextState.INIT, LongTextState.OUTLINE,
-            LongTextState.OUTLINE_REVIEW, LongTextState.WRITING,
+            LongTextState.OUTLINE_REVIEW, LongTextState.PREMISE_GATE, LongTextState.WRITING,
             LongTextState.PRE_REVIEW_INTEGRITY, LongTextState.REVIEWING,
             LongTextState.RE_REVIEW, LongTextState.RE_REVISE,
             LongTextState.CONSISTENCY, LongTextState.FINAL_INTEGRITY,
@@ -448,6 +457,13 @@ class TestFinalizeOutputAssembly:
         fsm = LongTextFSM(task_id=task.id, state=LongTextState.PRE_REVIEW_INTEGRITY)
         with pytest.raises(TransitionGuardError):
             await fsm.transition(LongTextState.REVIEWING, session=db_session)
+
+    @pytest.mark.asyncio
+    async def test_guard_blocks_premise_gate_to_writing_without_pass(self, db_session):
+        task = await _create_task(db_session, fsm_state="premise_gate")
+        fsm = LongTextFSM(task_id=task.id, state=LongTextState.PREMISE_GATE)
+        with pytest.raises(TransitionGuardError):
+            await fsm.transition(LongTextState.WRITING, session=db_session)
 
     @pytest.mark.asyncio
     async def test_guard_blocks_final_integrity_to_done_without_pass(self, db_session):
@@ -509,6 +525,43 @@ class TestFSMRetryTracking:
         fsm.mark_chapter_completed(1)
         assert fsm.is_chapter_completed(1) is True
         assert fsm.is_chapter_completed(0) is False
+
+
+class TestPremiseGate:
+    def test_premise_gate_rejects_missing_core_thesis(self):
+        outline = {
+            "primary_chapters": [
+                {"chapter_title": "第1章", "thesis_contribution": "解释问题"}
+            ]
+        }
+        result = LongTextFSM.evaluate_premise_gate(json.dumps(outline, ensure_ascii=False))
+        assert result["passed"] is False
+        assert "missing_core_thesis" in result["issues"]
+
+    def test_premise_gate_rejects_missing_contribution(self):
+        outline = {
+            "core_thesis": "核心论点",
+            "primary_chapters": [
+                {"chapter_title": "第1章", "thesis_contribution": ""},
+                {"chapter_title": "第2章"},
+            ],
+        }
+        result = LongTextFSM.evaluate_premise_gate(json.dumps(outline, ensure_ascii=False))
+        assert result["passed"] is False
+        assert "missing_thesis_contribution" in result["issues"]
+
+    def test_premise_gate_passes_valid_outline_contract(self):
+        outline = {
+            "core_thesis": "在给定约束下，方案A比方案B更优。",
+            "primary_chapters": [
+                {"chapter_title": "第1章", "thesis_contribution": "界定比较边界"},
+                {"chapter_title": "第2章", "thesis_contribution": "提供证据"},
+                {"chapter_title": "第3章", "thesis_contribution": "落地与风险"},
+            ],
+        }
+        result = LongTextFSM.evaluate_premise_gate(json.dumps(outline, ensure_ascii=False))
+        assert result["passed"] is True
+        assert result["issues"] == []
 
 
 # ===========================================================================
@@ -580,6 +633,8 @@ class TestCheckpoint:
         # Exclude timestamp which may differ between rapid calls
         data1.pop("checkpoint_at")
         data2.pop("checkpoint_at")
+        data1.pop("last_checkpoint_time", None)
+        data2.pop("last_checkpoint_time", None)
         assert data1 == data2
 
 

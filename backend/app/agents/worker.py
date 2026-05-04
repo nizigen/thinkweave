@@ -408,9 +408,22 @@ class WorkerAgent(BaseAgent):
         title = str(chapter_title or "本章").strip() or "本章"
         chapter_desc = str(payload.get("chapter_description") or "").strip()
         chapter_content = str(payload.get("chapter_content") or "").strip()
+        memory_context = str(payload.get("memory_context") or "").strip()
         research_questions = str(payload.get("research_questions") or "").strip()
+        topic_claims = payload.get("topic_claims")
+        assigned_evidence = payload.get("assigned_evidence")
         source_policy = str(payload.get("source_policy") or "").strip()
         evidence_pool_summary = str(payload.get("evidence_pool_summary") or "").strip()
+        topic_claims_text = (
+            json.dumps(topic_claims, ensure_ascii=False)
+            if isinstance(topic_claims, (dict, list))
+            else str(topic_claims or "").strip()
+        )
+        assigned_evidence_text = (
+            json.dumps(assigned_evidence, ensure_ascii=False)
+            if isinstance(assigned_evidence, (dict, list))
+            else str(assigned_evidence or "").strip()
+        )
         try:
             node_target_words = int(payload.get("node_target_words") or payload.get("target_words") or 0)
         except Exception:
@@ -423,6 +436,9 @@ class WorkerAgent(BaseAgent):
             f"- 最少段落数：{paragraph_count}\n"
             f"- 章节任务：{chapter_desc or '围绕章节主题给出可执行分析与证据支撑'}\n"
             f"- 研究问题：{research_questions or '请围绕任务主题中的核心问题推进论证'}\n"
+            f"- 记忆上下文：{memory_context[:1200] if memory_context else '（空）'}\n"
+            f"- 章节边界(topic_claims)：{topic_claims_text[:2000] if topic_claims_text else '（空）'}\n"
+            f"- 指派证据(assigned_evidence)：{assigned_evidence_text[:2000] if assigned_evidence_text else '（空）'}\n"
             "- 输出必须为严格 JSON 对象，不得有 markdown 代码块或解释文本。\n"
             '- 必须包含键：heading, paragraphs, chapter_title, content_markdown, key_points, evidence_trace, boundary_notes, citation_ledger。\n'
             '- paragraphs 每项必须是 {"text":"中文分析段落","citation_keys":["..."]}。\n'
@@ -746,7 +762,10 @@ class WorkerAgent(BaseAgent):
                 '{"score":0,"must_fix":[],"feedback":"","pass":false,'
                 '"accuracy_score":0,"coherence_score":0,'
                 '"evidence_sufficiency_score":0,"boundary_compliance_score":0,'
-                '"non_overlap_score":0,"strongest_counterargument":""}'
+                '"non_overlap_score":0,"specificity_score":0,'
+                '"source_attribution_score":0,'
+                '"unsupported_claims":[],"missing_sources":[],'
+                '"strongest_counterargument":""}'
             )
         elif agent_role == "researcher":
             schema_hint = (
@@ -804,6 +823,9 @@ class WorkerAgent(BaseAgent):
                 "mode": raw.get("mode", "report"),
                 "depth": raw.get("depth", ""),
                 "target_words": raw.get("target_words", ""),
+                "draft_text": raw.get("draft_text", ""),
+                "review_comments": raw.get("review_comments", ""),
+                "style_requirements": raw.get("style_requirements", ""),
                 "source_policy": raw.get("source_policy", ""),
                 "research_keywords": raw.get("research_keywords", ""),
                 "evidence_pool_summary": raw.get("evidence_pool_summary", ""),
