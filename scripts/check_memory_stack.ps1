@@ -3,7 +3,7 @@ param()
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
-$required = @("postgres", "redis", "neo4j", "qdrant")
+$required = @("postgres", "redis", "neo4j", "qdrant", "falkordb")
 $statusOutput = docker compose ps --format json | ConvertFrom-Json
 
 foreach ($name in $required) {

@@ -9,7 +9,7 @@ $args = @("compose", "up")
 if ($Detach) {
     $args += "-d"
 }
-$args += @("postgres", "redis", "neo4j", "qdrant")
+$args += @("postgres", "redis", "neo4j", "qdrant", "falkordb")
 
 Write-Host "Starting memory stack: $($args -join ' ')"
 docker @args

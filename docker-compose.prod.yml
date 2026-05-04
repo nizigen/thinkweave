@@ -21,6 +21,12 @@ services:
     restart: unless-stopped
     ports: !reset []
 
+  falkordb:
+    profiles:
+      - memory-falkor
+    restart: unless-stopped
+    ports: !reset []
+
   backend:
     build:
       context: ./backend

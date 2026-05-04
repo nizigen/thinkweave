@@ -54,8 +54,21 @@ services:
       timeout: 10s
       retries: 10
 
+  falkordb:
+    image: falkordb/falkordb-server:latest
+    ports:
+      - "16379:6379"
+    volumes:
+      - falkordbdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
 volumes:
   pgdata:
   redisdata:
   neo4jdata:
   qdrantdata:
+  falkordbdata:

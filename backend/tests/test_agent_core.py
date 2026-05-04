@@ -789,7 +789,7 @@ class TestWorkerAgent:
         )
         writer_calls = [c for c in mock_llm.call_log if c.get("role") == "writer"]
         assert writer_calls
-        assert any(call.get("model") == "deepseek-v3.2" for call in writer_calls)
+        assert any(call.get("model") == "deepseek-v4-flash" for call in writer_calls)
 
     async def test_writer_repairs_review_style_json_output(self):
         class RepairMockLLM:

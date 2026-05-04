@@ -43,6 +43,14 @@ class ModelConfig:
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
+    "deepseek-v4-flash": ModelConfig(
+        provider="deepseek",
+        model="deepseek/deepseek-v4-flash",
+        supports_streaming=True,
+        supports_json_mode=True,
+        max_tokens=8192,
+        fallback="deepseek-v3.2",
+    ),
     "deepseek-v3.2": ModelConfig(
         provider="deepseek",
         model="deepseek/deepseek-v3.2",
@@ -62,13 +70,13 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 }
 
 ROLE_MODEL_MAP: dict[str, str] = {
-    "orchestrator": "deepseek-v3.2",
-    "manager": "deepseek-v3.2",
-    "outline": "deepseek-v3.2",
-    "researcher": "deepseek-v3.2",
-    "writer": "deepseek-v3.2",
-    "reviewer": "deepseek-v3.2",
-    "consistency": "deepseek-v3.2",
+    "orchestrator": "deepseek-v4-flash",
+    "manager": "deepseek-v4-flash",
+    "outline": "deepseek-v4-flash",
+    "researcher": "deepseek-v4-flash",
+    "writer": "deepseek-v4-flash",
+    "reviewer": "deepseek-v4-flash",
+    "consistency": "deepseek-v4-flash",
 }
 
 

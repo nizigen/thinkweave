@@ -64,7 +64,7 @@ class TestMemoryConfig:
         monkeypatch.delenv("VECTOR_DATABASE_PROVIDER", raising=False)
         cfg = MemoryConfig(_env_file=None)
         assert cfg.memory_enabled is False
-        assert cfg.cognee_version == "0.5.5"
+        assert cfg.cognee_version == "1.0.5"
         assert cfg.graph_database_provider == "kuzu"
         assert cfg.vector_database_provider == "lancedb"
 

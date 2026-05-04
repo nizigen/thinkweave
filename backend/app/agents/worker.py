@@ -466,7 +466,7 @@ class WorkerAgent(BaseAgent):
             target_words = 0
         if target_words <= 0 or target_words > _FAST_PATH_MAX_TARGET_WORDS:
             return None
-        return "deepseek-v3.2"
+        return "deepseek-v4-flash"
 
     @staticmethod
     def _extract_json_object(text: str) -> dict[str, Any] | None:

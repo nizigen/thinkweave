@@ -16,7 +16,7 @@ class MemoryConfig(BaseSettings):
 
     memory_enabled: bool = False
 
-    cognee_version: str = "0.5.5"
+    cognee_version: str = "1.0.5"
     graph_database_provider: str = "kuzu"
     vector_database_provider: str = "lancedb"
     enable_backend_access_control: bool = False

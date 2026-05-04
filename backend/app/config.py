@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
-    default_model: str = "deepseek-v3.2"
+    default_model: str = "deepseek-v4-flash"
 
     # Concurrency controls
     max_concurrent_llm_calls: int = 5
@@ -117,6 +117,7 @@ def available_model_options(extra_models: list[str] | None = None) -> list[dict[
     """Return selectable model options for the agent management UI."""
     known_models = [
         settings.default_model,
+        "deepseek-v4-flash",
         "deepseek-v3.2",
         "deepseek-chat",
     ]
