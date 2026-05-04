@@ -326,7 +326,7 @@ class WorkerAgent(BaseAgent):
         last_obj: dict[str, Any] | None = None
         for attempt in range(1, attempts + 1):
             obj = await chat_json_fn(
-                messages=working_messages,
+                messages=[dict(item) for item in working_messages],
                 role="writer",
                 model=model_override,
                 max_retries=2,
@@ -342,7 +342,7 @@ class WorkerAgent(BaseAgent):
             # Fall back to normal chat for this attempt to keep compatibility
             # with providers that do not reliably honor chat_json contracts.
             fallback_text = await self.llm_client.chat(
-                messages=working_messages,
+                messages=[dict(item) for item in working_messages],
                 role="writer",
                 model=model_override,
             )
@@ -436,6 +436,7 @@ class WorkerAgent(BaseAgent):
             f"- 最少段落数：{paragraph_count}\n"
             f"- 章节任务：{chapter_desc or '围绕章节主题给出可执行分析与证据支撑'}\n"
             f"- 研究问题：{research_questions or '请围绕任务主题中的核心问题推进论证'}\n"
+            f"- Memory Context: {memory_context[:1200] if memory_context else '(empty)'}\n"
             f"- 记忆上下文：{memory_context[:1200] if memory_context else '（空）'}\n"
             f"- 章节边界(topic_claims)：{topic_claims_text[:2000] if topic_claims_text else '（空）'}\n"
             f"- 指派证据(assigned_evidence)：{assigned_evidence_text[:2000] if assigned_evidence_text else '（空）'}\n"
@@ -465,7 +466,7 @@ class WorkerAgent(BaseAgent):
             target_words = 0
         if target_words <= 0 or target_words > _FAST_PATH_MAX_TARGET_WORDS:
             return None
-        return "deepseek-v3.2"
+        return "gpt-4o-mini"
 
     @staticmethod
     def _extract_json_object(text: str) -> dict[str, Any] | None:

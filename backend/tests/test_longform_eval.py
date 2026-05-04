@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "longform_eval_runner.sh"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "longform_eval_runner.py"
 
 
 def _run_eval(*, task_detail_path: Path, output_path: Path, target_words: int = 30000) -> dict:
@@ -14,7 +15,13 @@ def _run_eval(*, task_detail_path: Path, output_path: Path, target_words: int = 
     env["TASK_DETAIL_JSON"] = str(task_detail_path)
     env["LONGFORM_EVAL_OUTPUT"] = str(output_path)
     env["TARGET_WORDS"] = str(target_words)
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert result.returncode == 0, result.stderr or result.stdout
     assert output_path.exists()
     return json.loads(output_path.read_text(encoding="utf-8"))
