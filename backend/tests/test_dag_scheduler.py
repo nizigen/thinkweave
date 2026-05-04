@@ -717,6 +717,64 @@ class TestDrainTaskResultShapeRepair:
         assert "content_markdown" in completed_output
         mock_failed.assert_not_awaited()
 
+    @pytest.mark.asyncio
+    async def test_drain_task_results_passes_block_ms_to_stream_read(
+        self,
+        scheduler: DAGScheduler,
+    ) -> None:
+        with patch(
+            "app.services.dag_scheduler.xread_latest",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as mock_xread:
+            consumed = await scheduler._drain_task_results(block_ms=987)
+
+        assert consumed == 0
+        mock_xread.assert_awaited_once()
+        assert mock_xread.await_args.kwargs["block"] == 987
+
+
+class TestEventDrivenWait:
+    @pytest.mark.asyncio
+    async def test_wait_for_next_signal_prefers_stream_event_path(
+        self,
+        scheduler: DAGScheduler,
+    ) -> None:
+        scheduler._schedule_event.clear()
+        with (
+            patch.object(
+                scheduler,
+                "_drain_task_results",
+                new=AsyncMock(return_value=1),
+            ) as mock_drain,
+            patch.object(
+                scheduler._schedule_event,
+                "wait",
+                new=AsyncMock(return_value=True),
+            ) as mock_wait,
+        ):
+            await scheduler._wait_for_next_signal()
+
+        mock_drain.assert_awaited_once_with(block_ms=1000)
+        mock_wait.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_wait_for_next_signal_short_circuits_when_schedule_event_already_set(
+        self,
+        scheduler: DAGScheduler,
+    ) -> None:
+        scheduler._schedule_event.set()
+        with (
+            patch.object(
+                scheduler,
+                "_drain_task_results",
+                new=AsyncMock(return_value=1),
+            ) as mock_drain,
+        ):
+            await scheduler._wait_for_next_signal()
+
+        mock_drain.assert_not_awaited()
+
 
 class TestMatchAgentRouting:
     @pytest.mark.asyncio

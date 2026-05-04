@@ -410,7 +410,7 @@ class DAGScheduler:
 
             while not self._stop.is_set():
                 # 0. 消费节点执行结果
-                await self._drain_task_results()
+                await self._drain_task_results(block_ms=1)
 
                 # 1. 检查超时
                 await self._check_timeouts()
@@ -452,12 +452,8 @@ class DAGScheduler:
                         await self._mark_task_failed("DAG deadlock: unreachable nodes")
                         break
 
-                # 等待：有节点完成/超时时被唤醒，或超时 1 秒
-                self._schedule_event.clear()
-                try:
-                    await asyncio.wait_for(self._schedule_event.wait(), timeout=1.0)
-                except TimeoutError:
-                    pass
+                # 等待：优先阻塞消费 task_result 事件，保留轮询兜底。
+                await self._wait_for_next_signal()
 
         except Exception:
             log.opt(exception=True).error("DAGScheduler crashed")
@@ -2124,23 +2120,31 @@ class DAGScheduler:
     # Internal — 超时处理
     # ------------------------------------------------------------------
 
-    async def _drain_task_results(self) -> None:
-        """消费 task events 中的 task_result 并推进节点状态。"""
+    async def _drain_task_results(
+        self,
+        *,
+        block_ms: int = 1,
+    ) -> int:
+        """消费 task events 中的 task_result 并推进节点状态。
+
+        Returns:
+            本次消费处理的消息数量（包含非 task_result 类型）。
+        """
         stream = task_events_key(self.task_id)
         try:
             messages = await xread_latest(
                 {stream: self._task_events_cursor},
                 count=100,
-                block=1,
+                block=max(int(block_ms), 0),
             )
         except Exception:
             logger.bind(task_id=str(self.task_id)).opt(exception=True).warning(
                 "task result drain failed"
             )
-            return
+            return 0
 
         if not messages:
-            return
+            return 0
 
         for message in messages:
             self._task_events_cursor = message.message_id
@@ -2392,6 +2396,31 @@ class DAGScheduler:
                     error=str(payload.get("error") or "Unknown agent failure"),
                     agent_id=agent_id,
                 )
+        return len(messages)
+
+    async def _wait_for_next_signal(self) -> None:
+        """等待下一次调度信号。
+
+        优先阻塞读取 task_result stream（事件驱动热路径）；
+        当没有新事件时回退到 schedule_event 轮询等待，保证兼容性。
+        """
+        if self._schedule_event.is_set():
+            self._schedule_event.clear()
+            return
+
+        self._schedule_event.clear()
+        consumed = await self._drain_task_results(block_ms=1000)
+        if consumed > 0:
+            return
+
+        if self._schedule_event.is_set():
+            self._schedule_event.clear()
+            return
+
+        try:
+            await asyncio.wait_for(self._schedule_event.wait(), timeout=1.0)
+        except TimeoutError:
+            pass
 
     async def _should_soften_consistency_failure(self, *, session: AsyncSession) -> bool:
         # Personal-use relaxed mode: consistency pass=false should not block finalization.

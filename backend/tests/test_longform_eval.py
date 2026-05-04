@@ -85,3 +85,30 @@ def test_longform_eval_runner_fails_length_gate_when_short(tmp_path: Path):
     assert payload["metrics"]["length_compliance"] < 1.0
     assert payload["pass_fail"]["length_gate"] is False
     assert payload["pass_fail"]["overall"] is False
+
+
+def test_longform_eval_runner_fails_diagnosis_evidence_gates_when_claims_unbound(tmp_path: Path):
+    detail = {
+        "id": "task-3",
+        "title": "evidence weak report",
+        "status": "completed",
+        "mode": "report",
+        "depth": "deep",
+        "word_count": 30000,
+        "citation_summary": {"total": 10, "bound_to_evidence": 2},
+        "evidence_summary": {"total": 20, "unbound_claims": 3},
+        "checkpoint_data": {},
+        "node_status_summary": {},
+    }
+    input_path = tmp_path / "task_detail.json"
+    input_path.write_text(json.dumps(detail, ensure_ascii=False), encoding="utf-8")
+    output = tmp_path / "eval.json"
+
+    payload = _run_eval(task_detail_path=input_path, output_path=output, target_words=30000)
+
+    assert payload["metrics"]["length_compliance"] == 1.0
+    assert payload["metrics"]["citation_coverage"] == 0.2
+    assert payload["metrics"]["instruction_adherence"] < 0.66
+    assert payload["pass_fail"]["adherence_gate"] is False
+    assert payload["pass_fail"]["citation_gate"] is False
+    assert payload["pass_fail"]["overall"] is False

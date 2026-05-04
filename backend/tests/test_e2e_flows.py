@@ -197,6 +197,37 @@ class TestReportE2EFlow:
         assert isinstance(detail.get("citation_summary"), dict)
         assert "stage_progress" in detail
 
+    async def test_report_task_exposes_decomposition_audit_summary_for_diagnosis(
+        self,
+        client: AsyncClient,
+    ):
+        task = await _create_task(client, REPORT_PAYLOAD)
+        detail = await _get_task(client, task["id"])
+        summary = detail.get("decomposition_audit_summary") or {}
+
+        assert isinstance(summary, dict)
+        assert summary.get("attempt_no", 0) >= 1
+        assert summary.get("node_count", 0) >= 1
+        assert "detail_persisted" in summary
+
+    async def test_report_task_decomposition_audit_endpoint_returns_breakdown_detail(
+        self,
+        client: AsyncClient,
+    ):
+        task = await _create_task(client, REPORT_PAYLOAD)
+        resp = await client.get(
+            f"/api/tasks/{task['id']}/decomposition-audit",
+            headers=AUTH,
+        )
+        assert resp.status_code == 200
+        detail = resp.json()
+
+        assert int(detail.get("attempt_no", 0)) >= 1
+        assert isinstance(detail.get("decomposition_input"), dict)
+        assert isinstance(detail.get("normalized_dag"), dict)
+        assert isinstance(detail.get("validation_issues"), list)
+        assert isinstance(detail.get("repair_actions"), list)
+
 
 # ---------------------------------------------------------------------------
 # E2E Flow 2: 大纲确认流程

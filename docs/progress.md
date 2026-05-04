@@ -1,3 +1,21 @@
+## Phase 6 Wave 3 检查点（2026-05-04，Event-Driven Hot Path + Diagnosis Regression）
+
+- `DAGScheduler` 等待路径改为“事件优先”：
+  - `run()` 在循环开头继续做快速 drain（`block_ms=1`），但 idle 等待阶段改为 `_wait_for_next_signal()`。
+  - `_wait_for_next_signal()` 先阻塞读取 `task:{task_id}:events`（`block_ms=1000`），有 `task_result` 立即返回并进入下一轮 ready 计算；无事件时再回退 `schedule_event.wait(timeout=1.0)` 兜底。
+- `_drain_task_results()` 扩展为 `block_ms` 参数，并返回本轮消费条数，支持上面热路径“是否被事件唤醒”的判定。
+- 新增回归测试（调度器）：
+  - `test_drain_task_results_passes_block_ms_to_stream_read`
+  - `test_wait_for_next_signal_prefers_stream_event_path`
+  - `test_wait_for_next_signal_short_circuits_when_schedule_event_already_set`
+- 新增 diagnosis 回归测试（覆盖“最初任务分解可追溯 + 证据门禁失败”）：
+  - `backend/tests/test_e2e_flows.py` 新增 decomposition audit summary / endpoint 用例
+  - `backend/tests/test_longform_eval.py` 新增 evidence-gate 失败用例（`unbound_claims` + 低 citation 覆盖）
+- 回归验证：
+  - `python -m pytest -q backend/tests/test_dag_scheduler.py -k "drain_task_results or wait_for_next_signal"` => `7 passed`
+  - `backend/tests/test_e2e_flows.py` 在当前环境受 PostgreSQL 不可达影响未完成验证
+  - `backend/tests/test_longform_eval.py` 在当前环境受 `bash/jq` 依赖与子进程编码问题影响未完成验证
+
 ## Phase 6 Wave 1 执行中（2026-05-03）
 
 - 新增 `backend/app/services/state_store.py`，提供状态协调边界：
