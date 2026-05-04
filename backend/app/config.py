@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     max_requests_per_minute: int = 120
     enable_planned_expansion_nodes: bool = False
     enable_finalize_auto_expansion: bool = False
+    bootstrap_resume_tasks: bool = True
+    bootstrap_resume_task_limit: int = 5
 
     # LLM retry policy
     llm_max_retries: int = 3

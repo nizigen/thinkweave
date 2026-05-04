@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.agents.agent_registry import agent_registry
 from app.agents.consistency_agent import ConsistencyAgent
@@ -154,14 +154,37 @@ async def bootstrap_runtime_agents() -> int:
 
 async def bootstrap_active_task_schedulers() -> int:
     """Resume schedulers for active tasks after process restart."""
+    if not settings.bootstrap_resume_tasks:
+        logger.info("task scheduler bootstrap skipped by config")
+        return 0
+
+    limit = int(getattr(settings, "bootstrap_resume_task_limit", 0) or 0)
     started = 0
     async with async_session_factory() as session:
+        total_result = await session.execute(
+            select(func.count()).select_from(Task).where(Task.status.in_(("pending", "running")))
+        )
+        total_candidates = int(total_result.scalar_one() or 0)
+
+        query = (
+            select(Task.id, Task.status, Task.checkpoint_data)
+            .where(Task.status.in_(("pending", "running")))
+            .order_by(Task.created_at.desc())
+        )
+        if limit > 0:
+            query = query.limit(limit)
         result = await session.execute(
-            select(Task.id, Task.status, Task.checkpoint_data).where(
-                Task.status.in_(("pending", "running"))
-            )
+            query
         )
         rows = list(result.all())
+
+    skipped = max(0, total_candidates - len(rows))
+    if skipped > 0:
+        logger.warning(
+            "task scheduler bootstrap capped: resumed_latest={} skipped_old={}",
+            len(rows),
+            skipped,
+        )
 
     for task_id, _status, checkpoint_data in rows:
         control = {}

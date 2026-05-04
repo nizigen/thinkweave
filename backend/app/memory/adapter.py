@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 from typing import Any
 
 from app.memory.config import MemoryConfig, get_memory_config
@@ -146,6 +147,123 @@ class MemoryAdapter:
             logger.warning("Memory adapter degraded to fallback backend: {}", reason)
         self._degraded = True
 
+    @staticmethod
+    def _is_empty_search_error(exc: Exception) -> bool:
+        message = str(exc or "").lower()
+        empty_markers = (
+            "nodataerror",
+            "no data found in the system",
+            "datasetnotfounderror",
+            "no datasets found",
+            "collection not found",
+            "empty knowledge graph",
+        )
+        return any(marker in message for marker in empty_markers)
+
+    @staticmethod
+    def _namespace_to_dataset(namespace: str | None) -> str:
+        raw = str(namespace or "").strip()
+        if not raw:
+            return "main_dataset"
+        safe = []
+        for ch in raw:
+            if ch.isalnum() or ch in {"-", "_", "."}:
+                safe.append(ch)
+            else:
+                safe.append("_")
+        dataset = "".join(safe).strip("_")
+        return dataset or "main_dataset"
+
+    @staticmethod
+    def _supports_param(func: Any, name: str) -> bool:
+        try:
+            return name in inspect.signature(func).parameters
+        except Exception:
+            return False
+
+    async def _client_add(
+        self,
+        client: Any,
+        content: str,
+        *,
+        namespace: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Any:
+        # Prefer legacy call first; fall back to dataset-style call for cognee >=1.0.
+        try:
+            return await client.add(
+                content,
+                namespace=namespace,
+                metadata=metadata or {},
+            )
+        except TypeError:
+            pass
+        dataset_name = self._namespace_to_dataset(namespace)
+        return await client.add(
+            content,
+            dataset_name=dataset_name,
+            metadata=metadata or {},
+        )
+
+    async def _client_search(
+        self,
+        client: Any,
+        query: str,
+        *,
+        namespace: str | None = None,
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]:
+        # Prefer legacy call first; fall back to dataset-style call for cognee >=1.0.
+        try:
+            rows = await client.search(query, namespace=namespace, top_k=top_k)
+            return rows or []
+        except TypeError:
+            pass
+
+        dataset_name = self._namespace_to_dataset(namespace)
+        search_kwargs: dict[str, Any] = {
+            "query_text": query,
+            "datasets": [dataset_name],
+            "top_k": top_k,
+        }
+        if hasattr(client, "SearchType"):
+            try:
+                search_kwargs["query_type"] = client.SearchType.CHUNKS
+            except Exception:
+                pass
+        rows = await client.search(**search_kwargs)
+        normalized: list[dict[str, Any]] = []
+        for row in rows or []:
+            if isinstance(row, dict):
+                normalized.append(row)
+                continue
+            text = getattr(row, "text", None)
+            if text is None:
+                text = getattr(row, "search_result", None)
+            if text is None:
+                text = str(row)
+            normalized.append({"content": str(text)})
+        return normalized
+
+    async def _client_cognify(
+        self,
+        client: Any,
+        content: str,
+        *,
+        namespace: str | None = None,
+    ) -> dict[str, Any]:
+        # Prefer legacy call first; fall back to dataset-style call for cognee >=1.0.
+        try:
+            data = await client.cognify(content, namespace=namespace)
+            return data or {}
+        except TypeError:
+            pass
+
+        dataset_name = self._namespace_to_dataset(namespace)
+        await self._client_add(client, content, namespace=namespace, metadata={})
+        await client.cognify(datasets=[dataset_name])
+        return {"dataset": dataset_name}
+
     async def add(
         self,
         content: str,
@@ -165,7 +283,8 @@ class MemoryAdapter:
             )
 
         try:
-            return await client.add(
+            return await self._client_add(
+                client,
                 content,
                 namespace=namespace,
                 metadata=metadata or {},
@@ -198,9 +317,21 @@ class MemoryAdapter:
             )
 
         try:
-            rows = await client.search(query, namespace=namespace, top_k=limit)
+            rows = await self._client_search(
+                client,
+                query,
+                namespace=namespace,
+                top_k=limit,
+            )
             return rows or []
         except Exception as exc:  # pragma: no cover
+            if self._is_empty_search_error(exc):
+                logger.info(
+                    "Memory search returned empty corpus state, namespace={} query={}",
+                    str(namespace or ""),
+                    str(query or "")[:80],
+                )
+                return []
             logger.warning(f"Memory search failed in enabled mode: {exc}")
             self._degrade_to_fallback(reason=f"search failed: {exc}")
             return await self._fallback_backend.search(
@@ -226,7 +357,11 @@ class MemoryAdapter:
             )
 
         try:
-            data = await client.cognify(content, namespace=namespace)
+            data = await self._client_cognify(
+                client,
+                content,
+                namespace=namespace,
+            )
             return data or {}
         except Exception as exc:  # pragma: no cover
             logger.warning(f"Memory cognify failed in enabled mode: {exc}")
