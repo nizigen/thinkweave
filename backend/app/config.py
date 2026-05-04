@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # Concurrency controls
     max_concurrent_llm_calls: int = 5
     max_concurrent_writers: int = 3
+    max_tokens_per_minute: int = 180000
+    max_requests_per_minute: int = 120
     enable_planned_expansion_nodes: bool = False
     enable_finalize_auto_expansion: bool = False
 

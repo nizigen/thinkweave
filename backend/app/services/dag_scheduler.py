@@ -45,6 +45,7 @@ from app.services.stage_contracts import (
     get_stage_contract,
     resolve_stage_code,
 )
+from app.services.writer_pool import WriterPool
 from app.services.flow_controller import FlowController
 from app.services.state_store import ConcurrentModificationError, StateStore
 from app.services import communicator
@@ -373,6 +374,12 @@ class DAGScheduler:
         # 并发信号量
         self._llm_semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
         self._writer_semaphore = asyncio.Semaphore(settings.max_concurrent_writers)
+        self._writer_pool = WriterPool(
+            max_concurrent_writers=settings.max_concurrent_writers,
+            max_tokens_per_minute=settings.max_tokens_per_minute,
+            max_requests_per_minute=settings.max_requests_per_minute,
+        )
+        self._writer_budget_waiting: dict[uuid.UUID, float] = {}
 
         # 追踪运行中的节点 {node_id: agent_id}
         self._running_nodes: dict[uuid.UUID, uuid.UUID] = {}
@@ -397,7 +404,12 @@ class DAGScheduler:
         try:
             # Runtime hard guard: even if decomposition misses chapter constraints,
             # enforce minimum primary writer chapters before scheduling starts.
-            await self._ensure_runtime_min_primary_chapters()
+            try:
+                await self._ensure_runtime_min_primary_chapters()
+            except Exception:
+                log.opt(exception=True).warning(
+                    "failed to enforce runtime chapter guard; continue with existing nodes"
+                )
             # 初始化：将所有无依赖的节点标为 ready
             await self._init_ready_nodes()
             # 修复重启后遗留的 running 节点（内存态丢失时会卡死）。
@@ -576,6 +588,7 @@ class DAGScheduler:
         """停止后清理运行中节点的超时监控和 Agent 状态。"""
         for node_id, agent_id in list(self._running_nodes.items()):
             await self._clear_timeout_watch(node_id)
+            self._release_writer_budget(node_id)
             async with async_session_factory() as session:
                 await session.execute(
                     update(Agent)
@@ -649,6 +662,7 @@ class DAGScheduler:
         await self._clear_timeout_watch(node_id)
 
         self._running_nodes.pop(node_id, None)
+        self._release_writer_budget(node_id)
         completed_role = self._node_roles.pop(node_id, None)
         if completed_role:
             await self._maybe_advance_fsm_state(completed_role)
@@ -763,6 +777,7 @@ class DAGScheduler:
                 await set_dag_node_status(self.task_id, str(node_id), STATUS_DONE)
                 await self._clear_timeout_watch(node_id)
                 self._running_nodes.pop(node_id, None)
+                self._release_writer_budget(node_id)
                 self._node_roles.pop(node_id, None)
                 log.warning(
                     "writer timeout stop-loss applied: node marked done with local fallback (retry={})",
@@ -797,6 +812,7 @@ class DAGScheduler:
                 await self._clear_timeout_watch(node_id)
 
                 self._running_nodes.pop(node_id, None)
+                self._release_writer_budget(node_id)
                 self._node_roles.pop(node_id, None)
                 log.warning(
                     "node failed (retry {}/{} in {}s): {}",
@@ -837,6 +853,7 @@ class DAGScheduler:
                 await self._clear_timeout_watch(node_id)
 
                 self._running_nodes.pop(node_id, None)
+                self._release_writer_budget(node_id)
                 self._node_roles.pop(node_id, None)
                 log.error("node permanently failed after {} retries", MAX_RETRIES)
 
@@ -1195,6 +1212,54 @@ class DAGScheduler:
 
         return True
 
+    def _release_writer_budget(self, node_id: uuid.UUID) -> None:
+        self._writer_pool.release(node_id=str(node_id))
+        self._writer_budget_waiting.pop(node_id, None)
+
+    async def _estimate_writer_budget_tokens(
+        self,
+        *,
+        node_title: str,
+    ) -> int:
+        hint = _extract_word_budget_hint(node_title)
+        floor = hint if hint is not None else DEFAULT_NODE_WORD_FLOOR
+        # Conservative estimate: ~2 tokens per Chinese/English unit.
+        return max(200, int(max(1, floor) * 2))
+
+    async def _mark_writer_waiting_budget(
+        self,
+        *,
+        node_id: uuid.UUID,
+        reason: str,
+        estimated_tokens: int,
+    ) -> None:
+        now = time.time()
+        last_emit = self._writer_budget_waiting.get(node_id, 0.0)
+        if now - last_emit < 2.0:
+            return
+        self._writer_budget_waiting[node_id] = now
+        try:
+            await set_dag_node_status(self.task_id, str(node_id), "waiting_budget")
+        except Exception:
+            logger.bind(task_id=str(self.task_id), node_id=str(node_id)).opt(
+                exception=True
+            ).warning("failed to set waiting_budget status")
+        try:
+            await communicator.send_status_update(
+                task_id=self.task_id,
+                node_id=node_id,
+                status="waiting_budget",
+                extra={
+                    "reason": reason,
+                    "estimated_tokens": estimated_tokens,
+                    "writer_pool": self._writer_pool.status(),
+                },
+            )
+        except Exception:
+            logger.bind(task_id=str(self.task_id), node_id=str(node_id)).opt(
+                exception=True
+            ).warning("failed to emit waiting_budget status update")
+
     def _timeout_watch_member(self, node_id: uuid.UUID) -> str:
         return timeout_watch_member(self.task_id, node_id)
 
@@ -1211,6 +1276,7 @@ class DAGScheduler:
     async def reconcile_skipped_node(self, node_id: uuid.UUID) -> None:
         tracked_agent_id = self._running_nodes.pop(node_id, None)
         self._node_roles.pop(node_id, None)
+        self._release_writer_budget(node_id)
         await self._clear_timeout_watch(node_id)
 
         async with async_session_factory() as session:
@@ -1387,6 +1453,24 @@ class DAGScheduler:
             "routing_mode": routing_mode,
         }
         expected_version = int(getattr(node, "version", 0) or 0)
+        role_norm = str(node_role or "").strip().lower()
+        writer_budget_tokens = 0
+        if role_norm == "writer":
+            writer_budget_tokens = await self._estimate_writer_budget_tokens(
+                node_title=str(node_title or ""),
+            )
+            acquired, budget_reason = self._writer_pool.acquire(
+                node_id=str(node_id),
+                estimated_tokens=writer_budget_tokens,
+            )
+            if not acquired:
+                await self._mark_writer_waiting_budget(
+                    node_id=node_id,
+                    reason=budget_reason,
+                    estimated_tokens=writer_budget_tokens,
+                )
+                return False
+            self._writer_budget_waiting.pop(node_id, None)
 
         result = await session.execute(
             update(TaskNode)
@@ -1404,6 +1488,7 @@ class DAGScheduler:
             )
         )
         if result.rowcount != 1:
+            self._release_writer_budget(node_id)
             log.info("node assignment lost ready-state race")
             return False
         await session.execute(
@@ -1427,6 +1512,7 @@ class DAGScheduler:
             or self._read_control_status(task) in CONTROL_BLOCKING_STATUSES
         ):
             self._running_nodes.pop(node_id, None)
+            self._release_writer_budget(node_id)
             self._node_roles.pop(node_id, None)
             if current_node is not None:
                 await session.execute(
@@ -2071,6 +2157,7 @@ class DAGScheduler:
         agent_id: uuid.UUID,
     ) -> None:
         self._running_nodes.pop(node_id, None)
+        self._release_writer_budget(node_id)
         self._node_roles.pop(node_id, None)
         await self._clear_timeout_watch(node_id)
 

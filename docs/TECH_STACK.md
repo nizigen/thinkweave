@@ -191,3 +191,19 @@ Docker Desktop：4.34.0+（仅用于运行PostgreSQL和Redis）
 2. Checkpoint 降噪策略：连续自动继续时切换 SLIM 展示。
 3. 关键关卡（integrity/review decision）永远使用 MANDATORY，不允许跳过。
 4. 审查与完整性报告统一 JSON Schema，便于自动评估与回归测试。
+
+---
+
+## Runtime Budget & Degrade Controls（2026-05-04）
+
+- Writer 预算参数（`backend/app/config.py`）：
+  - `MAX_CONCURRENT_WRITERS`
+  - `MAX_TOKENS_PER_MINUTE`
+  - `MAX_REQUESTS_PER_MINUTE`
+- Memory 降级策略：
+  - `MEMORY_ENABLED=false`：跳过 Redis/cognee，保持 v1 无副作用行为；
+  - `MEMORY_ENABLED=true` 且 cognee 异常：自动退化到内存 backend，持续可用。
+- RAG 查询保护：
+  - 对空/低信息 query 做前置校验；
+  - 语义检索无结果时 fallback 到关键词检索；
+  - 任一检索链路异常时返回安全空结果。

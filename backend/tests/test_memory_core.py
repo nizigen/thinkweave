@@ -34,10 +34,35 @@ class BrokenCogneeClient:
     async def add(self, content: str, **kwargs):
         raise RuntimeError("cognee add failed")
 
+    async def search(self, query: str, **kwargs):
+        raise RuntimeError("cognee search failed")
+
+    async def cognify(self, content: str, **kwargs):
+        raise RuntimeError("cognee cognify failed")
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self._hashes: dict[str, dict[str, str]] = {}
+
+    async def hset(self, key: str, mapping: dict[str, str]):
+        bucket = self._hashes.setdefault(key, {})
+        bucket.update(mapping)
+
+    async def hgetall(self, key: str):
+        return dict(self._hashes.get(key, {}))
+
+    async def delete(self, *keys: str):
+        for key in keys:
+            self._hashes.pop(key, None)
+
 
 class TestMemoryConfig:
-    def test_defaults(self):
-        cfg = MemoryConfig()
+    def test_defaults(self, monkeypatch):
+        monkeypatch.delenv("MEMORY_ENABLED", raising=False)
+        monkeypatch.delenv("GRAPH_DATABASE_PROVIDER", raising=False)
+        monkeypatch.delenv("VECTOR_DATABASE_PROVIDER", raising=False)
+        cfg = MemoryConfig(_env_file=None)
         assert cfg.memory_enabled is False
         assert cfg.cognee_version == "0.5.5"
         assert cfg.graph_database_provider == "kuzu"
@@ -53,8 +78,10 @@ class TestMemoryConfig:
         assert cfg.graph_database_provider == "falkor"
         assert cfg.vector_database_provider == "pgvector"
 
-    def test_default_cognee_backend_targets_match_project_architecture(self):
-        cfg = MemoryConfig()
+    def test_default_cognee_backend_targets_match_project_architecture(self, monkeypatch):
+        monkeypatch.delenv("GRAPH_DATABASE_PROVIDER", raising=False)
+        monkeypatch.delenv("VECTOR_DATABASE_PROVIDER", raising=False)
+        cfg = MemoryConfig(_env_file=None)
 
         assert cfg.graph_database_provider == "kuzu"
         assert cfg.vector_database_provider == "lancedb"
@@ -94,14 +121,19 @@ class TestMemoryAdapter:
         assert entities["entities"][0]["name"] == "Agentic Nexus"
 
     @pytest.mark.asyncio
-    async def test_enabled_mode_surfaces_provider_failure(self):
+    async def test_enabled_mode_degrades_to_fallback_on_provider_failure(self):
         adapter = MemoryAdapter(
             config=MemoryConfig(memory_enabled=True),
             cognee_client=BrokenCogneeClient(),
         )
 
-        with pytest.raises(RuntimeError, match="cognee add failed"):
-            await adapter.add("chapter summary", namespace="task-1")
+        add_result = await adapter.add("chapter summary", namespace="task-1")
+        rows = await adapter.search("chapter", namespace="task-1", limit=3)
+
+        assert adapter.degraded is True
+        assert add_result is not None
+        assert len(rows) == 1
+        assert "chapter summary" in rows[0]["content"]
 
     def test_enabled_mode_rejects_unsupported_cognee_backend_matrix(self):
         adapter = MemoryAdapter(
@@ -179,3 +211,47 @@ class TestSessionMemory:
         rows = await session.query("x")
         await session.cleanup()
         assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_snapshot_restore_and_clear_task_roundtrip(self):
+        redis = FakeRedis()
+        fake_client = FakeCogneeClient()
+        adapter = MemoryAdapter(
+            config=MemoryConfig(memory_enabled=True),
+            cognee_client=fake_client,
+        )
+
+        session_a = SessionMemory(task_id="task-persist", adapter=adapter, redis_client=redis)
+        await session_a.initialize()
+        await session_a.store("chapter one", metadata={"chapter": 1})
+        await session_a.store_territory_map("outline A")
+        snap = await session_a.snapshot()
+
+        session_b = SessionMemory(task_id="task-persist", adapter=adapter, redis_client=redis)
+        await session_b.initialize()
+        restored = await session_b.restore()
+
+        assert restored["task_id"] == "task-persist"
+        assert restored["dedup_registry"]
+        assert restored["territory_map"]
+        assert snap["snapshot_hash"] == restored["snapshot_hash"]
+
+        await session_b.clear_task()
+        empty = await session_b.restore()
+        assert empty["dedup_registry"] == []
+        assert empty["territory_map"] == {}
+
+    @pytest.mark.asyncio
+    async def test_restore_rejects_tampered_snapshot_hash(self):
+        session = SessionMemory(
+            task_id="task-hash",
+            adapter=MemoryAdapter(config=MemoryConfig(memory_enabled=True), cognee_client=FakeCogneeClient()),
+            redis_client=FakeRedis(),
+        )
+        await session.initialize()
+        await session.store("content A")
+        snapshot = await session.snapshot(persist=False)
+        snapshot["dedup_registry"] = []
+
+        with pytest.raises(ValueError, match="snapshot hash mismatch"):
+            await session.restore(snapshot)

@@ -1396,3 +1396,29 @@ Test coverage focus:
 - propagation from payload to LLM callsites
 - fallback-chain override and dedup behavior
 - default behavior when overrides absent
+
+---
+
+## 2026-05-04 Runtime Hardening Addendum (Phase 06-02)
+
+- `SessionMemory` 新增可恢复快照能力（`backend/app/memory/session.py`）：
+  - Redis task-scope keys：
+    - `session:{task_id}:dedup`
+    - `session:{task_id}:territory`
+    - `session:{task_id}:summary`
+  - API:
+    - `snapshot(persist=True)`
+    - `restore(snapshot | None)`
+    - `clear_task()`
+  - 快照包含 `schema_version` 与 `snapshot_hash`，用于恢复校验。
+- `MemoryAdapter` 新增后端隔离与降级：
+  - 启用记忆时优先走 cognee；
+  - provider 不可用/调用异常时自动降级到 in-process fallback backend；
+  - 保证记忆层故障不会阻断主任务执行。
+- `DAGScheduler` 接入 WriterPool 预算控制：
+  - 维度：`max_concurrent_writers`、`max_tokens_per_minute`、`max_requests_per_minute`
+  - 预算不足时节点保持可重试并发出 `waiting_budget` 状态事件。
+- `HybridRetriever` 增加查询校验与安全兜底：
+  - 空/低信息/无效 query 直接返回空结果；
+  - 语义检索无结果时回退到关键词检索；
+  - 检索异常返回安全空结果，不注入噪声上下文。

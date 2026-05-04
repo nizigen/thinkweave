@@ -179,6 +179,42 @@ class TestHybridRetriever:
         # Stub implementation returns empty
         assert results == []
 
+    @pytest.mark.asyncio
+    async def test_search_rejects_invalid_queries(self):
+        retriever = HybridRetriever()
+        assert await retriever.search("") == []
+        assert await retriever.search("   ") == []
+        assert await retriever.search("1") == []
+
+    @pytest.mark.asyncio
+    async def test_search_fallbacks_to_keyword_when_semantic_empty(self):
+        class _Retriever(HybridRetriever):
+            async def _semantic_search(self, query, task_id, limit):
+                return []
+
+            async def _keyword_search(self, query, task_id, limit):
+                return [
+                    RetrievalResult(content="keyword hit", score=0.6, source_type="fulltext")
+                ]
+
+        retriever = _Retriever()
+        results = await retriever.search("量子计算", top_k=3)
+        assert len(results) == 1
+        assert results[0].content == "keyword hit"
+
+    @pytest.mark.asyncio
+    async def test_search_returns_safe_empty_on_retrieval_error(self):
+        class _Retriever(HybridRetriever):
+            async def _semantic_search(self, query, task_id, limit):
+                raise RuntimeError("semantic down")
+
+            async def _keyword_search(self, query, task_id, limit):
+                raise RuntimeError("keyword down")
+
+        retriever = _Retriever()
+        results = await retriever.search("稳定查询")
+        assert results == []
+
     def test_rrf_score_calculation(self):
         retriever = HybridRetriever(k=60)
         r1 = RetrievalResult(content="item")

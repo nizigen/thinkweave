@@ -1,3 +1,25 @@
+## Phase 6 Wave 1 检查点（2026-05-04，06-02 Runtime Hardening）
+
+- SessionMemory 持久化落地：
+  - 新增 Redis 快照键：`session:{task_id}:dedup|territory|summary`
+  - 新增 API：`snapshot / restore / clear_task`
+  - 快照增加 `snapshot_hash` 校验，支持重启恢复与篡改检测。
+- MemoryAdapter 降级边界落地：
+  - cognee provider 异常时自动降级到 in-memory backend；
+  - `degraded` 状态可观测，避免记忆层中断主流程。
+- WriterPool 预算控制接入调度器：
+  - 新增 `backend/app/services/writer_pool.py`
+  - 维度：并发槽、每分钟请求数、每分钟 token 预算
+  - 预算不足时发出 `waiting_budget` 状态更新并等待下一轮预算窗口。
+- RAG 输入校验与安全兜底：
+  - 无效 query 直接空结果；
+  - 语义检索无结果时回退关键词检索；
+  - 检索异常返回安全空结果。
+- 新增/更新测试：
+  - `test_memory_core.py`：adapter fallback、session snapshot/restore/clear、hash 校验
+  - `test_dag_scheduler.py`：WriterPool 并发/RPM/TPM 窗口约束
+  - `test_rag.py`：query validate / fallback / retrieval-error safe empty
+
 ## Phase 6 Wave 3 检查点（2026-05-04，Event-Driven Hot Path + Diagnosis Regression）
 
 - `DAGScheduler` 等待路径改为“事件优先”：

@@ -20,6 +20,7 @@ import pytest_asyncio
 
 from app.config import settings
 from app.services.node_schema import coerce_output_to_role_schema
+from app.services.writer_pool import WriterPool
 from app.services.dag_scheduler import (
     AGENT_BUSY,
     AGENT_IDLE,
@@ -125,6 +126,68 @@ class TestDAGSchedulerInit:
         assert not scheduler._stop.is_set()
         scheduler.stop()
         assert scheduler._stop.is_set()
+
+
+class TestWriterPool:
+    def test_writer_pool_enforces_concurrent_slots(self):
+        pool = WriterPool(
+            max_concurrent_writers=2,
+            max_tokens_per_minute=10000,
+            max_requests_per_minute=100,
+        )
+        assert pool.acquire(node_id="n1", estimated_tokens=100)[0] is True
+        assert pool.acquire(node_id="n2", estimated_tokens=100)[0] is True
+        ok, reason = pool.acquire(node_id="n3", estimated_tokens=100)
+        assert ok is False
+        assert reason == "concurrency_exceeded"
+
+    def test_writer_pool_enforces_request_budget(self):
+        pool = WriterPool(
+            max_concurrent_writers=5,
+            max_tokens_per_minute=10000,
+            max_requests_per_minute=2,
+        )
+        assert pool.acquire(node_id="n1", estimated_tokens=100)[0] is True
+        assert pool.acquire(node_id="n2", estimated_tokens=100)[0] is True
+        pool.release(node_id="n1")
+        pool.release(node_id="n2")
+        ok, reason = pool.acquire(node_id="n3", estimated_tokens=100)
+        assert ok is False
+        assert reason == "request_budget_exceeded"
+
+    def test_writer_pool_enforces_token_budget(self):
+        pool = WriterPool(
+            max_concurrent_writers=5,
+            max_tokens_per_minute=100,
+            max_requests_per_minute=100,
+        )
+        assert pool.acquire(node_id="n1", estimated_tokens=80)[0] is True
+        pool.release(node_id="n1")
+        ok, reason = pool.acquire(node_id="n2", estimated_tokens=30)
+        assert ok is False
+        assert reason == "token_budget_exceeded"
+
+    def test_writer_pool_budget_recovers_after_time_window(self):
+        now = 1000.0
+
+        def _clock():
+            return now
+
+        pool = WriterPool(
+            max_concurrent_writers=5,
+            max_tokens_per_minute=100,
+            max_requests_per_minute=1,
+            clock=_clock,
+        )
+        assert pool.acquire(node_id="n1", estimated_tokens=80)[0] is True
+        pool.release(node_id="n1")
+        ok, _ = pool.acquire(node_id="n2", estimated_tokens=10)
+        assert ok is False
+
+        now += 61.0
+        ok2, reason2 = pool.acquire(node_id="n3", estimated_tokens=10)
+        assert ok2 is True
+        assert reason2 in {"acquired", "already_acquired"}
 
 
 class TestRoleOutputValidation:

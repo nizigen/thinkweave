@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
+
+from app.utils.logger import logger
 
 
 @dataclass(frozen=True)
@@ -26,12 +29,20 @@ class HybridRetriever:
     结果融合：RRF (Reciprocal Rank Fusion) 合并排序。
     """
 
-    def __init__(self, k: int = 60) -> None:
+    def __init__(
+        self,
+        k: int = 60,
+        *,
+        max_query_chars: int = 1024,
+        min_query_chars: int = 2,
+    ) -> None:
         """
         Args:
             k: RRF常数（默认60，标准值）
         """
         self._k = k
+        self._max_query_chars = max(32, int(max_query_chars))
+        self._min_query_chars = max(1, int(min_query_chars))
 
     async def search(
         self,
@@ -50,14 +61,38 @@ class HybridRetriever:
         Returns:
             按相关性排序的检索结果
         """
-        # 并行执行语义检索和关键词检索
-        semantic_results = await self._semantic_search(query, task_id, top_k * 2)
-        keyword_results = await self._keyword_search(query, task_id, top_k * 2)
+        cleaned = self._normalize_query(query)
+        if not self._is_valid_query(cleaned):
+            logger.debug("rag query rejected by validation: '{}'", cleaned[:120])
+            return []
 
-        # RRF融合
-        fused = self._rrf_fuse(semantic_results, keyword_results)
+        limit = max(1, int(top_k)) * 2
+        semantic_results: list[RetrievalResult] = []
+        keyword_results: list[RetrievalResult] = []
+        try:
+            semantic_results = await self._semantic_search(cleaned, task_id, limit)
+        except Exception:
+            logger.opt(exception=True).warning("semantic retrieval failed, fallback to keyword only")
+            semantic_results = []
 
-        return fused[:top_k]
+        if semantic_results:
+            try:
+                keyword_results = await self._keyword_search(cleaned, task_id, limit)
+            except Exception:
+                logger.opt(exception=True).warning("keyword retrieval failed after semantic results")
+                keyword_results = []
+            fused = self._rrf_fuse(semantic_results, keyword_results)
+            return fused[: max(1, int(top_k))]
+
+        try:
+            keyword_results = await self._keyword_search(cleaned, task_id, limit)
+        except Exception:
+            logger.opt(exception=True).warning("keyword retrieval fallback failed")
+            return []
+
+        if not keyword_results:
+            return []
+        return keyword_results[: max(1, int(top_k))]
 
     async def _semantic_search(
         self, query: str, task_id: str | None, limit: int
@@ -122,3 +157,27 @@ class HybridRetriever:
             )
             for key in sorted_keys
         ]
+
+    def _normalize_query(self, query: str) -> str:
+        text = str(query or "")
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > self._max_query_chars:
+            text = text[: self._max_query_chars]
+        return text
+
+    def _is_valid_query(self, query: str) -> bool:
+        if not query:
+            return False
+        if len(query) < self._min_query_chars:
+            return False
+        if query.isdigit():
+            return False
+        tokens = re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{2,}", query)
+        if not tokens:
+            return False
+        informative_tokens = [tok for tok in tokens if not tok.isdigit()]
+        if not informative_tokens:
+            return False
+        if len("".join(informative_tokens)) < self._min_query_chars:
+            return False
+        return True
