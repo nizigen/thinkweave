@@ -50,14 +50,7 @@ Planning implication:
 - Add Reviewer dimensions and FSM gates so prompt instructions are enforceable.
 - Validate with generated OPC UA regression fixtures rather than only unit tests.
 
-### 5. Fact Checking Needs A Dedicated Stage
-Technical statements need specialized verification against standards/source metadata. Folding fact checks into generic review risks unclear ownership and weak routing.
-
-Planning implication:
-- Add FACT_CHECK state and FactCheckAgent after REVIEWING and before CONSISTENCY.
-- Return failed claims to targeted rewrite instead of failing the entire task by default.
-
-### 6. Actionability Requires Different Decomposition
+### 5. Actionability Requires Different Decomposition
 Implementation sections are poor when treated as generic chapter prose. They need structured sub-nodes: checklist, decision matrix, timeline estimate, risk assessment.
 
 Planning implication:
@@ -72,7 +65,7 @@ Wave 1: Stabilize runtime truth before broad refactor.
 
 Wave 2: Enforce output-quality contracts.
 - Plan 06-03: Premise Gate, outline/writer evidence contracts, reviewer evidence dimensions.
-- Plan 06-04: FACT_CHECK, specificity constraints, implementation actionability, consistency feedback loop.
+- Plan 06-04: specificity constraints, implementation actionability, consistency feedback loop.
 
 Wave 3: Event-driven observability and recovery.
 - Plan 06-05: FlowController, event-driven scheduler/realtime protocol, Agent health, manual intervention APIs, E2E validation.
@@ -86,7 +79,6 @@ Wave 3: Event-driven observability and recovery.
 - SessionMemory Redis persistence and restore.
 - RAG query validation and fallback behavior.
 - Reviewer scoring dimensions for evidence, specificity, and source attribution.
-- FactCheckAgent extraction, registry lookup, and failure routing.
 
 ### Integration Tests
 - FSM transition emits state event and audit log exactly once.
@@ -100,9 +92,9 @@ Wave 3: Event-driven observability and recovery.
   - single core thesis present,
   - primary outline chapters are bounded,
   - market/business claims are evidence-bound,
-  - technical OPC UA claims pass fact-check or return targeted failures,
+  - technical OPC UA claims use evidence binding and reviewer/consistency routing,
   - implementation sections include checklist, matrix, estimate, and risk block,
-  - realtime stream exposes preview, review score, fact-check, consistency, and error messages.
+  - realtime stream exposes preview, review score, consistency, and error messages.
 
 ### Safety Constraints
 - Tests must use MockLLMClient and fakeredis.
@@ -117,7 +109,6 @@ Wave 3: Event-driven observability and recovery.
 | StateStore refactor touches high-risk runtime paths | Keep compatibility adapters and migrate one mutation path at a time |
 | Event-driven scheduler changes race with old polling path | Run dual-path with feature flag, then remove polling after tests pass |
 | Quality gates over-constrain generation | Gate thresholds configurable and surfaced in review output |
-| FactCheckAgent becomes domain-specific to OPC UA only | Start with registry abstraction and OPC UA seed fixture; allow generic source-backed fallback |
 | Redis persistence introduces stale memory | Include version/hash on snapshots and clear task-scoped keys on task deletion |
 
 ## RESEARCH COMPLETE

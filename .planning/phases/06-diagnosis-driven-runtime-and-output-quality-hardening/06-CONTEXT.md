@@ -18,7 +18,7 @@ In scope:
 - Runtime correctness: state consistency, optimistic locking, retry ownership, checkpoint completeness, recovery paths.
 - Scheduler and coordination: event-driven Redis Stream flow, Agent health checks, WriterPool limits, FlowController separation.
 - Memory and evidence: SessionMemory persistence, cognee isolation, Evidence Pool readiness, RAG input validation.
-- Output quality gates: premise focus, evidence-backed claims, fact checking, quantified constraints, actionable implementation sections.
+- Output quality gates: premise focus, evidence-backed claims, quantified constraints, actionable implementation sections.
 - User/operator feedback: realtime event protocol, chapter preview, detailed errors, audit logs, manual intervention APIs.
 
 Out of scope:
@@ -44,7 +44,6 @@ Out of scope:
 ### P1 Reliability And Quality Problems
 - DAG scheduling and realtime updates still rely on polling instead of completion/state events.
 - FSM and DAG coordination is coupled; FlowController responsibility is implicit.
-- Technical claims lack a dedicated FACT_CHECK stage and FactCheckAgent.
 - Writer prompts allow vague qualifiers instead of quantified boundary conditions.
 - Implementation sections are generated as strategy prose rather than checklists, matrices, estimates, and risks.
 
@@ -63,13 +62,13 @@ All implementation must preserve the AGENTS.md constraints: Redis Streams only, 
 Runtime state updates must be mediated through a StateStore-style service so FSM transitions, node updates, audit logs, and Redis events are emitted consistently.
 
 ### D3. Retry Ownership Must Be Explicit
-DAG handles transient node execution retries with backoff. FSM handles semantic quality loops such as review, consistency, premise, and fact-check failures. Terminal failure routing must be centralized.
+DAG handles transient node execution retries with backoff. FSM handles semantic quality loops such as review, consistency, and premise failures. Terminal failure routing must be centralized.
 
 ### D4. SessionMemory Must Be Recoverable
 Session dedup, topic territory, and relevant memory snapshots must have a Redis-backed persistence path while retaining `MEMORY_ENABLED=false` fallback behavior.
 
 ### D5. Quality Gates Must Be Enforceable, Not Advisory
-Premise, evidence, fact-check, specificity, and actionability requirements must be encoded in prompts, schemas, reviewer dimensions, FSM routing, and tests.
+Premise, evidence, specificity, and actionability requirements must be encoded in prompts, schemas, reviewer dimensions, FSM routing, and tests.
 
 ### D6. Event Streams Are The User And Operator Contract
 Scheduler, FSM, Agent health, realtime UI, and audit surfaces should consume Redis Stream events instead of polling whenever possible.

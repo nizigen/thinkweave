@@ -28,7 +28,7 @@
 
 ## R7 Event-Driven Coordination And Realtime Feedback
 - Replace scheduler and monitor polling hot paths with Redis Stream event consumption where safe.
-- Define realtime message envelopes for progress, previews, review scores, fact-check results, errors, and Agent health.
+- Define realtime message envelopes for progress, previews, review scores, consistency issues, errors, and Agent health.
 - Support replay/ACK behavior for high-priority realtime messages.
 
 ## R8 Enforced Output Quality Gates
@@ -36,8 +36,7 @@
 - Require claim-evidence binding for market, business, and technical claims.
 - Add reviewer scoring for evidence sufficiency, specificity, and source attribution.
 
-## R9 Fact Check, Specificity, And Actionability
-- Add FACT_CHECK state and FactCheckAgent for technical claim validation.
+## R9 Specificity And Actionability
 - Require quantified boundaries for scenarios, counterexamples, and constraints.
 - Decompose implementation sections into actionable checklist, matrix, timeline, and risk outputs.
 - Route unapplied consistency recommendations back into targeted rewrites.
