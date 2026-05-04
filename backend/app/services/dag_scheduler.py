@@ -2676,6 +2676,7 @@ class DAGScheduler:
             "term_inconsistency",
             "transition_gaps",
             "source_policy_violations",
+            "unapplied_recommendations",
         )
         for bucket in issue_buckets:
             entries = parsed.get(bucket, [])

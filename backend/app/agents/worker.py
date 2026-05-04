@@ -832,6 +832,14 @@ class WorkerAgent(BaseAgent):
                 "evidence_pool_markdown": raw.get("evidence_pool_markdown", ""),
             }
         if agent_role == "writer":
+            constraint_specification = self._load_support_prompt(
+                role="writer",
+                action="constraint_specification",
+            )
+            actionable_output_spec = self._load_support_prompt(
+                role="writer",
+                action="actionable_output",
+            )
             return {
                 "depth": raw.get("depth", ""),
                 "chapter_index": raw.get("chapter_index", ""),
@@ -856,6 +864,8 @@ class WorkerAgent(BaseAgent):
                 "is_assembly_editor": raw.get("is_assembly_editor", False),
                 "title_level_rule": raw.get("title_level_rule", ""),
                 "evidence_rule": raw.get("evidence_rule", ""),
+                "constraint_specification": constraint_specification,
+                "actionable_output_spec": actionable_output_spec,
                 "kg_context": raw.get("kg_context", kg_context or ""),
             }
         if agent_role == "researcher":
@@ -906,6 +916,12 @@ class WorkerAgent(BaseAgent):
                 "evidence_pool_markdown": raw.get("evidence_pool_markdown", ""),
             }
         return raw
+
+    def _load_support_prompt(self, *, role: str, action: str) -> str:
+        try:
+            return self._prompt_loader.load(role, action)
+        except Exception:
+            return ""
 
     def _build_messages(
         self,

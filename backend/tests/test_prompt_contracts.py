@@ -111,11 +111,38 @@ def test_writer_prompt_contract_requires_claim_evidence_mapping():
         is_assembly_editor="false",
         title_level_rule="<=2",
         evidence_rule="strict",
+        constraint_specification="",
+        actionable_output_spec="",
     )
     _assert_contains_all(
         content,
-        ["claim_evidence_map", "missing_evidence_items", "@evidence[MISSING:"],
+        [
+            "claim_evidence_map",
+            "missing_evidence_items",
+            "@evidence[MISSING:",
+            "constraint_specification",
+            "actionable_output_spec",
+        ],
     )
+
+
+def test_consistency_prompt_contract_mentions_unapplied_recommendations():
+    loader = PromptLoader()
+    content = loader.load(
+        "consistency",
+        "check",
+        target_words="10000",
+        chapters_summary="",
+        key_fragments="",
+        full_text="",
+        topic_claims="",
+        chapter_metadata="",
+        source_policy="",
+        research_keywords="",
+        evidence_pool_summary="",
+        evidence_pool_markdown="",
+    )
+    _assert_contains_all(content, ["unapplied_recommendations", "后文提出建议但前文未执行"])
 
 
 def test_revise_prompt_contract():

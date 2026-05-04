@@ -63,6 +63,26 @@ _CHAPTER_TITLE_TEMPLATES = [
     "监测评估与持续优化",
     "长期演进与战略展望",
 ]
+_IMPLEMENTATION_SIGNAL_KEYWORDS = (
+    "implementation",
+    "implement",
+    "how-to",
+    "how to",
+    "rollout",
+    "deployment",
+    "playbook",
+    "步骤",
+    "路径",
+    "实施",
+    "落地",
+    "建议",
+)
+_ACTIONABLE_NODE_SPECS: list[tuple[str, str, str]] = [
+    ("actionable_checklist", "ACTIONABLE_CHECKLIST", "实施检查清单"),
+    ("decision_matrix", "DECISION_MATRIX", "决策矩阵"),
+    ("timeline_estimate", "TIMELINE_ESTIMATE", "时间线估算"),
+    ("risk_assessment", "RISK_ASSESSMENT", "风险评估"),
+]
 
 
 def _parse_chapter_index(title: str) -> int | None:
@@ -84,6 +104,13 @@ def _is_expansion_title(title: str) -> bool:
         return False
     markers = ("扩写", "补写", "整合", "篇幅补足")
     return any(marker in text for marker in markers)
+
+
+def _has_implementation_signal(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    return any(keyword in normalized for keyword in _IMPLEMENTATION_SIGNAL_KEYWORDS)
 
 
 def _normalized_chapter_title(chapter_index: int) -> str:
@@ -571,6 +598,84 @@ def _compact_quick_short_dag(
     return compact
 
 
+def _inject_actionable_implementation_nodes(
+    dag: DAGSchema,
+    *,
+    task_title: str,
+) -> DAGSchema:
+    """Inject actionable implementation sub-nodes for implementation-heavy sections."""
+    if not dag.nodes:
+        return dag
+
+    raw_nodes = [node.model_dump() for node in dag.nodes]
+    existing_ids = {str(node["id"]) for node in raw_nodes}
+    global_signal = _has_implementation_signal(task_title)
+
+    target_writer_ids: list[str] = []
+    for node in raw_nodes:
+        role = str(node.get("role") or "").strip().lower()
+        if role != "writer":
+            continue
+        title = str(node.get("title") or "")
+        if _is_expansion_title(title):
+            continue
+        if _has_implementation_signal(title):
+            target_writer_ids.append(str(node["id"]))
+
+    if not target_writer_ids and global_signal:
+        primary_writers = [
+            node for node in raw_nodes
+            if str(node.get("role") or "").strip().lower() == "writer"
+            and not _is_expansion_title(str(node.get("title") or ""))
+        ]
+        if primary_writers:
+            target_writer_ids.append(str(primary_writers[-1]["id"]))
+
+    if not target_writer_ids:
+        return dag
+
+    actionable_children: dict[str, list[str]] = {}
+    for writer_id in target_writer_ids:
+        writer_node = next((node for node in raw_nodes if str(node.get("id")) == writer_id), None)
+        if writer_node is None:
+            continue
+        chapter_title = str(writer_node.get("title") or "实施章节").strip() or "实施章节"
+        created_ids: list[str] = []
+        for capability, marker, label in _ACTIONABLE_NODE_SPECS:
+            child_id = _allocate_node_id(existing_ids, "n_actionable")
+            raw_nodes.append(
+                {
+                    "id": child_id,
+                    "title": f"{chapter_title} - {marker}（{label}）",
+                    "role": "writer",
+                    "depends_on": [writer_id],
+                    "required_capabilities": [capability],
+                    "routing_mode": "capability_first",
+                }
+            )
+            created_ids.append(child_id)
+        if created_ids:
+            actionable_children[writer_id] = created_ids
+
+    if not actionable_children:
+        return dag
+
+    for node in raw_nodes:
+        role = str(node.get("role") or "").strip().lower()
+        if role not in {"reviewer", "consistency"}:
+            continue
+        deps = [str(dep) for dep in node.get("depends_on", [])]
+        rewritten: list[str] = []
+        for dep in deps:
+            if dep in actionable_children:
+                rewritten.extend(actionable_children[dep])
+            else:
+                rewritten.append(dep)
+        node["depends_on"] = _dedupe_preserve_order(rewritten)
+
+    return DAGSchema.model_validate({"nodes": raw_nodes})
+
+
 # ---------------------------------------------------------------------------
 # Main Decomposition
 # ---------------------------------------------------------------------------
@@ -717,6 +822,10 @@ async def decompose_task_with_trace(
         after = _compact_quick_short_dag(before, depth=depth, target_words=target_words)
         _append_repair_action(trace["repair_actions"], step="compact_quick_short_dag", before=before, after=after)
         dag = after
+        before = dag
+        after = _inject_actionable_implementation_nodes(before, task_title=title)
+        _append_repair_action(trace["repair_actions"], step="inject_actionable_implementation_nodes", before=before, after=after)
+        dag = after
         # Ensure the returned DAG is acyclic.
         validate_dag_acyclic(dag)
         trace["normalized_dag"] = _dag_dump(dag)
@@ -748,6 +857,10 @@ async def decompose_task_with_trace(
         before = dag
         after = _compact_quick_short_dag(before, depth=depth, target_words=target_words)
         _append_repair_action(trace["repair_actions"], step="compact_quick_short_dag", before=before, after=after)
+        dag = after
+        before = dag
+        after = _inject_actionable_implementation_nodes(before, task_title=title)
+        _append_repair_action(trace["repair_actions"], step="inject_actionable_implementation_nodes", before=before, after=after)
         dag = after
         trace["normalized_dag"] = _dag_dump(dag)
         logger.bind(node_count=len(dag.nodes)).info("Fallback DAG generated")

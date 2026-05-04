@@ -324,6 +324,54 @@ class TestParseDAGResponse:
 
         assert len(dag.nodes) >= 7
 
+    @pytest.mark.asyncio
+    async def test_decompose_injects_actionable_nodes_for_implementation_sections(self):
+        class _ImplementationLLM(MockLLMClient):
+            async def chat_json(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                return {
+                    "nodes": [
+                        {"id": "n1", "title": "大纲", "role": "outline", "depends_on": []},
+                        {"id": "n2", "title": "研究", "role": "researcher", "depends_on": ["n1"]},
+                        {
+                            "id": "n3",
+                            "title": "第4章：实施路径与部署建议",
+                            "role": "writer",
+                            "depends_on": ["n2"],
+                        },
+                        {"id": "n4", "title": "第4章审查", "role": "reviewer", "depends_on": ["n3"]},
+                        {"id": "n5", "title": "一致性检查", "role": "consistency", "depends_on": ["n4"]},
+                    ]
+                }
+
+        dag = await decompose_task(
+            title="Industrial implementation rollout plan",
+            mode="report",
+            depth="standard",
+            target_words=12000,
+            llm_client=_ImplementationLLM(),
+        )
+
+        actionable_titles = [
+            node.title for node in dag.nodes
+            if node.role == "writer"
+            and any(
+                marker in node.title
+                for marker in (
+                    "ACTIONABLE_CHECKLIST",
+                    "DECISION_MATRIX",
+                    "TIMELINE_ESTIMATE",
+                    "RISK_ASSESSMENT",
+                )
+            )
+        ]
+        assert any("ACTIONABLE_CHECKLIST" in title for title in actionable_titles)
+        assert any("DECISION_MATRIX" in title for title in actionable_titles)
+        assert any("TIMELINE_ESTIMATE" in title for title in actionable_titles)
+        assert any("RISK_ASSESSMENT" in title for title in actionable_titles)
+
+        reviewer_node = next(node for node in dag.nodes if node.role == "reviewer")
+        assert "n3" not in reviewer_node.depends_on
+
 
 class TestDecomposeTask:
     @pytest.mark.asyncio

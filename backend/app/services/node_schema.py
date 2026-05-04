@@ -174,6 +174,9 @@ def _coerce_consistency_output(content: str) -> str:
         "source_policy_violations": parsed.get("source_policy_violations")
         if isinstance(parsed.get("source_policy_violations"), list)
         else [],
+        "unapplied_recommendations": parsed.get("unapplied_recommendations")
+        if isinstance(parsed.get("unapplied_recommendations"), list)
+        else [],
         "severity_summary": parsed.get("severity_summary")
         if isinstance(parsed.get("severity_summary"), dict)
         else {"critical": 0, "high": 0, "medium": 0, "low": 0},
@@ -266,6 +269,7 @@ def has_valid_schema_for_role(role: str | None, content: str) -> bool:
             "transition_gaps",
             "language_policy_conflicts",
             "source_policy_violations",
+            "unapplied_recommendations",
         ):
             if k in parsed and not isinstance(parsed.get(k), list):
                 return False

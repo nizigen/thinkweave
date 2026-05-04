@@ -365,3 +365,54 @@ async def test_consistency_agent_normalizes_extended_document_contract():
     user_prompt = llm.calls[0]["messages"][-1]["content"]
     assert "claim-a" in user_prompt
     assert "word_count" in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_consistency_agent_flags_unapplied_recommendations():
+    llm = MockLLMClient()
+    llm.chat = AsyncMock(
+        return_value=json.dumps(
+            {
+                "pass": True,
+                "style_conflicts": [],
+                "claim_conflicts": [],
+                "duplicate_coverage": [],
+                "term_inconsistency": [],
+                "transition_gaps": [],
+                "language_policy_conflicts": [],
+                "source_policy_violations": [],
+                "severity_summary": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+                "repair_priority": [],
+                "repair_targets": [],
+            },
+            ensure_ascii=False,
+        )
+    )
+    agent = ConsistencyAgent(
+        agent_id=uuid.uuid4(),
+        name="consistency-policy",
+        llm_client=llm,
+        middlewares=(),
+    )
+
+    full_text = (
+        "## 第2章：现状\n已有内容未提及验收指标。\n"
+        "## 第6章：实施建议\n建议补充统一验收指标并绑定责任人。"
+    )
+    result = await agent.handle_task(
+        {
+            "task_id": "t1",
+            "title": "Consistency check",
+            "payload": {
+                "chapters_summary": "",
+                "full_text": full_text,
+                "topic_claims": [],
+                "chapter_metadata": [],
+            },
+        }
+    )
+    parsed = json.loads(result)
+    assert parsed["pass"] is False
+    assert isinstance(parsed.get("unapplied_recommendations"), list)
+    assert len(parsed["unapplied_recommendations"]) >= 1
+    assert 6 in parsed.get("repair_targets", [])

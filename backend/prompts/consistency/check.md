@@ -48,6 +48,9 @@
   "source_policy_violations": [
     {{"chapter_index": 2, "problem": "来源策略不合规", "suggestion": "降级确定性或补充合规证据", "severity": "high"}}
   ],
+  "unapplied_recommendations": [
+    {{"chapter_index": 6, "problem": "后文建议未在前文执行", "recommendation": "应补充实施验收指标", "severity": "high"}}
+  ],
   "severity_summary": {{"critical": 0, "high": 0, "medium": 3, "low": 1}},
   "repair_priority": [],
   "repair_targets": []
@@ -60,3 +63,4 @@
 4. 当 `pass=false` 时，repair_targets 不能为空；当 `pass=true` 时可为空。
 5. repair_priority 必须按“严重度 + 影响面”排序。
 6. 不得凭空捏造冲突；必须可在输入文本中定位到依据。
+7. 若发现“后文提出建议但前文未执行”，必须写入 `unapplied_recommendations` 并给出目标章节。

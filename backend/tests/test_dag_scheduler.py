@@ -587,6 +587,18 @@ class TestConsistencyRepairBudget:
         }
         assert scheduler._consistency_has_actionable_issues(parsed) is False
 
+    def test_consistency_actionable_detection_true_with_unapplied_recommendations(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        parsed = {
+            "unapplied_recommendations": [{"chapter_index": 6, "severity": "high"}],
+            "repair_targets": [],
+            "repair_priority": [],
+            "severity_summary": {"critical": 0, "high": 1, "medium": 0, "low": 0},
+        }
+        assert scheduler._consistency_has_actionable_issues(parsed) is True
+
     @pytest.mark.asyncio
     async def test_consume_repair_budget_allows_within_quota(
         self,
