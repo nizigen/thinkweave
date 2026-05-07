@@ -22,19 +22,17 @@ from tests.conftest import MockLLMClient
 
 class TestModelConfig:
     def test_model_config_frozen(self):
-        cfg = ModelConfig(provider="openai", model="gpt-4o")
+        cfg = ModelConfig(provider="deepseek", model="deepseek/deepseek-v3.2")
         with pytest.raises(AttributeError):
             cfg.provider = "deepseek"  # type: ignore[misc]
 
     def test_registry_has_required_models(self):
-        assert "gpt-4o" in MODEL_REGISTRY
-        assert "deepseek-chat" in MODEL_REGISTRY
+        assert "deepseek-v3.2" in MODEL_REGISTRY
+        assert "deepseek-v3.2" in MODEL_REGISTRY
 
     def test_fallback_chain(self):
-        gpt = MODEL_REGISTRY["gpt-4o"]
-        ds = MODEL_REGISTRY["deepseek-chat"]
-        assert gpt.fallback == "deepseek-chat"
-        assert ds.fallback == "gpt-4o"
+        ds = MODEL_REGISTRY["deepseek-v3.2"]
+        assert ds.fallback is None
 
     def test_role_model_map_covers_all_roles(self):
         expected_roles = {
@@ -57,19 +55,19 @@ class TestModelResolution:
         self.client._tracker = None
 
     def test_explicit_model_wins(self):
-        assert self.client._resolve_model("gpt-4o", "writer") == "gpt-4o"
+        assert self.client._resolve_model("deepseek-v3.2", "writer") == "deepseek-v3.2"
 
     def test_role_mapping(self):
-        assert self.client._resolve_model(None, "writer") == "deepseek-chat"
-        assert self.client._resolve_model(None, "orchestrator") == "gpt-4o"
+        assert self.client._resolve_model(None, "writer") == "deepseek-v3.2"
+        assert self.client._resolve_model(None, "orchestrator") == "deepseek-v3.2"
 
     def test_fallback_to_default(self):
         result = self.client._resolve_model(None, None)
-        assert result == "gpt-4o"  # settings.default_model
+        assert result == "deepseek-v3.2"  # settings.default_model
 
     def test_unknown_role_uses_default(self):
         result = self.client._resolve_model(None, "unknown_role")
-        assert result == "gpt-4o"
+        assert result == "deepseek-v3.2"
 
 
 class TestRetryFallbackOverrides:
@@ -85,9 +83,9 @@ class TestRetryFallbackOverrides:
 
     def test_resolve_fallback_chain_prefers_override(self):
         chain = self.client._resolve_fallback_chain(
-            model_name="gpt-4o",
-            default_fallback="deepseek-chat",
-            fallback_models=["deepseek-chat", "gpt-4o", "deepseek-chat"],
+            model_name="deepseek-v3.2",
+            default_fallback=None,
+            fallback_models=["deepseek-chat", "deepseek-v3.2", "deepseek-chat"],
         )
         assert chain == ["deepseek-chat"]
 
@@ -101,7 +99,7 @@ class TestRetryFallbackOverrides:
         )
 
         result = await self.client._call_with_retry(
-            "gpt-4o",
+            "deepseek-v3.2",
             AsyncMock(),
             max_retries=2,
             fallback_models=["deepseek-chat"],
@@ -110,8 +108,8 @@ class TestRetryFallbackOverrides:
         assert result == "ok"
         calls = self.client._try_model.call_args_list
         assert calls[0].kwargs["max_attempts"] == 2
-        assert calls[0].args[0].model == "gpt-4o"
-        assert calls[1].args[0].model == "deepseek/deepseek-chat"
+        assert calls[0].args[0].model == "deepseek/deepseek-v3.2"
+        assert calls[1].args[0].model == "deepseek/deepseek-v3.2"
 
 
 # ---------------------------------------------------------------------------
@@ -289,13 +287,13 @@ class TestGatewayResponseCompatibility:
     @pytest.mark.asyncio
     async def test_chat_accepts_string_response(self):
         client = LLMClient.__new__(LLMClient)
-        client._clients = {"openai": _FakeProviderClient("plain text response")}
+        client._clients = {"deepseek": _FakeProviderClient("plain text response")}
         client._tracker = None
         client._allow_build_clients = False
 
         result = await client.chat(
             [{"role": "user", "content": "hello"}],
-            model="gpt-4o",
+            model="deepseek-v3.2",
         )
 
         assert result == "plain text response"
@@ -311,13 +309,13 @@ class TestGatewayResponseCompatibility:
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
         client = LLMClient.__new__(LLMClient)
-        client._clients = {"openai": _FakeProviderClient(payload)}
+        client._clients = {"deepseek": _FakeProviderClient(payload)}
         client._tracker = None
         client._allow_build_clients = False
 
         result = await client.chat_json(
             [{"role": "user", "content": "return json"}],
-            model="gpt-4o",
+            model="deepseek-v3.2",
         )
 
         assert result == {"ok": True, "value": 1}
@@ -334,13 +332,13 @@ class TestGatewayResponseCompatibility:
             ]
         }
         client = LLMClient.__new__(LLMClient)
-        client._clients = {"openai": _FakeProviderClient(payload)}
+        client._clients = {"deepseek": _FakeProviderClient(payload)}
         client._tracker = None
         client._allow_build_clients = False
 
         result = await client.chat_json(
             [{"role": "user", "content": "return json"}],
-            model="gpt-4o",
+            model="deepseek-v3.2",
         )
 
         assert "nodes" in result
@@ -358,18 +356,18 @@ class TestGatewayResponseCompatibility:
             ]
         }
         client = LLMClient.__new__(LLMClient)
-        client._clients = {"openai": _FakeProviderClient(payload)}
+        client._clients = {"deepseek": _FakeProviderClient(payload)}
         client._tracker = None
         client._allow_build_clients = False
         monkeypatch.setitem(
             MODEL_REGISTRY,
-            "gpt-4o",
+            "deepseek-v3.2",
             ModelConfig(
-                provider="openai",
-                model="gpt-4o",
+                provider="deepseek",
+                model="deepseek/deepseek-v3.2",
                 supports_streaming=True,
                 supports_json_mode=True,
-                max_tokens=4096,
+                max_tokens=8192,
                 fallback=None,
             ),
         )
@@ -377,7 +375,7 @@ class TestGatewayResponseCompatibility:
         with pytest.raises(LLMUnavailableError, match="gateway/WAF"):
             await client.chat(
                 [{"role": "user", "content": "hello"}],
-                model="gpt-4o",
+                model="deepseek-v3.2",
             )
 
 

@@ -16,7 +16,7 @@ function resolveDefaultApiBase() {
 
   // Vite dev/preview ports: auto-wire frontend -> backend for local runs.
   if (port === '5173' || port === '4173') {
-    return `${protocol}//${hostname}:8000`
+    return `${protocol}//${hostname}:18080`
   }
   return ''
 }
@@ -29,8 +29,8 @@ function resolveDefaultToken() {
   const isLocalHost =
     window.location.hostname === 'localhost' ||
     window.location.hostname === '127.0.0.1'
-  if (isLocalHost && import.meta.env.DEV) {
-    return 'test-token-123'
+  if (isLocalHost) {
+    return 'local-dev-admin-token'
   }
   return ''
 }
@@ -51,4 +51,19 @@ export function authHeaders(extra = {}) {
     headers.Authorization = `Bearer ${token}`
   }
   return headers
+}
+
+export async function requestJson(path, options = {}) {
+  const response = await fetch(apiUrl(path), options)
+  if (!response.ok) {
+    let detail = ''
+    try {
+      const body = await response.json()
+      detail = body?.detail ? ` - ${body.detail}` : ''
+    } catch {
+      detail = ''
+    }
+    throw new Error(`HTTP ${response.status}${detail}`)
+  }
+  return response.json()
 }

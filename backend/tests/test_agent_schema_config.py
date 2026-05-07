@@ -12,7 +12,6 @@ def test_agent_config_defaults():
     cfg = AgentConfig()
     assert cfg.temperature == 0.3
     assert cfg.max_retries == 3
-    assert cfg.max_tool_iterations == 1
     assert cfg.fallback_models == []
 
 
@@ -28,8 +27,8 @@ def test_agent_create_accepts_agent_config():
         layer=2,
         agent_config=AgentConfig(
             goal="Produce low-overlap chapters",
-            max_tool_iterations=2,
+            skill_allowlist=["technical_report"],
         ),
     )
     assert agent.agent_config is not None
-    assert agent.agent_config.max_tool_iterations == 2
+    assert agent.agent_config.skill_allowlist == ["technical_report"]

@@ -11,11 +11,13 @@
 - research_keywords: {research_keywords}
 - evidence_pool_summary: {evidence_pool_summary}
 - evidence_pool_markdown: {evidence_pool_markdown}
+- memory_context: {memory_context}
 
 ## 审计流程（必须执行）
 1. 先用 chapters_summary 做全局扫描，定位章节冲突候选。
 2. 再用 key_fragments/full_text 做关键回查，避免仅凭摘要误判。
-3. 输出问题时必须给到具体章节与修复动作。
+3. 结合 memory_context 回查上一轮修复历史，避免重复报错或回归。
+4. 输出问题时必须给到具体章节与修复动作。
 
 ## 判定策略（可用优先，降低阻断）
 1. 仅当存在 critical/high 问题时，`pass=false`。

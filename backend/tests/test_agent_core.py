@@ -758,6 +758,7 @@ class TestWorkerAgent:
                 "node_id": "n2",
                 "title": "Consistency check",
                 "agent_role": "consistency",
+                "memory_context": "上一轮已统一术语：MVP=最小可行产品",
                 "payload": {"full_draft": "chapter draft text"},
             }
         )
@@ -767,6 +768,8 @@ class TestWorkerAgent:
         ]
         user_prompt = consistency_calls[0]["messages"][-1]["content"]
         assert "Full Text" in user_prompt
+        assert "memory_context" in user_prompt
+        assert "上一轮已统一术语" in user_prompt
 
     async def test_quick_low_word_tasks_use_fast_model_override(self, mock_llm):
         agent = WorkerAgent(
@@ -789,7 +792,7 @@ class TestWorkerAgent:
         )
         writer_calls = [c for c in mock_llm.call_log if c.get("role") == "writer"]
         assert writer_calls
-        assert any(call.get("model") == "deepseek-v4-flash" for call in writer_calls)
+        assert any(call.get("model") == "deepseek-v3.2" for call in writer_calls)
 
     async def test_writer_repairs_review_style_json_output(self):
         class RepairMockLLM:

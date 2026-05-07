@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import select
@@ -32,6 +33,85 @@ _TERMINAL_TASK_STATUSES = {
     "cancelled",
     "canceled",
 }
+
+
+def _allocate_hierarchy_node_id(existing_ids: set[str], base: str) -> str:
+    if base not in existing_ids:
+        existing_ids.add(base)
+        return base
+    suffix = 1
+    while True:
+        candidate = f"{base}_{suffix}"
+        if candidate not in existing_ids:
+            existing_ids.add(candidate)
+            return candidate
+        suffix += 1
+
+
+def _inject_hierarchy_entry_nodes(dag: DAGSchema) -> bool:
+    """Inject L0/L1 lightweight entry nodes without changing downstream business DAG."""
+    if not getattr(dag, "nodes", None):
+        return False
+
+    existing_ids = {str(getattr(node, "id", "")).strip() for node in dag.nodes}
+    existing_ids = {v for v in existing_ids if v}
+    orchestrator_id = _allocate_hierarchy_node_id(existing_ids, "l0_orchestrator_entry")
+    manager_id = _allocate_hierarchy_node_id(existing_ids, "l1_manager_dispatch")
+
+    original_nodes = list(dag.nodes)
+    root_nodes = [
+        node
+        for node in original_nodes
+        if not list(getattr(node, "depends_on", []) or [])
+    ]
+    if not root_nodes:
+        return False
+
+    for node in root_nodes:
+        deps = list(getattr(node, "depends_on", []) or [])
+        if manager_id not in deps:
+            deps.append(manager_id)
+        setattr(node, "depends_on", deps)
+
+    orchestrator_node = SimpleNamespace(
+        id=orchestrator_id,
+        title="L0 编排入口：任务统筹与流程启动",
+        role="orchestrator",
+        depends_on=[],
+        required_capabilities=[],
+        preferred_agents=[],
+        routing_mode="auto",
+    )
+    manager_node = SimpleNamespace(
+        id=manager_id,
+        title="L1 管理入口：资源协调与执行放行",
+        role="manager",
+        depends_on=[orchestrator_id],
+        required_capabilities=[],
+        preferred_agents=[],
+        routing_mode="auto",
+    )
+    dag.nodes = [orchestrator_node, manager_node, *original_nodes]
+    return True
+
+
+async def _has_idle_hierarchy_agents(session: AsyncSession) -> bool:
+    """Return whether both L0/L1 roles are immediately dispatchable (idle)."""
+    if not hasattr(session, "execute"):
+        return False
+    try:
+        result = await session.execute(
+            select(Agent.role).where(Agent.status == "idle")
+        )
+    except Exception:
+        logger.opt(exception=True).warning("failed to probe idle hierarchy agents; keep legacy flow")
+        return False
+    roles = {
+        str(row[0] or "").strip().lower()
+        for row in result.all()
+        if str(row[0] or "").strip()
+    }
+    return "orchestrator" in roles and "manager" in roles
 
 
 def _build_decomposition_audit_summary(
@@ -495,12 +575,27 @@ async def create_task(
         depth=task_in.depth,
         target_words=task_in.target_words,
     )
+    hierarchy_injected = False
+    hierarchy_enabled = await _has_idle_hierarchy_agents(session)
+    if hierarchy_enabled:
+        hierarchy_injected = _inject_hierarchy_entry_nodes(dag)
+        if hierarchy_injected:
+            logger.bind(task_id=str(task.id)).info(
+                "hierarchy entry nodes injected into runtime DAG (L0 -> L1 -> L2)"
+            )
     checkpoint = (
         dict(task.checkpoint_data)
         if isinstance(task.checkpoint_data, dict)
         else {}
     )
     checkpoint.update(pipeline_meta)
+    pipeline = checkpoint.get("pipeline") if isinstance(checkpoint.get("pipeline"), dict) else {}
+    pipeline = dict(pipeline)
+    pipeline["hierarchy_entry"] = {
+        "enabled": bool(hierarchy_enabled),
+        "injected": bool(hierarchy_injected),
+    }
+    checkpoint["pipeline"] = pipeline
     task.checkpoint_data = checkpoint
     decomposition_trace = (
         pipeline_meta.get("decomposition_trace")

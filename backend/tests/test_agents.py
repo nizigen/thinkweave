@@ -26,9 +26,8 @@ VALID_AGENT = {
         "temperature": 0.4,
         "max_tokens": 4000,
         "max_retries": 3,
-        "max_tool_iterations": 2,
         "fallback_models": ["gpt-5.2", "deepseek-v3.2"],
-        "tool_allowlist": ["web_search", "vector_retrieve"],
+        "skill_allowlist": ["technical_report"],
     },
 }
 
@@ -128,10 +127,7 @@ class TestCreateAgent:
         assert resp.status_code == 201
         data = resp.json()
         assert data["agent_config"] is not None
-        assert data["agent_config"]["max_tool_iterations"] == 3
         assert "writer_evidence_first_policy" in data["agent_config"]["skill_allowlist"]
-        assert "tavily_search" in data["agent_config"]["tool_allowlist"]
-        assert "search_code" in data["agent_config"]["tool_allowlist"]
 
     async def test_create_preserves_user_provided_agent_config(
         self,
@@ -144,18 +140,14 @@ class TestCreateAgent:
                 "role": "writer",
                 "layer": 2,
                 "agent_config": {
-                    "max_tool_iterations": 1,
                     "skill_allowlist": ["technical_report"],
-                    "tool_allowlist": ["search_files"],
                 },
             },
             headers=AUTH_HEADERS,
         )
         assert resp.status_code == 201
         data = resp.json()
-        assert data["agent_config"]["max_tool_iterations"] == 1
         assert data["agent_config"]["skill_allowlist"] == ["technical_report"]
-        assert data["agent_config"]["tool_allowlist"] == ["search_files"]
 
     async def test_create_missing_required_field(self, client: AsyncClient):
         resp = await client.post(
@@ -210,12 +202,6 @@ class TestReadAgents:
         writer = next(item for item in data if item["role"] == "writer")
         assert writer["layer"] == 2
         assert "writer_evidence_first_policy" in writer["agent_config"]["skill_allowlist"]
-
-    async def test_tool_options_available(self, client: AsyncClient):
-        resp = await client.get("/api/agents/tool-options", headers=AUTH_HEADERS)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
 
     async def test_get_health_returns_runtime_snapshot(self, client: AsyncClient):
         create_resp = await client.post("/api/agents", json=VALID_AGENT, headers=AUTH_HEADERS)

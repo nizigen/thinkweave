@@ -815,10 +815,64 @@ class LongTextFSM:
         return text
 
     @staticmethod
+    def _parse_chinese_chapter_number(raw: str) -> int | None:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        if text.isdigit():
+            value = int(text)
+            return value if value > 0 else None
+
+        digit_map = {
+            "零": 0,
+            "〇": 0,
+            "一": 1,
+            "二": 2,
+            "两": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+            "九": 9,
+        }
+        unit_map = {"十": 10, "百": 100, "千": 1000}
+
+        total = 0
+        current = 0
+        pending = 0
+        seen = False
+        for ch in text:
+            if ch in digit_map:
+                pending = digit_map[ch]
+                seen = True
+                continue
+            if ch in unit_map:
+                unit = unit_map[ch]
+                if pending == 0:
+                    pending = 1
+                current += pending * unit
+                pending = 0
+                seen = True
+                continue
+            return None
+        if not seen:
+            return None
+        value = total + current + pending
+        return value if value > 0 else None
+
+    @staticmethod
     def _parse_chapter_meta(title: str) -> tuple[int | None, str]:
         text = str(title or "").strip()
         if not text:
             return None, ""
+        cn_match = re.search(r"第\s*([零〇一二两三四五六七八九十百千\d]+)\s*章[:：]?\s*(.*)", text)
+        if cn_match:
+            chapter_index = LongTextFSM._parse_chinese_chapter_number(cn_match.group(1))
+            if chapter_index is not None:
+                chapter_title = str(cn_match.group(2) or "").strip() or text
+                return chapter_index, chapter_title
         for pattern in (
             r"第\s*(\d+)\s*章[:：]?\s*(.*)",
             r"(?i)\bchapter\s*(\d+)\b[:：\-]?\s*(.*)",

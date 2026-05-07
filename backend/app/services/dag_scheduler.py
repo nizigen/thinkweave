@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import time
 import uuid
@@ -250,6 +251,54 @@ def _extract_word_budget_hint(text: str) -> int | None:
         value = int(match.group(1))
     except Exception:
         return None
+    return value if value > 0 else None
+
+
+def _parse_chinese_chapter_number(raw: str) -> int | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.isdigit():
+        value = int(text)
+        return value if value > 0 else None
+
+    digit_map = {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    unit_map = {"十": 10, "百": 100, "千": 1000}
+
+    total = 0
+    current = 0
+    pending = 0
+    seen = False
+    for ch in text:
+        if ch in digit_map:
+            pending = digit_map[ch]
+            seen = True
+            continue
+        if ch in unit_map:
+            unit = unit_map[ch]
+            if pending == 0:
+                pending = 1
+            current += pending * unit
+            pending = 0
+            seen = True
+            continue
+        return None
+    if not seen:
+        return None
+    value = total + current + pending
     return value if value > 0 else None
 
 
@@ -1543,6 +1592,7 @@ class DAGScheduler:
             try:
                 assignment_payload = await self._build_assignment_payload(
                     session=session,
+                    agent_id=agent_id,
                     node_id=node_id,
                     node_title=node_title or "",
                     node_role=node_role or "",
@@ -1600,6 +1650,7 @@ class DAGScheduler:
         self,
         *,
         session: AsyncSession,
+        agent_id: uuid.UUID,
         node_id: uuid.UUID,
         node_title: str,
         node_role: str,
@@ -1607,6 +1658,15 @@ class DAGScheduler:
         routing_reason: str,
         routing_mode: str,
     ) -> dict[str, Any]:
+        persisted_agent = await session.get(Agent, agent_id)
+        agent = persisted_agent or Agent(
+            id=agent_id,
+            name="",
+            role=str(node_role or ""),
+            layer=2,
+            model="",
+            status="idle",
+        )
         payload: dict[str, Any] = {
             "title": node_title,
             "agent_role": node_role,
@@ -1614,6 +1674,26 @@ class DAGScheduler:
             "routing_reason": routing_reason,
             "routing_mode": routing_mode,
         }
+        agent_config_raw = getattr(agent, "agent_config", None)
+        agent_config: dict[str, Any] = (
+            dict(agent_config_raw)
+            if isinstance(agent_config_raw, dict)
+            else {}
+        )
+        if agent_config:
+            payload["agent_config"] = agent_config
+        payload["model"] = str(getattr(agent, "model", "") or "")
+        payload["skill_allowlist"] = (
+            list(agent_config.get("skill_allowlist", []))
+            if isinstance(agent_config.get("skill_allowlist", []), list)
+            else []
+        )
+        tags = (
+            list(agent_config.get("tags", []))
+            if isinstance(agent_config.get("tags", []), list)
+            else []
+        )
+        payload["tags"] = tags
         stage_code = resolve_stage_code(role=node_role, title=node_title)
         payload["stage_code"] = stage_code
         payload["schema_version"] = SCHEMA_VERSION
@@ -1953,6 +2033,13 @@ class DAGScheduler:
             return None, ""
         match = re.search(r"第\s*(\d+)\s*章[:：]?\s*(.*)", text)
         if not match:
+            cn_match = re.search(r"第\s*([零〇一二两三四五六七八九十百千\d]+)\s*章[:：]?\s*(.*)", text)
+            if cn_match:
+                chapter_index = _parse_chinese_chapter_number(cn_match.group(1))
+                if chapter_index is not None:
+                    chapter_title = (cn_match.group(2) or "").strip() or text
+                    return chapter_index, chapter_title
+        if not match:
             match = re.search(r"(?i)\bchapter\s*(\d+)\b[:：\-]?\s*(.*)", text)
         if not match:
             match = re.search(r"(?i)\bch(?:apter)?\.?\s*(\d+)\b[:：\-]?\s*(.*)", text)
@@ -1967,7 +2054,15 @@ class DAGScheduler:
         text = (title or "").strip()
         if not text:
             return False
-        markers = ("扩写", "补写", "整合", "篇幅补足")
+        markers = (
+            "自动补写",
+            "补写轮次",
+            "扩写",
+            "篇幅补足",
+            "一致性定向修复",
+            "一致性修复",
+            "全稿扩写",
+        )
         return any(marker in text for marker in markers)
 
     @classmethod
@@ -2112,9 +2207,9 @@ class DAGScheduler:
                 if content:
                     return content
             return ""
-        marker = f"第{chapter_index}章"
         for title, content in writer_nodes:
-            if marker in title and content:
+            parsed_index, _ = self._parse_chapter_meta(str(title or ""))
+            if parsed_index == chapter_index and content:
                 return content
         for _, content in writer_nodes:
             if content:
@@ -2350,17 +2445,35 @@ class DAGScheduler:
                                 fallback_targets=repair_targets,
                             )
                             if not allowed:
+                                if await self._should_soften_consistency_failure(
+                                    session=session,
+                                    node_retry_count=node_retry_count,
+                                    reason="repair_budget_exhausted",
+                                ):
+                                    await self._record_consistency_soft_failure(
+                                        session=session,
+                                        parsed=parsed,
+                                        reason="repair_budget_exhausted",
+                                        budget_report=budget_report,
+                                    )
+                                    await session.commit()
+                                    logger.bind(
+                                        task_id=str(self.task_id),
+                                        node_id=str(node_id),
+                                    ).warning(
+                                        "consistency repair budget exhausted, but softened to keep workflow closed"
+                                    )
+                                    await self.on_node_completed(
+                                        node_id=node_id,
+                                        result=output,
+                                        agent_id=agent_id,
+                                    )
+                                    continue
                                 await self.on_node_failed(
                                     node_id=node_id,
                                     error=(
-                                        "BUDGET_EXCEEDED:"
-                                        + json.dumps(
-                                            {
-                                                "reason": "consistency_repair_budget_exhausted",
-                                                "report": budget_report or {},
-                                            },
-                                            ensure_ascii=False,
-                                        )
+                                        "Consistency repair budget exhausted before max retries "
+                                        f"(retry={node_retry_count}/{MAX_RETRIES - 1})"
                                     ),
                                     agent_id=agent_id,
                                 )
@@ -2385,7 +2498,11 @@ class DAGScheduler:
                                     )
                                     continue
                             if node_retry_count >= (MAX_RETRIES - 1):
-                                if await self._should_soften_consistency_failure(session=session):
+                                if await self._should_soften_consistency_failure(
+                                    session=session,
+                                    node_retry_count=node_retry_count,
+                                    reason="pass_false_after_max_retries",
+                                ):
                                     await self._record_consistency_soft_failure(
                                         session=session,
                                         parsed=parsed,
@@ -2509,16 +2626,26 @@ class DAGScheduler:
         except TimeoutError:
             pass
 
-    async def _should_soften_consistency_failure(self, *, session: AsyncSession) -> bool:
-        # Personal-use relaxed mode: consistency pass=false should not block finalization.
+    async def _should_soften_consistency_failure(
+        self,
+        *,
+        session: AsyncSession,
+        node_retry_count: int,
+        reason: str = "pass_false_after_max_retries",
+    ) -> bool:
         _ = session
-        return True
+        _ = reason
+        # Policy: consistency issues should trigger repair/retry first.
+        # Auto-pass is allowed only after retry budget is exhausted.
+        return int(node_retry_count) >= (MAX_RETRIES - 1)
 
     async def _record_consistency_soft_failure(
         self,
         *,
         session: AsyncSession,
         parsed: dict[str, Any],
+        reason: str = "pass_false_after_max_retries",
+        budget_report: dict[str, Any] | None = None,
     ) -> None:
         task = await session.get(Task, self.task_id)
         if task is None:
@@ -2529,10 +2656,11 @@ class DAGScheduler:
         events.append(
             {
                 "at": datetime.now(UTC).isoformat(),
-                "reason": "pass_false_after_max_retries",
+                "reason": str(reason or "pass_false_after_max_retries"),
                 "severity_summary": parsed.get("severity_summary", {}),
                 "repair_targets": _normalize_repair_targets(parsed.get("repair_targets")),
                 "repair_priority": _normalize_repair_priority(parsed.get("repair_priority")),
+                "budget_report": budget_report or {},
             }
         )
         checkpoint["consistency_soft_failures"] = events[-10:]
@@ -3097,6 +3225,17 @@ class DAGScheduler:
         session: AsyncSession,
     ) -> bool:
         """Ensure a dedicated global assembly editor node runs before finalize."""
+        assembly_enabled = str(
+            os.getenv("ENABLE_ASSEMBLY_EDITOR_WAVE", "false")
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if not assembly_enabled:
+            return False
+
+        task = await session.get(Task, self.task_id)
+        depth = str(getattr(task, "depth", "") or "").strip().lower() if task is not None else ""
+        if depth == "quick":
+            return False
+
         writer_rows = await session.execute(
             select(TaskNode.id, TaskNode.title, TaskNode.result)
             .where(TaskNode.task_id == self.task_id)
@@ -3121,7 +3260,6 @@ class DAGScheduler:
         if usable_count < 2:
             return False
 
-        task = await session.get(Task, self.task_id)
         target_words = int(getattr(task, "target_words", 0) or 0) if task is not None else 0
         suggested = 0 if target_words <= 0 else max(1800, min(9000, int(target_words * 0.18)))
         suffix = f"（目标补写约{suggested}字）" if suggested > 0 else ""
@@ -3326,8 +3464,6 @@ class DAGScheduler:
             return False, "invalid_target"
         if current_words <= 0:
             return False, "no_usable_output"
-        if depth == "quick":
-            return False, "quick_depth_disabled"
 
         rows = await session.execute(
             select(TaskNode.title, TaskNode.result, TaskNode.status)
@@ -3352,7 +3488,8 @@ class DAGScheduler:
             if is_valid_writer_output_text(text) or _count_text_units(markdown) >= 600:
                 primary_usable += 1
 
-        if primary_usable < 2:
+        required_primary = 1 if depth == "quick" else 2
+        if primary_usable < required_primary:
             return False, "insufficient_primary_chapters"
 
         gap = max(0, target_words - current_words)
@@ -3413,51 +3550,53 @@ class DAGScheduler:
 
         inserted_ids: list[uuid.UUID] = []
         chapter_units = await self._collect_writer_chapter_units(session)
-        candidate_chapters: list[int] = [
-            chapter_index
-            for chapter_index, _ in sorted(chapter_units, key=lambda item: (item[1], item[0]))
-        ]
+        if not chapter_units:
+            logger.bind(
+                task_id=str(self.task_id),
+                target_words=target_words,
+                current_words=current_words,
+            ).warning("auto-expansion skipped: no chapter candidates")
+            return False
 
-        if candidate_chapters:
-            for idx in range(min(expansion_nodes, len(candidate_chapters))):
-                chapter_index = int(candidate_chapters[idx])
-                title = (
-                    f"第{chapter_index}章：自动补写轮次{wave_no}"
-                    f"（目标补写约{per_node_budget}字）"
+        chapter_count = max(1, len(chapter_units))
+        baseline_per_chapter = max(800, target_words // chapter_count)
+        chapter_deficits: list[tuple[int, int, int]] = []
+        for chapter_index, units in chapter_units:
+            deficit = max(0, baseline_per_chapter - max(0, int(units)))
+            chapter_deficits.append((int(chapter_index), int(deficit), int(units)))
+
+        chapter_deficits.sort(key=lambda item: (-item[1], item[0]))
+        candidates = [row for row in chapter_deficits if row[1] > 0]
+        if not candidates:
+            # If all chapters are close to baseline but global total still fails,
+            # expand the currently shortest chapters to close remaining gap.
+            candidates = sorted(chapter_deficits, key=lambda item: (item[2], item[0]))
+
+        for idx in range(min(expansion_nodes, len(candidates))):
+            chapter_index = int(candidates[idx][0])
+            title = (
+                f"第{chapter_index}章：自动补写轮次{wave_no}"
+                f"（目标补写约{per_node_budget}字）"
+            )
+            node_id = uuid.uuid4()
+            inserted_ids.append(node_id)
+            session.add(
+                TaskNode(
+                    id=node_id,
+                    task_id=self.task_id,
+                    title=title,
+                    agent_role="writer",
+                    status=STATUS_READY,
+                    depends_on=[],
+                    retry_count=0,
                 )
-                node_id = uuid.uuid4()
-                inserted_ids.append(node_id)
-                session.add(
-                    TaskNode(
-                        id=node_id,
-                        task_id=self.task_id,
-                        title=title,
-                        agent_role="writer",
-                        status=STATUS_READY,
-                        depends_on=[],
-                        retry_count=0,
-                    )
-                )
-        else:
-            for idx in range(expansion_nodes):
-                suffix = f"（分片{idx + 1}/{expansion_nodes}）" if expansion_nodes > 1 else ""
-                title = (
-                    f"自动补写轮次{wave_no}：全稿扩写与篇幅补足{suffix}"
-                    f"（目标补写约{per_node_budget}字）"
-                )
-                node_id = uuid.uuid4()
-                inserted_ids.append(node_id)
-                session.add(
-                    TaskNode(
-                        id=node_id,
-                        task_id=self.task_id,
-                        title=title,
-                        agent_role="writer",
-                        status=STATUS_READY,
-                        depends_on=[],
-                        retry_count=0,
-                    )
-                )
+            )
+
+        if not inserted_ids:
+            logger.bind(task_id=str(self.task_id)).warning(
+                "auto-expansion skipped: chapter candidates exhausted"
+            )
+            return False
         task = await session.get(Task, self.task_id)
         if task is not None:
             checkpoint = normalize_checkpoint_data(getattr(task, "checkpoint_data", None))

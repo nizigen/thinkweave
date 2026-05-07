@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from abc import ABC
 from collections import OrderedDict
@@ -234,6 +235,7 @@ class ContextSummaryMiddleware(AgentMiddleware):
 
 class MemoryMiddleware(AgentMiddleware):
     """Role-aware session memory injection and persistence."""
+    _QUICK_MEMORY_SOFT_TIMEOUT_SECONDS = 2.0
 
     def __init__(
         self,
@@ -246,6 +248,44 @@ class MemoryMiddleware(AgentMiddleware):
         self._max_cached_sessions = max(1, max_cached_sessions)
         self._sessions: OrderedDict[str, Any] = OrderedDict()
         self._knowledge_graph = knowledge_graph
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+
+    def _track_background_task(self, task: asyncio.Task[Any], *, label: str) -> None:
+        self._background_tasks.add(task)
+
+        def _on_done(done: asyncio.Task[Any]) -> None:
+            self._background_tasks.discard(done)
+            try:
+                done.result()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "memory background task failed: {}",
+                    label,
+                )
+
+        task.add_done_callback(_on_done)
+
+    async def _store_with_quick_soft_timeout(
+        self,
+        *,
+        session: Any,
+        result: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        task = asyncio.create_task(session.store(result, metadata=metadata))
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=self._QUICK_MEMORY_SOFT_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            self._track_background_task(task, label="session.store")
+            logger.info(
+                "memory store switched to background for quick path after {:.1f}s",
+                self._QUICK_MEMORY_SOFT_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            raise
 
     def _get_session(self, task_id: str) -> Any:
         session = self._sessions.get(task_id)
@@ -272,7 +312,22 @@ class MemoryMiddleware(AgentMiddleware):
                 f"{payload.get('chapter_title', ctx.get('title', ''))}"
             ).strip()
         if agent.role == "consistency":
-            return "cross chapter consistency and terminology summary"
+            title = str(ctx.get("title", "")).strip()
+            keywords = str(payload.get("research_keywords", "")).strip()
+            chapter_hints = str(payload.get("chapters_summary", "")).strip()
+            if len(chapter_hints) > 200:
+                chapter_hints = chapter_hints[:200]
+            query = " ".join(
+                item
+                for item in (
+                    "跨章节一致性 术语统一",
+                    title,
+                    keywords,
+                    chapter_hints,
+                )
+                if item
+            ).strip()
+            return query or "跨章节一致性"
         return str(ctx.get("title", "task memory context")).strip()
 
     def _format_rows(self, rows: list[dict[str, Any]]) -> str:
@@ -356,8 +411,21 @@ class MemoryMiddleware(AgentMiddleware):
                 return result
 
             metadata = self._build_store_metadata(agent, ctx, result)
-            await session.store(result, metadata=metadata)
-            if agent.role == "outline":
+            payload = ctx.get("payload", {})
+            depth = ""
+            if isinstance(payload, dict):
+                depth = str(payload.get("depth", "")).strip().lower()
+            if depth == "quick":
+                await self._store_with_quick_soft_timeout(
+                    session=session,
+                    result=result,
+                    metadata=metadata,
+                )
+            else:
+                await session.store(result, metadata=metadata)
+            # Territory map extraction can be expensive on first cognee call.
+            # Keep quick-path latency predictable by skipping this heavy step.
+            if agent.role == "outline" and depth != "quick":
                 await session.store_territory_map(result)
         except Exception:
             logger.opt(exception=True).warning(

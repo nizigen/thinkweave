@@ -33,7 +33,7 @@ def parse_skill(text: str, source_path: str = "") -> Skill:
     Raises:
         SkillParseError: frontmatter缺失或格式错误
     """
-    stripped = text.strip()
+    stripped = text.lstrip("\ufeff").strip()
     if not stripped.startswith("---"):
         raise SkillParseError(
             f"Missing YAML frontmatter in {source_path or 'input'}"

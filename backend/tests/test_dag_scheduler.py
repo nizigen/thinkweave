@@ -330,6 +330,15 @@ class TestWriterBudgetHelpers:
         idx2, _ = scheduler._parse_chapter_meta("Ch. 3 - Results")
         assert idx2 == 3
 
+    def test_parse_chapter_meta_supports_chinese_numeral_titles(self, scheduler: DAGScheduler):
+        idx, name = scheduler._parse_chapter_meta("第一章：背景与问题定义")
+        assert idx == 1
+        assert "背景" in name
+
+        idx2, name2 = scheduler._parse_chapter_meta("第十二章：实施路径")
+        assert idx2 == 12
+        assert "实施路径" in name2
+
     def test_primary_writer_count_excludes_expansion_titles(self, scheduler: DAGScheduler):
         writer_nodes = [
             ("第1章：背景", "content-a"),
@@ -342,6 +351,7 @@ class TestWriterBudgetHelpers:
     def test_expansion_title_detection(self, scheduler: DAGScheduler):
         assert scheduler._is_expansion_writer_title("第3章：实验（扩写）") is True
         assert scheduler._is_expansion_writer_title("全稿扩写与篇幅补足") is True
+        assert scheduler._is_expansion_writer_title("术语整合与口径统一") is False
         assert scheduler._is_expansion_writer_title("第3章：实验设计") is False
 
     @pytest.mark.asyncio
@@ -421,9 +431,20 @@ class TestWriterBudgetHelpers:
     ):
         task = SimpleNamespace(checkpoint_data={})
         session = AsyncMock()
-        execute_result = MagicMock()
-        execute_result.all.return_value = []
-        session.execute = AsyncMock(return_value=execute_result)
+        wave_rows = MagicMock()
+        wave_rows.all.return_value = []
+        chapter_rows = MagicMock()
+        chapter_rows.all.return_value = [
+            (
+                "第1章：背景",
+                '{"chapter_title":"第1章：背景","content_markdown":"第一章正文较短。","paragraphs":[{"text":"第一章正文较短。","citation_keys":[]}]}',
+            ),
+            (
+                "第2章：方法",
+                '{"chapter_title":"第2章：方法","content_markdown":"第二章正文较长一些。第二章正文较长一些。","paragraphs":[{"text":"第二章正文较长一些。第二章正文较长一些。","citation_keys":[]}]}',
+            ),
+        ]
+        session.execute = AsyncMock(side_effect=[wave_rows, chapter_rows])
         session.get = AsyncMock(return_value=task)
         session.add = MagicMock()
         session.flush = AsyncMock()
@@ -483,11 +504,96 @@ class TestWriterBudgetHelpers:
         assert any(title.startswith("第1章：自动补写轮次1") for title in titles)
 
     @pytest.mark.asyncio
-    async def test_allow_auto_expansion_disabled_for_quick_depth(
+    async def test_auto_expansion_skips_when_no_chapter_candidates(
         self,
         scheduler: DAGScheduler,
     ):
+        task = SimpleNamespace(checkpoint_data={})
         session = AsyncMock()
+        wave_rows = MagicMock()
+        wave_rows.all.return_value = []
+        chapter_rows = MagicMock()
+        chapter_rows.all.return_value = [
+            ("全稿扩写建议", '{"content_markdown":"无章节编号正文"}'),
+        ]
+        session.execute = AsyncMock(side_effect=[wave_rows, chapter_rows])
+        session.get = AsyncMock(return_value=task)
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new=AsyncMock()),
+            patch("app.services.dag_scheduler.push_ready_node", new=AsyncMock()),
+        ):
+            created = await scheduler._enqueue_auto_expansion_wave(
+                session=session,
+                target_words=10000,
+                current_words=7000,
+            )
+
+        assert created is False
+        assert session.add.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_assembly_editor_wave_disabled_for_quick_depth(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        task = SimpleNamespace(depth="quick", target_words=1000, checkpoint_data={})
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=task)
+        session.execute = AsyncMock()
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        created = await scheduler._ensure_assembly_editor_wave(session=session)
+        assert created is False
+        assert session.execute.await_count == 0
+        assert session.add.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_assembly_editor_wave_disabled_by_env_flag(
+        self,
+        scheduler: DAGScheduler,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        monkeypatch.setenv("ENABLE_ASSEMBLY_EDITOR_WAVE", "false")
+        task = SimpleNamespace(depth="standard", target_words=10000, checkpoint_data={})
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=task)
+        session.execute = AsyncMock()
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+
+        created = await scheduler._ensure_assembly_editor_wave(session=session)
+        assert created is False
+        assert session.execute.await_count == 0
+        assert session.add.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_allow_auto_expansion_enabled_for_quick_depth_with_one_primary_chapter(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        long_text = "第一章正文充分，满足基本可用长度。" * 80
+        writer_payload = json.dumps(
+            {
+                "chapter_title": "第1章：背景",
+                "content_markdown": long_text,
+                "paragraphs": [{"text": long_text, "citation_keys": []}],
+            },
+            ensure_ascii=False,
+        )
+        rows = MagicMock()
+        rows.all.return_value = [
+            (
+                "第1章：背景",
+                writer_payload,
+                "done",
+            ),
+        ]
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=rows)
         with patch.object(settings, "enable_finalize_auto_expansion", True):
             allowed, reason = await scheduler._allow_auto_expansion_after_finalize(
                 session=session,
@@ -496,8 +602,8 @@ class TestWriterBudgetHelpers:
                 current_words=1200,
                 depth="quick",
             )
-        assert allowed is False
-        assert reason == "quick_depth_disabled"
+        assert allowed is True
+        assert reason == "ok"
 
     @pytest.mark.asyncio
     async def test_allow_auto_expansion_disabled_by_policy_flag(
@@ -2212,7 +2318,7 @@ class TestConsistencyRepairWave:
         mock_failed.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_drain_task_results_fails_when_consistency_budget_exhausted(
+    async def test_drain_task_results_softens_when_consistency_budget_exhausted(
         self,
         scheduler: DAGScheduler,
     ):
@@ -2223,9 +2329,11 @@ class TestConsistencyRepairWave:
             "output": json.dumps(
                 {
                     "pass": False,
-                    "style_conflicts": [],
-                    "claim_conflicts": [],
+                    "style_conflicts": [{"chapter_index": 2, "severity": "high"}],
+                    "claim_conflicts": [{"chapter_index": 2, "severity": "high"}],
                     "repair_targets": [2],
+                    "repair_priority": [2],
+                    "severity_summary": {"critical": 0, "high": 1, "medium": 0, "low": 0},
                 },
                 ensure_ascii=False,
             ),
@@ -2252,8 +2360,34 @@ class TestConsistencyRepairWave:
                 scheduler,
                 "_inject_consistency_repair_wave",
                 new_callable=AsyncMock,
-                return_value=False,  # repair wave budget exhausted
+                return_value=False,
             ) as mock_inject,
+            patch.object(
+                scheduler,
+                "_consume_consistency_repair_budget",
+                new_callable=AsyncMock,
+                return_value=(
+                    False,
+                    [2],
+                    {
+                        "total_points": 4,
+                        "remaining_points_before": 1,
+                        "required_points": 5,
+                        "selected_targets": [2],
+                    },
+                ),
+            ) as mock_budget,
+            patch.object(
+                scheduler,
+                "_should_soften_consistency_failure",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as mock_soften,
+            patch.object(
+                scheduler,
+                "_record_consistency_soft_failure",
+                new_callable=AsyncMock,
+            ) as mock_record_soft,
             patch.object(
                 scheduler,
                 "on_node_completed",
@@ -2275,8 +2409,103 @@ class TestConsistencyRepairWave:
             await scheduler._drain_task_results()
 
         mock_inject.assert_not_awaited()
+        mock_budget.assert_awaited_once()
+        mock_soften.assert_awaited_once()
+        mock_record_soft.assert_awaited_once()
         mock_completed.assert_awaited_once()
         mock_failed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_drain_task_results_budget_exhausted_before_max_retries_keeps_retrying(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        node_id = make_uuid()
+        agent_id = make_uuid()
+        payload = {
+            "status": "done",
+            "output": json.dumps(
+                {
+                    "pass": False,
+                    "style_conflicts": [{"chapter_index": 2, "severity": "high"}],
+                    "claim_conflicts": [{"chapter_index": 2, "severity": "high"}],
+                    "repair_targets": [2],
+                    "repair_priority": [2],
+                    "severity_summary": {"critical": 0, "high": 1, "medium": 0, "low": 0},
+                },
+                ensure_ascii=False,
+            ),
+        }
+        envelope = SimpleNamespace(
+            msg_type="task_result",
+            node_id=str(node_id),
+            from_agent=str(agent_id),
+            payload=payload,
+        )
+
+        with (
+            patch(
+                "app.services.dag_scheduler.xread_latest",
+                new_callable=AsyncMock,
+                return_value=[SimpleNamespace(message_id="1-0", data={})],
+            ),
+            patch(
+                "app.services.dag_scheduler.MessageEnvelope.from_redis",
+                return_value=envelope,
+            ),
+            patch("app.services.dag_scheduler.async_session_factory") as mock_factory,
+            patch.object(
+                scheduler,
+                "_inject_consistency_repair_wave",
+                new_callable=AsyncMock,
+                return_value=False,
+            ) as mock_inject,
+            patch.object(
+                scheduler,
+                "_consume_consistency_repair_budget",
+                new_callable=AsyncMock,
+                return_value=(
+                    False,
+                    [2],
+                    {
+                        "total_points": 4,
+                        "remaining_points_before": 1,
+                        "required_points": 5,
+                        "selected_targets": [2],
+                    },
+                ),
+            ) as mock_budget,
+            patch.object(
+                scheduler,
+                "_record_consistency_soft_failure",
+                new_callable=AsyncMock,
+            ) as mock_record_soft,
+            patch.object(
+                scheduler,
+                "on_node_completed",
+                new_callable=AsyncMock,
+            ) as mock_completed,
+            patch.object(
+                scheduler,
+                "on_node_failed",
+                new_callable=AsyncMock,
+            ) as mock_failed,
+        ):
+            mock_session = AsyncMock()
+            role_row = MagicMock()
+            role_row.first.return_value = ("consistency", "一致性检查", 0)
+            mock_session.execute = AsyncMock(return_value=role_row)
+            mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await scheduler._drain_task_results()
+
+        mock_inject.assert_not_awaited()
+        mock_budget.assert_awaited_once()
+        mock_record_soft.assert_not_awaited()
+        mock_completed.assert_not_awaited()
+        mock_failed.assert_awaited_once()
+        assert "budget exhausted before max retries" in str(mock_failed.await_args.kwargs.get("error", "")).lower()
 
     @pytest.mark.asyncio
     async def test_inject_repair_wave_compacts_nodes_for_quick_low_word_task(

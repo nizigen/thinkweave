@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from typing import Any
 
@@ -107,6 +109,35 @@ async def test_memory_middleware_outline_roundtrip_reads_writes_and_stores_terri
 
 
 @pytest.mark.asyncio
+async def test_memory_middleware_outline_quick_skips_territory_map():
+    stub = _StubSessionEnabled()
+    mw = MemoryMiddleware(session_factory=lambda _tid: stub)
+    agent = _SimpleAgent(
+        agent_id=uuid.uuid4(),
+        name="outline",
+        role="outline",
+        layer=2,
+        llm_client=_DummyLLM(),
+        middlewares=(),
+    )
+    ctx = {
+        "task_id": "t2q",
+        "title": "outline quick topic",
+        "node_id": "n1",
+        "payload": {"depth": "quick"},
+    }
+
+    after_before = await mw.before_task(agent, ctx)
+    assert "existing context" in after_before["memory_context"]
+
+    out = await mw.after_task(agent, after_before, "outline result")
+    assert out == "outline result"
+    assert len(stub.stored) == 1
+    assert stub.territory_calls == 0
+    assert stub.stored[0][1]["role"] == "outline"
+
+
+@pytest.mark.asyncio
 async def test_memory_middleware_writer_roundtrip_uses_query_context_and_stores_metadata():
     stub = _StubSessionEnabled()
     mw = MemoryMiddleware(session_factory=lambda _tid: stub)
@@ -150,10 +181,21 @@ async def test_memory_middleware_consistency_role_injects_memory_context():
         llm_client=_DummyLLM(),
         middlewares=(),
     )
-    ctx = {"task_id": "t4", "title": "consistency pass"}
+    ctx = {
+        "task_id": "t4",
+        "title": "一人公司增长系统一致性检查",
+        "payload": {
+            "research_keywords": "一人公司,增长系统,术语统一",
+            "chapters_summary": "第1章定位 第2章获客 第3章交付",
+        },
+    }
 
     after_before = await mw.before_task(agent, ctx)
     assert "existing context" in after_before["memory_context"]
+    assert stub.queries
+    query, _limit = stub.queries[0]
+    assert "跨章节一致性" in query
+    assert "一人公司增长系统一致性检查" in query
 
 
 class _StubSessionQueryFails:
@@ -182,6 +224,25 @@ class _StubSessionStoreFails:
 
     async def store_territory_map(self, content: str):
         raise RuntimeError("territory failed")
+
+
+class _StubSessionSlowStore:
+    def __init__(self):
+        self.store_calls = 0
+
+    async def initialize(self):
+        return True
+
+    async def query(self, query: str, limit: int = 5):
+        return [{"content": "existing context"}]
+
+    async def store(self, content: str, metadata=None):
+        await asyncio.sleep(0.2)
+        self.store_calls += 1
+        return None
+
+    async def store_territory_map(self, content: str):
+        return {}
 
 
 @pytest.mark.asyncio
@@ -216,6 +277,32 @@ async def test_memory_middleware_degrades_gracefully_when_store_fails():
     after_before = await mw.before_task(agent, ctx)
     out = await mw.after_task(agent, after_before, "outline result")
     assert out == "outline result"
+
+
+@pytest.mark.asyncio
+async def test_memory_middleware_quick_store_soft_timeout_backgrounds_write():
+    stub = _StubSessionSlowStore()
+    mw = MemoryMiddleware(session_factory=lambda _tid: stub)
+    mw._QUICK_MEMORY_SOFT_TIMEOUT_SECONDS = 0.05
+    agent = _SimpleAgent(
+        agent_id=uuid.uuid4(),
+        name="writer",
+        role="writer",
+        layer=2,
+        llm_client=_DummyLLM(),
+        middlewares=(),
+    )
+    ctx = {"task_id": "t6q", "title": "quick chapter", "payload": {"depth": "quick"}}
+
+    after_before = await mw.before_task(agent, ctx)
+    t0 = time.monotonic()
+    out = await mw.after_task(agent, after_before, "writer result")
+    elapsed = time.monotonic() - t0
+
+    assert out == "writer result"
+    assert elapsed < 0.15
+    await asyncio.sleep(0.25)
+    assert stub.store_calls == 1
 
 
 @pytest.mark.asyncio

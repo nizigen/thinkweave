@@ -1,0 +1,6 @@
+node_modules
+dist
+npm-debug.log
+.playwright-cli
+frontend-dev.err.log
+frontend-dev.out.log

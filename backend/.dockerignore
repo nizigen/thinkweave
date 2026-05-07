@@ -4,3 +4,9 @@
 .venv
 __pycache__
 logs
+.cognee_system
+.cognee_data
+.cognee_cache
+artifacts
+reports
+*.log

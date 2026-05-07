@@ -1,18 +1,18 @@
+FROM node:20-bookworm-slim AS node_runtime
+
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# 系统依赖（用于 asyncpg 编译）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# 从 Node 官方镜像注入 npx 运行时，避免 apt 源波动影响构建
+COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node_runtime /usr/local/bin/npm /usr/local/bin/npm
+COPY --from=node_runtime /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=node_runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 # 先复制依赖文件，利用 Docker 层缓存
 COPY requirements.txt .
-RUN uv pip install --system -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY . .

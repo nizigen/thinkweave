@@ -14,6 +14,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
+from app.agents.runtime_config import resolve_llm_call_params
+from app.skills.loader import SkillLoader
 from app.utils.logger import logger
 
 
@@ -48,6 +50,7 @@ class ManagerAgent(BaseAgent):
                 f"must be one of {sorted(_MANAGER_ROLE_PROMPTS)}"
             )
         self.manager_role = manager_role
+        self._skill_loader = SkillLoader()
 
     async def handle_task(self, ctx: dict[str, Any]) -> str:
         """处理管理层任务 — 根据 manager_role 执行不同逻辑。
@@ -71,6 +74,9 @@ class ManagerAgent(BaseAgent):
         log.info("processing manager task: {}", self.manager_role)
 
         system_prompt = _MANAGER_ROLE_PROMPTS[self.manager_role]
+        skill_instructions = self._build_skill_instructions(payload)
+        if skill_instructions:
+            system_prompt += f"\n\n## Skill Constraints\n{skill_instructions}"
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -79,10 +85,44 @@ class ManagerAgent(BaseAgent):
             messages.append({"role": "user", "content": f"当前上下文：\n{context_info}"})
         messages.append({"role": "user", "content": instruction or ctx.get("title", "")})
 
-        result = await self.llm_client.chat(
-            messages=messages,
-            role="manager",
-        )
+        llm_params = resolve_llm_call_params(ctx)
+        try:
+            result = await self.llm_client.chat(
+                messages=messages,
+                role="manager",
+                model=llm_params.get("model"),
+                max_tokens=llm_params.get("max_tokens"),
+                temperature=float(llm_params.get("temperature", 0.3)),
+                max_retries=llm_params.get("max_retries"),
+                fallback_models=llm_params.get("fallback_models"),
+            )
+        except TypeError:
+            # Backward-compat path for older mocks without retry/fallback kwargs.
+            result = await self.llm_client.chat(
+                messages=messages,
+                role="manager",
+                model=llm_params.get("model"),
+                max_tokens=llm_params.get("max_tokens"),
+                temperature=float(llm_params.get("temperature", 0.3)),
+            )
 
         log.info("manager task completed")
         return result
+
+    def _build_skill_instructions(self, payload: dict[str, Any]) -> str:
+        allowlist = payload.get("skill_allowlist", [])
+        if not isinstance(allowlist, list) or not allowlist:
+            cfg = payload.get("agent_config", {})
+            if isinstance(cfg, dict):
+                allowlist = cfg.get("skill_allowlist", [])
+        if not isinstance(allowlist, list) or not allowlist:
+            return ""
+
+        self._skill_loader.reload()
+        snippets: list[str] = []
+        for name in allowlist:
+            skill = self._skill_loader.get(str(name))
+            if skill is None:
+                continue
+            snippets.append(f"### {skill.name}\n{skill.content}")
+        return "\n\n".join(snippets)

@@ -14,7 +14,6 @@ from app.schemas.agent import (
     ModelOptionRead,
     RolePresetRead,
     SkillOptionRead,
-    ToolOptionRead,
 )
 from app.security.auth import require_admin_user_id
 from app.services import agent_manager
@@ -58,13 +57,6 @@ async def list_agent_skill_options(
     _user_id: str = Depends(require_admin_user_id),
 ):
     return agent_manager.list_agent_skill_options()
-
-
-@router.get("/tool-options", response_model=list[ToolOptionRead])
-async def list_agent_tool_options(
-    _user_id: str = Depends(require_admin_user_id),
-):
-    return agent_manager.list_agent_tool_options()
 
 
 @router.get("/{agent_id}", response_model=AgentRead)

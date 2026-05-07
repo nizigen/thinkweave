@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from typing import TYPE_CHECKING, Any
 
 from app.memory.adapter import MemoryAdapter
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
 
 SESSION_SNAPSHOT_SCHEMA_VERSION = "session-memory:v1"
+SESSION_RETENTION_SCHEDULE_KEY = "session_memory:retention:datasets"
 
 
 class SessionMemory:
@@ -38,6 +40,7 @@ class SessionMemory:
         self._dedup_cache: set[str] = set()
         self._territory_cache: dict[str, Any] = {}
         self._summary_cache: dict[str, Any] = {}
+        self._cognified_once = False
 
     async def initialize(self) -> bool:
         self.namespace = (
@@ -46,6 +49,8 @@ class SessionMemory:
         self._initialized = True
         if self.adapter.enabled and not self._restored:
             await self.restore()
+        if self.adapter.enabled:
+            await self._run_retention_maintenance()
         return self.adapter.enabled
 
     async def _ensure_initialized(self) -> None:
@@ -74,6 +79,106 @@ class SessionMemory:
         except Exception:
             logger.opt(exception=True).warning("session memory redis client unavailable")
             return None
+
+    @staticmethod
+    def _supports_redis_command(client: Any, name: str) -> bool:
+        return hasattr(client, name)
+
+    def _retention_seconds(self) -> int:
+        try:
+            value = int(getattr(self.adapter.config, "memory_session_retention_seconds", 0))
+        except Exception:
+            value = 0
+        return max(0, value)
+
+    async def _expire_snapshot_keys(self, *, retention_seconds: int) -> None:
+        if retention_seconds <= 0:
+            return
+        client = await self._get_redis()
+        if client is None:
+            return
+        if not self._supports_redis_command(client, "expire"):
+            return
+        try:
+            await client.expire(self._dedup_key, retention_seconds)
+            await client.expire(self._territory_key, retention_seconds)
+            await client.expire(self._summary_key, retention_seconds)
+        except Exception:
+            logger.opt(exception=True).warning("failed to set session memory redis ttl")
+
+    async def _schedule_dataset_cleanup(self, *, retention_seconds: int) -> None:
+        if retention_seconds <= 0:
+            return
+        client = await self._get_redis()
+        if client is None:
+            return
+        if not self._supports_redis_command(client, "zadd"):
+            return
+        dataset_name = self.adapter._namespace_to_dataset(self.namespace)
+        run_at = float(time.time()) + float(retention_seconds)
+        payload = json.dumps(
+            {
+                "task_id": self.task_id,
+                "namespace": self.namespace,
+                "dataset": dataset_name,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        try:
+            await client.zadd(SESSION_RETENTION_SCHEDULE_KEY, {payload: run_at})
+        except Exception:
+            logger.opt(exception=True).warning("failed to enqueue session memory cleanup")
+
+    async def _run_retention_maintenance(self) -> None:
+        client = await self._get_redis()
+        if client is None:
+            return
+        if not self._supports_redis_command(client, "zrangebyscore"):
+            return
+
+        now = float(time.time())
+        try:
+            due = await client.zrangebyscore(SESSION_RETENTION_SCHEDULE_KEY, 0, now)
+        except Exception:
+            return
+
+        for raw in due or []:
+            payload = str(raw or "").strip()
+            if not payload:
+                continue
+
+            task_id = ""
+            namespace = ""
+            dataset = ""
+            try:
+                record = json.loads(payload)
+                if isinstance(record, dict):
+                    task_id = str(record.get("task_id") or "").strip()
+                    namespace = str(record.get("namespace") or "").strip()
+                    dataset = str(record.get("dataset") or "").strip()
+            except Exception:
+                dataset = payload
+
+            target = dataset or namespace
+            if target:
+                await self.adapter.forget_dataset(target)
+
+            if task_id and self._supports_redis_command(client, "delete"):
+                try:
+                    await client.delete(
+                        f"session:{task_id}:dedup",
+                        f"session:{task_id}:territory",
+                        f"session:{task_id}:summary",
+                    )
+                except Exception:
+                    logger.opt(exception=True).warning("failed to delete retained session keys")
+
+            if self._supports_redis_command(client, "zrem"):
+                try:
+                    await client.zrem(SESSION_RETENTION_SCHEDULE_KEY, payload)
+                except Exception:
+                    pass
 
     @staticmethod
     def _content_hash(content: str) -> str:
@@ -230,6 +335,16 @@ class SessionMemory:
             namespace=self.namespace,
             metadata=metadata,
         )
+        if self.adapter.enabled and not self._cognified_once:
+            auto_cognify = bool(
+                getattr(self.adapter.config, "memory_auto_cognify_on_store", True)
+            )
+            if auto_cognify:
+                try:
+                    await self.adapter.cognify(content, namespace=self.namespace)
+                    self._cognified_once = True
+                except Exception:
+                    logger.opt(exception=True).warning("session memory auto-cognify failed")
         self._dedup_cache.add(digest)
         self._summary_cache[digest] = {
             "summary": str(content or "")[:500],
@@ -246,12 +361,99 @@ class SessionMemory:
         *,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
+        def _summary_fallback_rows(query_text: str, take: int) -> list[dict[str, Any]]:
+            if take <= 0 or not self._summary_cache:
+                return []
+
+            normalized_query = str(query_text or "").strip().lower()
+            values = list(self._summary_cache.values())
+            selected: list[dict[str, Any]] = []
+
+            for row in reversed(values):
+                if not isinstance(row, dict):
+                    continue
+                summary = str(row.get("summary", "")).strip()
+                metadata = row.get("metadata", {})
+                metadata_dict = metadata if isinstance(metadata, dict) else {}
+                if not summary:
+                    continue
+
+                if normalized_query:
+                    haystack = " ".join(
+                        str(item or "")
+                        for item in (
+                            summary,
+                            metadata_dict.get("title", ""),
+                            metadata_dict.get("chapter_title", ""),
+                            metadata_dict.get("role", ""),
+                        )
+                    ).lower()
+                    if normalized_query not in haystack:
+                        continue
+
+                selected.append(
+                    {
+                        "content": summary,
+                        "metadata": metadata_dict,
+                        "score": 0.01,
+                        "source": "session_summary_cache",
+                    }
+                )
+                if len(selected) >= take:
+                    break
+
+            if selected:
+                return selected
+
+            for row in reversed(values):
+                if not isinstance(row, dict):
+                    continue
+                summary = str(row.get("summary", "")).strip()
+                if not summary:
+                    continue
+                metadata = row.get("metadata", {})
+                metadata_dict = metadata if isinstance(metadata, dict) else {}
+                selected.append(
+                    {
+                        "content": summary,
+                        "metadata": metadata_dict,
+                        "score": 0.01,
+                        "source": "session_summary_cache",
+                    }
+                )
+                if len(selected) >= take:
+                    break
+            return selected
+
         await self._ensure_initialized()
-        return await self.adapter.search(
+        rows = await self.adapter.search(
             query,
             namespace=self.namespace,
             limit=limit,
         )
+        if rows:
+            return rows
+
+        if (
+            self.adapter.enabled
+            and self._write_count > 0
+            and not self._cognified_once
+        ):
+            try:
+                await self.adapter.cognify(query, namespace=self.namespace)
+                self._cognified_once = True
+                rows = await self.adapter.search(
+                    query,
+                    namespace=self.namespace,
+                    limit=limit,
+                )
+            except Exception:
+                logger.opt(exception=True).warning("session memory query recovery cognify failed")
+        if rows:
+            return rows
+        if self.adapter.enabled and self._summary_cache:
+            return _summary_fallback_rows(query, limit)
+        return rows
 
     async def store_territory_map(self, content: str) -> dict[str, Any]:
         await self._ensure_initialized()
@@ -320,7 +522,19 @@ class SessionMemory:
             "write_count": self._write_count,
             "promoted_to_kg": promotion_count,
         }
-        await self.clear_task()
+        retention_seconds = self._retention_seconds()
+        result["retention_seconds"] = retention_seconds
+
+        if self.adapter.enabled:
+            if retention_seconds > 0:
+                await self._schedule_dataset_cleanup(retention_seconds=retention_seconds)
+                await self._expire_snapshot_keys(retention_seconds=retention_seconds)
+            else:
+                await self.adapter.forget_dataset(self.namespace)
+                await self.clear_task()
+        else:
+            await self.clear_task()
+
+        self._clear_local_cache()
         self._initialized = False
         return result
-

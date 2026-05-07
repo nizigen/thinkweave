@@ -20,9 +20,12 @@ class MemoryConfig(BaseSettings):
     graph_database_provider: str = "kuzu"
     vector_database_provider: str = "lancedb"
     enable_backend_access_control: bool = False
+    memory_provider_timeout_seconds: float = 15.0
 
     memory_embedding_model: str = "text-embedding-3-small"
     memory_namespace_prefix: str = "task"
+    memory_session_retention_seconds: int = 86400
+    memory_auto_cognify_on_store: bool = True
 
     model_config = {
         "env_file": _BACKEND_ENV_FILE,

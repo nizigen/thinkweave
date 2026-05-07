@@ -19,11 +19,9 @@ class AgentConfig(BaseModel):
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2000, ge=1, le=32000)
     max_retries: int = Field(default=3, ge=0, le=10)
-    max_tool_iterations: int = Field(default=1, ge=1, le=50)
 
     fallback_models: list[str] = Field(default_factory=list)
     skill_allowlist: list[str] = Field(default_factory=list)
-    tool_allowlist: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
 
@@ -104,16 +102,8 @@ class SkillOptionRead(BaseModel):
     source_path: str = ""
 
 
-class ToolOptionRead(BaseModel):
-    name: str
-    description: str = ""
-    server_name: str = ""
-
-
 class RolePresetConfigRead(BaseModel):
     skill_allowlist: list[str] = Field(default_factory=list)
-    tool_allowlist: list[str] = Field(default_factory=list)
-    max_tool_iterations: int = Field(default=1, ge=1, le=50)
 
 
 class RolePresetRead(BaseModel):

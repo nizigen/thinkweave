@@ -347,6 +347,15 @@ class TestFSMTransitionExecution:
 
 
 class TestFinalizeOutputAssembly:
+    def test_parse_chapter_meta_supports_chinese_numeral_titles(self):
+        idx, title = LongTextFSM._parse_chapter_meta("第一章：行业现状")
+        assert idx == 1
+        assert "行业现状" in title
+
+        idx2, title2 = LongTextFSM._parse_chapter_meta("第十二章：实施路径")
+        assert idx2 == 12
+        assert "实施路径" in title2
+
     @pytest.mark.asyncio
     async def test_finalize_output_orders_by_chapter_and_skips_non_chapter_nodes(
         self,

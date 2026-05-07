@@ -718,6 +718,7 @@ async def decompose_task(
     model: str | None = None,
     max_retries: int | None = None,
     fallback_models: list[str] | None = None,
+    extra_instructions: str | None = None,
 ) -> DAGSchema:
     dag, _trace = await decompose_task_with_trace(
         title=title,
@@ -728,6 +729,7 @@ async def decompose_task(
         model=model,
         max_retries=max_retries,
         fallback_models=fallback_models,
+        extra_instructions=extra_instructions,
     )
     return dag
 
@@ -742,6 +744,7 @@ async def decompose_task_with_trace(
     model: str | None = None,
     max_retries: int | None = None,
     fallback_models: list[str] | None = None,
+    extra_instructions: str | None = None,
 ) -> tuple[DAGSchema, dict[str, Any]]:
     """
     Validate input, load the prompt, call the LLM, and verify the DAG.
@@ -775,6 +778,11 @@ async def decompose_task_with_trace(
         depth=depth,
         target_words=str(target_words),
     )
+    if extra_instructions:
+        prompt += (
+            "\n\n## Additional Agent Instructions\n"
+            f"{str(extra_instructions).strip()}"
+        )
 
     trace: dict[str, Any] = {
         "decomposer_version": DECOMPOSER_VERSION,

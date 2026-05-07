@@ -201,24 +201,3 @@ class TestSettingsNormalization:
         assert _BACKEND_ENV_FILE == expected
 
 
-# ---------------------------------------------------------------------------
-# Fix 8: MCPServerConfig mutable fields
-# ---------------------------------------------------------------------------
-
-class TestMCPServerConfigImmutable:
-
-    def test_args_is_tuple(self):
-        from app.mcp.config import MCPServerConfig
-        cfg = MCPServerConfig(name="test", command="npx")
-        assert isinstance(cfg.args, tuple)
-
-    def test_env_is_tuple(self):
-        from app.mcp.config import MCPServerConfig
-        cfg = MCPServerConfig(name="test", command="npx")
-        assert isinstance(cfg.env, tuple)
-
-    def test_args_not_appendable(self):
-        from app.mcp.config import MCPServerConfig
-        cfg = MCPServerConfig(name="test", command="npx", args=("--flag",))
-        with pytest.raises((TypeError, AttributeError)):
-            cfg.args.append("bad")  # type: ignore[union-attr]

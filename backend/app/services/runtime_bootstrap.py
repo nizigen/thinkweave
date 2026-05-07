@@ -27,7 +27,6 @@ from app.services.heartbeat import wait_for_agent_healthy
 from app.utils.logger import logger
 from app.utils.llm_client import DebugMockLLMClient, LLMClient
 
-_runtime_mcp_client: Any | None = None
 _runtime_llm_client: Any | None = None
 
 
@@ -36,6 +35,30 @@ async def _ensure_required_role_agents(session: Any) -> int:
     created = 0
     result = await session.execute(select(Agent.role))
     existing_roles = {str(row[0] or "").strip().lower() for row in result.all()}
+
+    if "orchestrator" not in existing_roles:
+        agent = Agent(
+            name="orchestrator-auto",
+            role="orchestrator",
+            layer=0,
+            capabilities="planning, decomposition, orchestration",
+            model=settings.default_model,
+            status="idle",
+        )
+        session.add(agent)
+        created += 1
+
+    if "manager" not in existing_roles:
+        agent = Agent(
+            name="manager-auto",
+            role="manager",
+            layer=1,
+            capabilities="coordination, routing, quality_gate",
+            model=settings.default_model,
+            status="idle",
+        )
+        session.add(agent)
+        created += 1
 
     if "researcher" not in existing_roles:
         agent = Agent(
@@ -52,17 +75,6 @@ async def _ensure_required_role_agents(session: Any) -> int:
     if created:
         await session.flush()
     return created
-
-
-def set_runtime_mcp_client(client: Any | None) -> None:
-    """Register runtime MCP client instance for option introspection."""
-    global _runtime_mcp_client
-    _runtime_mcp_client = client
-
-
-def get_runtime_mcp_client() -> Any | None:
-    """Return runtime MCP client if bootstrap has provided one."""
-    return _runtime_mcp_client
 
 
 def _get_runtime_llm_client() -> Any:

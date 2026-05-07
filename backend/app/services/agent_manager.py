@@ -15,7 +15,6 @@ from app.config import (
 from app.models.agent import Agent
 from app.schemas.agent import AgentCreate, AgentStatusUpdate
 from app.services.runtime_bootstrap import (
-    get_runtime_mcp_client,
     register_persisted_agent,
     unregister_runtime_agent,
 )
@@ -30,37 +29,25 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
         "label": "编排 (Orchestrator)",
         "description": "任务分解与全局协调",
         "icon": "🎯",
-        "max_tool_iterations": 1,
         "skill_allowlist": ["model_selection_guard"],
-        "tool_allowlist": ["sequentialthinking"],
     },
     "manager": {
         "layer": 1,
         "label": "管理 (Manager)",
         "description": "资源调度与策略管理",
         "icon": "📋",
-        "max_tool_iterations": 1,
         "skill_allowlist": ["model_selection_guard"],
-        "tool_allowlist": ["sequentialthinking"],
     },
     "outline": {
         "layer": 2,
         "label": "大纲 (Outline)",
         "description": "结构规划与章节设计",
         "icon": "🗂️",
-        "max_tool_iterations": 2,
         "skill_allowlist": [
             "outline_claim_contract",
             "chapter_non_overlap",
             "technical_report",
             "no_hallucination_policy",
-        ],
-        "tool_allowlist": [
-            "search_files",
-            "read_text_file",
-            "read_multiple_files",
-            "tavily_search",
-            "search_repositories",
         ],
     },
     "writer": {
@@ -68,7 +55,6 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
         "label": "写作 (Writer)",
         "description": "内容撰写与创作",
         "icon": "✍️",
-        "max_tool_iterations": 3,
         "skill_allowlist": [
             "writer_evidence_first_policy",
             "revision_closure_policy",
@@ -80,22 +66,12 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
             "chapter_non_overlap",
             "technical_report",
         ],
-        "tool_allowlist": [
-            "search_files",
-            "read_text_file",
-            "read_multiple_files",
-            "tavily_search",
-            "tavily_extract",
-            "search_code",
-            "get_file_contents",
-        ],
     },
     "researcher": {
         "layer": 2,
         "label": "调研 (Researcher)",
         "description": "证据检索计划与来源约束",
         "icon": "📚",
-        "max_tool_iterations": 3,
         "skill_allowlist": [
             "research_tooling_policy",
             "no_hallucination_policy",
@@ -103,22 +79,12 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
             "quantified_claims",
             "technical_report",
         ],
-        "tool_allowlist": [
-            "search_files",
-            "read_text_file",
-            "read_multiple_files",
-            "tavily_search",
-            "tavily_extract",
-            "search_code",
-            "get_file_contents",
-        ],
     },
     "reviewer": {
         "layer": 2,
         "label": "审查 (Reviewer)",
         "description": "质量评分与反馈",
         "icon": "🔍",
-        "max_tool_iterations": 2,
         "skill_allowlist": [
             "reviewer_gate_policy",
             "reviewer_redline_logic_check",
@@ -128,29 +94,15 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
             "evidence_driven_report",
             "quantified_claims",
         ],
-        "tool_allowlist": [
-            "search_files",
-            "read_text_file",
-            "read_multiple_files",
-            "tavily_search",
-            "search_code",
-            "search_issues",
-        ],
     },
     "consistency": {
         "layer": 2,
         "label": "一致性 (Consistency)",
         "description": "跨章节一致性检查",
         "icon": "🔗",
-        "max_tool_iterations": 2,
         "skill_allowlist": [
             "consistency_integrity_gate",
             "no_hallucination_policy",
-        ],
-        "tool_allowlist": [
-            "search_files",
-            "read_text_file",
-            "read_multiple_files",
         ],
     },
 }
@@ -203,19 +155,11 @@ def _resolve_role_preset(role: str) -> dict[str, object] | None:
     skill_allowlist = _normalize_preset_allowlist(
         list(preset.get("skill_allowlist", [])),
     )
-    tool_allowlist = _normalize_preset_allowlist(
-        list(preset.get("tool_allowlist", [])),
-    )
-    max_iterations = int(preset.get("max_tool_iterations", 1))
 
     preset["agent_config"] = {
         "skill_allowlist": skill_allowlist,
-        "tool_allowlist": tool_allowlist,
-        "max_tool_iterations": max_iterations,
     }
     preset["skill_allowlist"] = skill_allowlist
-    preset["tool_allowlist"] = tool_allowlist
-    preset["max_tool_iterations"] = max_iterations
     return preset
 
 
@@ -379,8 +323,6 @@ def list_agent_role_presets() -> list[dict[str, object]]:
                         "agent_config",
                         {
                             "skill_allowlist": [],
-                            "tool_allowlist": [],
-                            "max_tool_iterations": 1,
                         },
                     )
                 ),
@@ -412,18 +354,3 @@ def list_agent_skill_options() -> list[dict[str, object]]:
     return options
 
 
-def list_agent_tool_options() -> list[dict[str, str]]:
-    client = get_runtime_mcp_client()
-    if client is None:
-        return []
-    tools = client.registry.list_tools()
-    options = [
-        {
-            "name": tool.name,
-            "description": tool.description,
-            "server_name": tool.server_name,
-        }
-        for tool in tools
-    ]
-    options.sort(key=lambda item: item["name"])
-    return options

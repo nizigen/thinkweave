@@ -35,7 +35,7 @@ class ModelConfig:
     """Configuration for a single model entry."""
 
     provider: str                      # "openai" | "deepseek"
-    model: str                         # Model identifier, for example "gpt-4o".
+    model: str                         # Model identifier, for example "deepseek/deepseek-v3.2".
     supports_streaming: bool = True
     supports_json_mode: bool = True
     max_tokens: int = 4096
@@ -43,17 +43,9 @@ class ModelConfig:
 
 
 MODEL_REGISTRY: dict[str, ModelConfig] = {
-    "deepseek-v4-flash": ModelConfig(
-        provider="deepseek",
-        model="deepseek/deepseek-v4-flash",
-        supports_streaming=True,
-        supports_json_mode=True,
-        max_tokens=8192,
-        fallback=None,
-    ),
     "deepseek-v3.2": ModelConfig(
         provider="deepseek",
-        model="deepseek/deepseek-v4-flash",
+        model="deepseek/deepseek-v3.2",
         supports_streaming=True,
         supports_json_mode=True,
         max_tokens=8192,
@@ -61,7 +53,7 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
     ),
     "deepseek-chat": ModelConfig(
         provider="deepseek",
-        model="deepseek/deepseek-v4-flash",
+        model="deepseek/deepseek-v3.2",
         supports_streaming=True,
         supports_json_mode=True,
         max_tokens=8192,
@@ -70,13 +62,13 @@ MODEL_REGISTRY: dict[str, ModelConfig] = {
 }
 
 ROLE_MODEL_MAP: dict[str, str] = {
-    "orchestrator": "deepseek-v4-flash",
-    "manager": "deepseek-v4-flash",
-    "outline": "deepseek-v4-flash",
-    "researcher": "deepseek-v4-flash",
-    "writer": "deepseek-v4-flash",
-    "reviewer": "deepseek-v4-flash",
-    "consistency": "deepseek-v4-flash",
+    "orchestrator": "deepseek-v3.2",
+    "manager": "deepseek-v3.2",
+    "outline": "deepseek-v3.2",
+    "researcher": "deepseek-v3.2",
+    "writer": "deepseek-v3.2",
+    "reviewer": "deepseek-v3.2",
+    "consistency": "deepseek-v3.2",
 }
 
 

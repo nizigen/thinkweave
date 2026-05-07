@@ -14,7 +14,9 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
+from app.agents.runtime_config import resolve_llm_call_params
 from app.services.task_decomposer import decompose_task
+from app.skills.loader import SkillLoader
 from app.utils.logger import logger
 from app.utils.prompt_loader import PromptLoader
 
@@ -25,6 +27,7 @@ class OrchestratorAgent(BaseAgent):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(role="orchestrator", layer=0, **kwargs)
         self._prompt_loader = PromptLoader()
+        self._skill_loader = SkillLoader()
 
     async def handle_task(self, ctx: dict[str, Any]) -> str:
         """分解任务为 DAG 子任务图。
@@ -42,6 +45,7 @@ class OrchestratorAgent(BaseAgent):
         depth = payload.get("depth", "standard")
         target_words = int(payload.get("target_words", 10000))
         task_id = ctx.get("task_id", "")
+        llm_params = resolve_llm_call_params(ctx)
 
         log = logger.bind(
             task_id=task_id,
@@ -51,15 +55,44 @@ class OrchestratorAgent(BaseAgent):
 
         log.info("decomposing task: mode={}, depth={}, target_words={}", mode, depth, target_words)
 
+        # Hierarchy-gate nodes should only mark orchestration hand-off,
+        # not re-run full decomposition (task service has already planned DAG).
+        if str(ctx.get("title", "")).startswith("L0 编排入口"):
+            return "L0 orchestration gate passed."
+
+        skill_instructions = self._build_skill_instructions(payload)
+
         dag = await decompose_task(
             title=title,
             mode=mode,
             depth=depth,
             target_words=target_words,
             llm_client=self.llm_client,
+            model=llm_params.get("model"),
+            max_retries=llm_params.get("max_retries"),
+            fallback_models=llm_params.get("fallback_models"),
+            extra_instructions=skill_instructions,
         )
 
         log.info("DAG generated: {} nodes", len(dag.nodes))
 
         # 返回 DAG JSON 字符串供调度器使用
         return dag.model_dump_json()
+
+    def _build_skill_instructions(self, payload: dict[str, Any]) -> str:
+        allowlist = payload.get("skill_allowlist", [])
+        if not isinstance(allowlist, list) or not allowlist:
+            cfg = payload.get("agent_config", {})
+            if isinstance(cfg, dict):
+                allowlist = cfg.get("skill_allowlist", [])
+        if not isinstance(allowlist, list) or not allowlist:
+            return ""
+
+        self._skill_loader.reload()
+        snippets: list[str] = []
+        for name in allowlist:
+            skill = self._skill_loader.get(str(name))
+            if skill is None:
+                continue
+            snippets.append(f"### {skill.name}\n{skill.content}")
+        return "\n\n".join(snippets)

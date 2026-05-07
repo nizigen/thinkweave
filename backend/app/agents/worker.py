@@ -120,17 +120,7 @@ class WorkerAgent(BaseAgent):
         role_norm = str(agent_role or "").strip().lower()
         for attempt in range(1, _STAGE_AUTORETRY_LIMIT + 2):
             try:
-                if role_norm == "researcher":
-                    result = await self._run_researcher_tool_path(
-                        messages=messages,
-                        payload=payload,
-                        model_override=model_override,
-                    )
-                    if result:
-                        log.bind(result_len=len(result), attempt=attempt).info(
-                            "researcher used tool-backed execution path"
-                        )
-                if not result and role_norm == "writer":
+                if role_norm == "writer":
                     result = await self._run_writer_hard_json_path(
                         messages=messages,
                         payload=payload,
@@ -193,108 +183,6 @@ class WorkerAgent(BaseAgent):
                 title=title,
             )
         return result
-
-    async def _run_researcher_tool_path(
-        self,
-        *,
-        messages: list[dict[str, str]],
-        payload: dict[str, Any],
-        model_override: str | None,
-    ) -> str | None:
-        mode = str(payload.get("mode") or "").strip().lower()
-        if mode and mode != "report":
-            return None
-
-        from app.services.runtime_bootstrap import get_runtime_mcp_client
-
-        mcp_client = get_runtime_mcp_client()
-        if mcp_client is None:
-            return None
-
-        raw_allowlist = payload.get("tool_allowlist", [])
-        tool_allowlist: list[str] = []
-        if isinstance(raw_allowlist, list):
-            for item in raw_allowlist:
-                token = str(item or "").strip()
-                if token:
-                    tool_allowlist.append(token)
-        tools = mcp_client.registry.to_openai_tools(tool_allowlist or None)
-        if not tools:
-            return None
-
-        try:
-            max_iterations = int(payload.get("max_tool_iterations") or 2)
-        except (TypeError, ValueError):
-            max_iterations = 2
-        max_iterations = min(max(1, max_iterations), 4)
-
-        conversation: list[dict[str, Any]] = [dict(item) for item in messages]
-
-        for _ in range(max_iterations):
-            response = await self.llm_client.chat_with_tools(
-                messages=conversation,
-                tools=tools,
-                role="researcher",
-                model=model_override,
-            )
-            if response.get("type") == "text":
-                content = str(response.get("content") or "").strip()
-                if content:
-                    return content
-                break
-
-            tool_calls = response.get("tool_calls") or []
-            if not tool_calls:
-                break
-
-            assistant_tool_calls: list[dict[str, Any]] = []
-            tool_messages: list[dict[str, str]] = []
-
-            for call in tool_calls:
-                call_id = str(call.get("id") or "")
-                fn = call.get("function") or {}
-                tool_name = str(fn.get("name") or "").strip()
-                raw_args = str(fn.get("arguments") or "").strip()
-                if not call_id or not tool_name:
-                    continue
-                try:
-                    parsed_args = json.loads(raw_args) if raw_args else {}
-                except Exception:
-                    parsed_args = {}
-                if not isinstance(parsed_args, dict):
-                    parsed_args = {}
-
-                tool_output = await mcp_client.call_tool(tool_name, parsed_args)
-                assistant_tool_calls.append(
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "arguments": json.dumps(parsed_args, ensure_ascii=False),
-                        },
-                    }
-                )
-                tool_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": str(tool_output or ""),
-                    }
-                )
-
-            if not assistant_tool_calls:
-                break
-
-            conversation.append(
-                {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": assistant_tool_calls,
-                }
-            )
-            conversation.extend(tool_messages)
-        return None
 
     async def _run_writer_hard_json_path(
         self,
@@ -443,7 +331,9 @@ class WorkerAgent(BaseAgent):
             "- 输出必须为严格 JSON 对象，不得有 markdown 代码块或解释文本。\n"
             '- 必须包含键：heading, paragraphs, chapter_title, content_markdown, key_points, evidence_trace, boundary_notes, citation_ledger。\n'
             '- paragraphs 每项必须是 {"text":"中文分析段落","citation_keys":["..."]}。\n'
-            "- 每段应包含：可检验观点 + 证据支撑 + 边界/反例或实施含义；禁止空话和模板开头。\n"
+            "- 全章要覆盖：关键观点、证据支撑、边界/反例或实施含义；不要求每段硬凑同一模板。\n"
+            "- 优先具体表达：写清主体、动作、条件、结果；少用“可以看出/值得注意的是/本章将”等空转句。\n"
+            "- 允许句长变化，避免段落节奏完全一致。\n"
             "- 不得写“围绕本章继续补充”“本轮扩写”等流程描述。\n"
             "- 引用仅通过 citation_keys 字段绑定，不要把 citation key 写进正文句子。\n"
             f"- 可用证据策略：{source_policy[:1200] if source_policy else '遵循给定证据池与章节边界'}\n"
@@ -466,7 +356,7 @@ class WorkerAgent(BaseAgent):
             target_words = 0
         if target_words <= 0 or target_words > _FAST_PATH_MAX_TARGET_WORDS:
             return None
-        return "deepseek-v4-flash"
+        return "deepseek-v3.2"
 
     @staticmethod
     def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -883,8 +773,6 @@ class WorkerAgent(BaseAgent):
                 "evidence_pool_markdown": raw.get("evidence_pool_markdown", ""),
                 "memory_context": raw.get("memory_context", memory_context or ""),
                 "kg_context": raw.get("kg_context", kg_context or ""),
-                "tool_allowlist": raw.get("tool_allowlist", []),
-                "max_tool_iterations": raw.get("max_tool_iterations", 2),
             }
         if agent_role == "reviewer":
             return {
@@ -901,6 +789,7 @@ class WorkerAgent(BaseAgent):
                 "research_keywords": raw.get("research_keywords", ""),
                 "evidence_pool_summary": raw.get("evidence_pool_summary", ""),
                 "evidence_pool_markdown": raw.get("evidence_pool_markdown", ""),
+                "memory_context": raw.get("memory_context", memory_context or ""),
             }
         if agent_role == "consistency":
             return {
@@ -915,6 +804,7 @@ class WorkerAgent(BaseAgent):
                 "research_keywords": raw.get("research_keywords", ""),
                 "evidence_pool_summary": raw.get("evidence_pool_summary", ""),
                 "evidence_pool_markdown": raw.get("evidence_pool_markdown", ""),
+                "memory_context": raw.get("memory_context", memory_context or ""),
             }
         return raw
 
