@@ -24,7 +24,6 @@
 - title_level_rule: {title_level_rule}
 - evidence_rule: {evidence_rule}
 - constraint_specification: {constraint_specification}
-- actionable_output_spec: {actionable_output_spec}
 
 ## 输出目标
 在不突破章节边界的前提下，产出足够长、证据可追踪、可通过后续一致性检查的章节内容。
@@ -67,9 +66,6 @@
 7. 量化纪律：
    - 必须遵循 `constraint_specification`。
    - 无法量化时，明确写 assumption 并登记 missing_evidence_items。
-8. 实施可执行性纪律：
-   - 若章节属于 implementation/how-to/步骤/路径/建议，必须遵循 `actionable_output_spec`。
-
 ## 分阶段策略
 1. stage_code = DRAFT
    - 先建立章节核心论证骨架，再展开证据与限定条件。
@@ -83,9 +79,6 @@
 
 ## Constraint Specification
 {constraint_specification}
-
-## Actionable Output Specification
-{actionable_output_spec}
 
 ## 反模式（命中任一视为失败）
 - fabricated citations：编造来源、DOI、URL、机构或数据。

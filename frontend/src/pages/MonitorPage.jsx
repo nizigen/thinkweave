@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { authHeaders, requestJson } from '../lib/apiBase'
+import { normalizeDisplayText } from '../lib/text'
 
 const STAGE_ORDER = ['OUTLINE', 'RESEARCH', 'DRAFT', 'REVIEW', 'ASSEMBLY', 'QA']
 const ROLE_STAGE_MAP = {
@@ -310,6 +311,16 @@ function renderReportWithEvidence(text, evidenceMap, onRefClick) {
   )
 }
 
+function renderMemorySummary(summary) {
+  const text = normalizeDisplayText(String(summary || '').trim())
+  if (!text) return '-'
+  return (
+    <div className="memory-summary-markdown">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  )
+}
+
 export function MonitorPage() {
   const navigate = useNavigate()
   const { taskId: routeTaskId } = useParams()
@@ -571,6 +582,45 @@ export function MonitorPage() {
     }
   }, [evidenceRows, task?.output_text, transitionLogs.length])
 
+  const memoryWritesByNode = useMemo(() => {
+    const raw = task?.checkpoint_data?.control?.memory_writes
+    if (!raw || typeof raw !== 'object') return []
+    return Object.entries(raw)
+      .map(([nodeId, rows]) => {
+        const node = nodeMap[nodeId] || null
+        const safeRows = Array.isArray(rows) ? rows : []
+        return {
+          nodeId,
+          node,
+          rows: safeRows.map((row) => ({
+            at: row?.at || '',
+            role: row?.role || node?.agent_role || '-',
+            title: row?.title || node?.title || '-',
+            summary: row?.summary || '',
+            chars: Number(row?.chars || 0),
+            depth: row?.depth || '',
+            chapterIndex: row?.chapter_index,
+            chapterTitle: row?.chapter_title || '',
+          })),
+        }
+      })
+      .filter((entry) => entry.rows.length > 0)
+  }, [task, nodeMap])
+
+  const memoryWriteRows = useMemo(() => {
+    const rows = []
+    for (const group of memoryWritesByNode) {
+      for (const row of group.rows) {
+        rows.push({
+          ...row,
+          nodeId: group.nodeId,
+          nodeTitle: group.node?.title || '',
+        })
+      }
+    }
+    return rows.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
+  }, [memoryWritesByNode])
+
   function focusEvidence(evidenceId) {
     setFocusedEvidenceId(evidenceId)
     const el = evidenceRowRefs.current[evidenceId]
@@ -609,7 +659,7 @@ export function MonitorPage() {
                 >
                   {tasks.map((item) => (
                     <option value={item.id} key={item.id}>
-                      {item.title} ({item.status})
+                      {normalizeDisplayText(item.title)} ({item.status})
                     </option>
                   ))}
                 </select>
@@ -731,10 +781,10 @@ export function MonitorPage() {
                       }`}
                       onClick={() => setSelectedNodeId(node.id)}
                       style={{ left: pos.x, top: pos.y, width: pos.width, height: pos.height }}
-                      title={`${node.title} | ${node.stage_code || '-'} | ${node.status}`}
+                      title={`${normalizeDisplayText(node.title)} | ${node.stage_code || '-'} | ${node.status}`}
                       type="button"
                     >
-                      <strong>{node.title}</strong>
+                      <strong>{normalizeDisplayText(node.title)}</strong>
                       <small>
                         {node.stage_code || '-'} · {node.agent_role} · {node.status}
                       </small>
@@ -773,7 +823,7 @@ export function MonitorPage() {
                         }`}
                         onClick={() => setSelectedNodeId(node.id)}
                       >
-                        <strong>{node.title}</strong>
+                        <strong>{normalizeDisplayText(node.title)}</strong>
                         <div className="node-tags">
                           <span className="tag">{node.agent_role}</span>
                           <span className="tag">{node.status}</span>
@@ -797,7 +847,7 @@ export function MonitorPage() {
                 <div className="detail-grid">
                   <div className="detail-line">
                     <span>标题</span>
-                    <strong>{selectedNode.title}</strong>
+                    <strong>{normalizeDisplayText(selectedNode.title)}</strong>
                   </div>
                   <div className="detail-line">
                     <span>角色</span>
@@ -845,7 +895,7 @@ export function MonitorPage() {
                 return (
                   <div className="gantt-row" key={row.node.id}>
                     <div className="gantt-label">
-                      <strong>{row.node.title}</strong>
+                      <strong>{normalizeDisplayText(row.node.title)}</strong>
                       <small>
                         {row.node.stage_code} · {row.node.status}
                       </small>
@@ -897,8 +947,8 @@ export function MonitorPage() {
 
       <section className="card monitor-card">
         <header className="card-head">
-          <h2>记忆层 / 证据池</h2>
-          <p>MemoryMiddleware + 证据池快照（中文详解）</p>
+          <h2>记忆层</h2>
+          <p>SessionMemory / KnowledgeGraph / 节点写入明细</p>
         </header>
         <div className="module-scroll-x">
           <div className="module-width-lg">
@@ -918,6 +968,8 @@ export function MonitorPage() {
               <article className="memory-block">
                 <h3>本任务记忆快照</h3>
                 <ul className="memory-list">
+                  <li>节点写入条数: {memoryWriteRows.length}</li>
+                  <li>有写入的节点数: {memoryWritesByNode.length}</li>
                   <li>证据条目数: {memorySummary.evidenceCount}</li>
                   <li>高优先级证据: {memorySummary.highPriorityCount}</li>
                   <li>报告引用次数: {memorySummary.citedCount}</li>
@@ -927,6 +979,47 @@ export function MonitorPage() {
                 </ul>
               </article>
             </div>
+
+            <div className="evidence-table-wrap">
+              <table className="task-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>节点</th>
+                    <th>角色</th>
+                    <th>写入摘要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {memoryWriteRows.slice(0, 50).map((row, idx) => (
+                    <tr key={`${row.nodeId}-${row.at}-${idx}`}>
+                      <td>{formatTime(row.at)}</td>
+                      <td>{normalizeDisplayText(row.nodeTitle || row.title || '-')}</td>
+                      <td>{row.role || '-'}</td>
+                      <td className="memory-summary-cell">{renderMemorySummary(row.summary)}</td>
+                    </tr>
+                  ))}
+                  {!memoryWriteRows.length ? (
+                    <tr>
+                      <td colSpan={4} className="muted">
+                        暂无节点记忆写入明细（后端将在节点落库后写入此处）
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="card monitor-card">
+        <header className="card-head">
+          <h2>证据池</h2>
+          <p>evidence_pool 快照与引用跳转</p>
+        </header>
+        <div className="module-scroll-x">
+          <div className="module-width-lg">
 
             <div className="evidence-table-wrap">
               <table className="task-table">
@@ -953,14 +1046,21 @@ export function MonitorPage() {
                       <td>
                         {row.url ? (
                           <a href={row.url} target="_blank" rel="noreferrer">
-                            {row.title}
+                            {normalizeDisplayText(row.title)}
                           </a>
                         ) : (
-                          row.title
+                          normalizeDisplayText(row.title)
                         )}
                       </td>
                     </tr>
                   ))}
+                  {!evidenceRows.length ? (
+                    <tr>
+                      <td colSpan={4} className="muted">
+                        暂无证据池快照
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>

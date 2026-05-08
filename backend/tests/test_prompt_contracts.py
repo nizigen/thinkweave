@@ -77,6 +77,7 @@ def test_outline_prompt_contract_requires_premise_gate_fields():
         research_keywords="",
         evidence_pool_summary="",
         evidence_pool_markdown="",
+        memory_context="",
     )
     _assert_contains_all(
         content,
@@ -112,7 +113,6 @@ def test_writer_prompt_contract_requires_claim_evidence_mapping():
         title_level_rule="<=2",
         evidence_rule="strict",
         constraint_specification="",
-        actionable_output_spec="",
     )
     _assert_contains_all(
         content,
@@ -121,7 +121,6 @@ def test_writer_prompt_contract_requires_claim_evidence_mapping():
             "missing_evidence_items",
             "@evidence[MISSING:",
             "constraint_specification",
-            "actionable_output_spec",
         ],
     )
 
@@ -141,6 +140,7 @@ def test_consistency_prompt_contract_mentions_unapplied_recommendations():
         research_keywords="",
         evidence_pool_summary="",
         evidence_pool_markdown="",
+        memory_context="",
     )
     _assert_contains_all(content, ["unapplied_recommendations", "后文提出建议但前文未执行"])
 

@@ -42,6 +42,12 @@ class SessionMemory:
         self._summary_cache: dict[str, Any] = {}
         self._cognified_once = False
 
+    def _session_only_mode(self) -> bool:
+        return bool(
+            self.adapter.enabled
+            and getattr(self.adapter.config, "memory_session_only_mode", False)
+        )
+
     async def initialize(self) -> bool:
         self.namespace = (
             f"{self.adapter.config.memory_namespace_prefix}:{self.task_id}"
@@ -330,21 +336,22 @@ class SessionMemory:
         if digest in self._dedup_cache:
             return
 
-        await self.adapter.add(
-            content,
-            namespace=self.namespace,
-            metadata=metadata,
-        )
-        if self.adapter.enabled and not self._cognified_once:
-            auto_cognify = bool(
-                getattr(self.adapter.config, "memory_auto_cognify_on_store", True)
+        if not self._session_only_mode():
+            await self.adapter.add(
+                content,
+                namespace=self.namespace,
+                metadata=metadata,
             )
-            if auto_cognify:
-                try:
-                    await self.adapter.cognify(content, namespace=self.namespace)
-                    self._cognified_once = True
-                except Exception:
-                    logger.opt(exception=True).warning("session memory auto-cognify failed")
+            if self.adapter.enabled and not self._cognified_once:
+                auto_cognify = bool(
+                    getattr(self.adapter.config, "memory_auto_cognify_on_store", True)
+                )
+                if auto_cognify:
+                    try:
+                        await self.adapter.cognify(content, namespace=self.namespace)
+                        self._cognified_once = True
+                    except Exception:
+                        logger.opt(exception=True).warning("session memory auto-cognify failed")
         self._dedup_cache.add(digest)
         self._summary_cache[digest] = {
             "summary": str(content or "")[:500],
@@ -426,6 +433,9 @@ class SessionMemory:
             return selected
 
         await self._ensure_initialized()
+        if self._session_only_mode():
+            return _summary_fallback_rows(query, limit)
+
         rows = await self.adapter.search(
             query,
             namespace=self.namespace,
@@ -457,6 +467,8 @@ class SessionMemory:
 
     async def store_territory_map(self, content: str) -> dict[str, Any]:
         await self._ensure_initialized()
+        if self._session_only_mode():
+            return {}
         result = await self.adapter.cognify(content, namespace=self.namespace)
         marker = hashlib.sha1(str(content or "").encode("utf-8")).hexdigest()[:12]
         self._territory_cache[marker] = result or {}

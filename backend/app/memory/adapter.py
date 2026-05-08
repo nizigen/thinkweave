@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 import inspect
 import os
 from pathlib import Path
+import re
+import shutil
 from typing import Any
 from urllib.parse import urlparse
 
@@ -94,6 +96,8 @@ class MemoryAdapter:
         self._cognee_client = cognee_client
         self._fallback_backend = _InMemoryBackend()
         self._degraded = False
+        self._fastembed_repair_lock = asyncio.Lock()
+    _provider_disabled_reason: str | None = None
 
     @property
     def enabled(self) -> bool:
@@ -170,6 +174,23 @@ class MemoryAdapter:
         os.environ.setdefault("SYSTEM_ROOT_DIRECTORY", str(backend_root / ".cognee_system"))
         os.environ.setdefault("DATA_ROOT_DIRECTORY", str(backend_root / ".cognee_data"))
         os.environ.setdefault("CACHE_ROOT_DIRECTORY", str(backend_root / ".cognee_cache"))
+        cache_root = Path(os.environ.get("CACHE_ROOT_DIRECTORY", str(backend_root / ".cognee_cache")))
+        fastembed_cache = cache_root / "fastembed_cache"
+        os.environ.setdefault("FASTEMBED_CACHE_PATH", str(fastembed_cache))
+        # Normalize HF token aliases so huggingface_hub can pick it reliably.
+        hf_token = str(os.environ.get("HF_TOKEN", "")).strip()
+        hf_hub_token = str(os.environ.get("HF_HUB_TOKEN", "")).strip()
+        huggingface_hub_token = str(os.environ.get("HUGGINGFACE_HUB_TOKEN", "")).strip()
+        if not hf_token:
+            alias_token = hf_hub_token or huggingface_hub_token
+            if alias_token:
+                os.environ["HF_TOKEN"] = alias_token
+        elif not hf_hub_token:
+            os.environ["HF_HUB_TOKEN"] = hf_token
+        try:
+            fastembed_cache.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            logger.warning("failed to ensure FASTEMBED cache directory: {}", fastembed_cache)
 
         os.environ.setdefault("GRAPH_DATABASE_PROVIDER", self.config.graph_database_provider)
         os.environ.setdefault("VECTOR_DB_PROVIDER", self.config.vector_database_provider)
@@ -237,10 +258,23 @@ class MemoryAdapter:
     def _resolve_client(self) -> Any | None:
         if not self.enabled:
             return None
+        if MemoryAdapter._provider_disabled_reason:
+            self._degraded = True
+            return None
+        if self._degraded:
+            return None
         if self._cognee_client is not None:
             return self._cognee_client
 
         self._prime_cognee_env()
+        if not self._has_hf_auth_token() and not self._fastembed_model_ready():
+            self._degrade_to_fallback(
+                reason="fastembed cache is cold and HF token is missing"
+            )
+            logger.warning(
+                "Memory degraded early: FASTEMBED cache is empty and HF token is not configured"
+            )
+            return None
         self.ensure_supported_backend_matrix()
         self._validate_runtime_config()
 
@@ -258,6 +292,12 @@ class MemoryAdapter:
             logger.warning("Memory adapter degraded to fallback backend: {}", reason)
         self._degraded = True
 
+    @classmethod
+    def _disable_provider_globally(cls, *, reason: str) -> None:
+        if not cls._provider_disabled_reason:
+            cls._provider_disabled_reason = reason
+            logger.warning("Memory provider globally disabled: {}", reason)
+
     @staticmethod
     def _is_empty_search_error(exc: Exception) -> bool:
         message = str(exc or "").lower()
@@ -270,6 +310,92 @@ class MemoryAdapter:
             "empty knowledge graph",
         )
         return any(marker in message for marker in empty_markers)
+
+    @staticmethod
+    def _has_hf_auth_token() -> bool:
+        keys = ("HF_TOKEN", "HF_HUB_TOKEN", "HUGGINGFACE_HUB_TOKEN")
+        for key in keys:
+            if str(os.environ.get(key, "")).strip():
+                return True
+        return False
+
+    @staticmethod
+    def _fastembed_model_ready() -> bool:
+        cache_path = Path(os.environ.get("FASTEMBED_CACHE_PATH", "")).expanduser()
+        if not cache_path.exists():
+            return False
+        try:
+            return any(cache_path.rglob("model_optimized.onnx"))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_missing_fastembed_model_error(exc: Exception) -> bool:
+        message = str(exc or "").lower()
+        return (
+            "model_optimized.onnx" in message
+            and ("no_suchfile" in message or "file doesn't exist" in message)
+        )
+
+    @staticmethod
+    def _is_provider_init_fatal_error(exc: Exception) -> bool:
+        message = str(exc or "").lower()
+        if "ladybug" in message and "map" in message and "version" in message:
+            return True
+        fatal_markers = (
+            "could not map version_code to proper ladybug version",
+            "could not map version code to proper ladybug version",
+        )
+        return any(marker in message for marker in fatal_markers)
+
+    @staticmethod
+    def _extract_missing_fastembed_model_path(exc: Exception) -> Path | None:
+        text = str(exc or "")
+        match = re.search(r"(/[^ ]*model_optimized\.onnx)", text)
+        if not match:
+            return None
+        try:
+            return Path(match.group(1))
+        except Exception:
+            return None
+
+    async def _repair_fastembed_cache(self, exc: Exception) -> bool:
+        if not self._is_missing_fastembed_model_error(exc):
+            return False
+
+        async with self._fastembed_repair_lock:
+            removed_any = False
+            model_path = self._extract_missing_fastembed_model_path(exc)
+            if model_path is not None:
+                snapshot_dir = model_path.parent
+                if snapshot_dir.exists():
+                    shutil.rmtree(snapshot_dir, ignore_errors=True)
+                    removed_any = True
+                snapshots_dir = snapshot_dir.parent
+                if snapshots_dir.exists():
+                    for pending in snapshots_dir.glob("*.incomplete"):
+                        try:
+                            pending.unlink(missing_ok=True)
+                            removed_any = True
+                        except Exception:
+                            continue
+
+            cache_path = Path(
+                os.environ.get("FASTEMBED_CACHE_PATH", "")
+            ).expanduser()
+            if cache_path.exists():
+                for pending in cache_path.rglob("*.incomplete"):
+                    try:
+                        pending.unlink(missing_ok=True)
+                        removed_any = True
+                    except Exception:
+                        continue
+
+            if removed_any:
+                logger.warning(
+                    "fastembed cache repaired after missing ONNX model; retrying memory operation"
+                )
+            return removed_any
 
     @staticmethod
     def _namespace_to_dataset(namespace: str | None) -> str:
@@ -383,6 +509,12 @@ class MemoryAdapter:
     ) -> Any | None:
         if not self.enabled:
             return None
+        if self._degraded:
+            return await self._fallback_backend.add(
+                content,
+                namespace=namespace,
+                metadata=metadata or {},
+            )
         client = self._resolve_client()
         if client is None:
             self._degrade_to_fallback(reason="cognee client unavailable")
@@ -403,6 +535,21 @@ class MemoryAdapter:
                 timeout=self._provider_timeout_seconds(),
             )
         except Exception as exc:  # pragma: no cover
+            if await self._repair_fastembed_cache(exc):
+                try:
+                    return await asyncio.wait_for(
+                        self._client_add(
+                            client,
+                            content,
+                            namespace=namespace,
+                            metadata=metadata or {},
+                        ),
+                        timeout=self._provider_timeout_seconds(),
+                    )
+                except Exception as retry_exc:
+                    exc = retry_exc
+            if self._is_provider_init_fatal_error(exc):
+                self._disable_provider_globally(reason=str(exc))
             logger.warning(f"Memory add failed in enabled mode: {exc}")
             self._degrade_to_fallback(reason=f"add failed: {exc}")
             return await self._fallback_backend.add(
@@ -420,6 +567,12 @@ class MemoryAdapter:
     ) -> list[dict[str, Any]]:
         if not self.enabled:
             return []
+        if self._degraded:
+            return await self._fallback_backend.search(
+                query,
+                namespace=namespace,
+                top_k=limit,
+            )
         client = self._resolve_client()
         if client is None:
             self._degrade_to_fallback(reason="cognee client unavailable")
@@ -441,6 +594,21 @@ class MemoryAdapter:
             )
             return rows or []
         except Exception as exc:  # pragma: no cover
+            if await self._repair_fastembed_cache(exc):
+                try:
+                    return await asyncio.wait_for(
+                        self._client_search(
+                            client,
+                            query,
+                            namespace=namespace,
+                            top_k=limit,
+                        ),
+                        timeout=self._provider_timeout_seconds(),
+                    )
+                except Exception as retry_exc:
+                    exc = retry_exc
+            if self._is_provider_init_fatal_error(exc):
+                self._disable_provider_globally(reason=str(exc))
             if self._is_empty_search_error(exc):
                 # add() is ingestion-only in cognee v1; if chunks/graph are not
                 # built yet, trigger one cognify pass and retry once.
@@ -493,6 +661,11 @@ class MemoryAdapter:
     ) -> dict[str, Any]:
         if not self.enabled:
             return {}
+        if self._degraded:
+            return await self._fallback_backend.cognify(
+                content,
+                namespace=namespace,
+            )
         client = self._resolve_client()
         if client is None:
             self._degrade_to_fallback(reason="cognee client unavailable")
@@ -512,6 +685,21 @@ class MemoryAdapter:
             )
             return data or {}
         except Exception as exc:  # pragma: no cover
+            if await self._repair_fastembed_cache(exc):
+                try:
+                    data = await asyncio.wait_for(
+                        self._client_cognify(
+                            client,
+                            content,
+                            namespace=namespace,
+                        ),
+                        timeout=self._provider_timeout_seconds(),
+                    )
+                    return data or {}
+                except Exception as retry_exc:
+                    exc = retry_exc
+            if self._is_provider_init_fatal_error(exc):
+                self._disable_provider_globally(reason=str(exc))
             logger.warning(f"Memory cognify failed in enabled mode: {exc}")
             self._degrade_to_fallback(reason=f"cognify failed: {exc}")
             return await self._fallback_backend.cognify(
@@ -522,6 +710,8 @@ class MemoryAdapter:
     async def forget_dataset(self, dataset_or_namespace: str) -> bool:
         if not self.enabled:
             return True
+        if self._degraded:
+            return False
 
         name = self._normalize_dataset_name(dataset_or_namespace)
         client = self._resolve_client()

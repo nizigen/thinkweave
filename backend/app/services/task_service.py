@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.models.agent import Agent
+from app.models.message import Message
 from app.models.task import Task
 from app.models.task_decomposition_audit import TaskDecompositionAudit
 from app.models.task_node import TaskNode
@@ -407,6 +408,25 @@ def _apply_monitor_recovery_event(
         review_scores = dict(control["review_scores"])
         review_scores[node_id] = dict(payload)
         control["review_scores"] = review_scores
+    elif event_type == "memory_write":
+        memory_writes = dict(control.get("memory_writes") or {})
+        node_rows_raw = memory_writes.get(node_id, [])
+        node_rows = list(node_rows_raw) if isinstance(node_rows_raw, list) else []
+        entry = {
+            "at": str(payload.get("at") or ""),
+            "role": str(payload.get("role") or ""),
+            "title": str(payload.get("title") or ""),
+            "summary": str(payload.get("summary") or "")[:500],
+            "chars": int(payload.get("chars") or 0),
+            "depth": str(payload.get("depth") or ""),
+        }
+        if payload.get("chapter_index") is not None:
+            entry["chapter_index"] = payload.get("chapter_index")
+        if payload.get("chapter_title"):
+            entry["chapter_title"] = str(payload.get("chapter_title") or "")[:200]
+        node_rows.append(entry)
+        memory_writes[node_id] = node_rows[-10:]
+        control["memory_writes"] = memory_writes
     else:
         return
     checkpoint["control"] = control
@@ -922,7 +942,7 @@ async def persist_monitor_recovery_event(
     session: AsyncSession | None = None,
 ) -> None:
     node_key = str(node_id)
-    if event_type not in {"chapter_preview", "review_score"}:
+    if event_type not in {"chapter_preview", "review_score", "memory_write"}:
         return
 
     try:
@@ -1011,7 +1031,19 @@ async def batch_delete_tasks(
         return 0
     if not user_id:
         raise ValueError("user_id is required for batch_delete_tasks")
-    stmt = delete(Task).where(Task.id.in_(ids)).where(Task.owner_id == user_id)
-    result = await session.execute(stmt)
+    owned_task_rows = await session.execute(
+        select(Task.id).where(Task.id.in_(ids)).where(Task.owner_id == user_id)
+    )
+    owned_task_ids = [row[0] for row in owned_task_rows.all()]
+    if not owned_task_ids:
+        return 0
+
+    # `messages.task_id` has no DB-level cascade, so remove dependent rows first.
+    await session.execute(
+        delete(Message).where(Message.task_id.in_(owned_task_ids))
+    )
+    result = await session.execute(
+        delete(Task).where(Task.id.in_(owned_task_ids))
+    )
     await session.commit()
-    return result.rowcount
+    return int(result.rowcount or 0)
