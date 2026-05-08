@@ -26,6 +26,7 @@ class MemoryConfig(BaseSettings):
     memory_namespace_prefix: str = "task"
     memory_session_retention_seconds: int = 86400
     memory_auto_cognify_on_store: bool = True
+    memory_session_only_mode: bool = False
 
     model_config = {
         "env_file": _BACKEND_ENV_FILE,

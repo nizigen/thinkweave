@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root {
   --bg: #f4f6f7;
@@ -26,7 +26,7 @@ body {
     linear-gradient(90deg, transparent 0, transparent 49.5%, var(--bg-grid) 50%, transparent 50.5%);
   background-size: auto, 42px 42px;
   color: var(--text);
-  font-family: 'Manrope', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
 }
 
 a {
@@ -70,6 +70,9 @@ a {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: 56vh;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .main-nav a {
@@ -81,6 +84,7 @@ a {
   padding: 12px 14px;
   font-weight: 700;
   transition: all 0.25s ease;
+  font-size: 13px;
 }
 
 .main-nav a.active {
@@ -171,13 +175,18 @@ label span {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: #fff;
   color: var(--text);
+  font-family: inherit;
+}
+
+button {
   font-family: inherit;
 }
 
@@ -199,6 +208,9 @@ select {
   padding: 10px 14px;
   font-weight: 800;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 .btn:disabled {
@@ -456,6 +468,36 @@ select {
 
 .task-picker {
   margin-bottom: 12px;
+}
+
+.toolbar-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(280px, 520px) minmax(0, 1fr);
+  align-items: end;
+}
+
+.toolbar-item {
+  margin: 0;
+}
+
+.toolbar-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+}
+
+.page-ops {
+  grid-template-columns: 1fr;
+}
+
+.ops-link-row {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .filter-grid {
@@ -984,5 +1026,97 @@ select {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .toolbar-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.memory-summary-markdown {
+  max-width: 100%;
+  max-height: none;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.memory-summary-cell {
+  width: min(60vw, 760px);
+  max-width: min(60vw, 760px);
+  vertical-align: top;
+}
+
+.memory-summary-markdown p {
+  margin: 0 0 6px;
+}
+
+.memory-summary-markdown h1,
+.memory-summary-markdown h2,
+.memory-summary-markdown h3,
+.memory-summary-markdown h4,
+.memory-summary-markdown h5,
+.memory-summary-markdown h6 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 600;
+}
+
+.memory-summary-markdown li,
+.memory-summary-markdown blockquote,
+.memory-summary-markdown td,
+.memory-summary-markdown th {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.memory-summary-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.memory-summary-markdown ul,
+.memory-summary-markdown ol {
+  margin: 0 0 6px 18px;
+  padding: 0;
+}
+
+.memory-summary-markdown code {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.memory-summary-markdown pre {
+  max-width: 100%;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-summary-markdown table {
+  display: table;
+  max-width: 100%;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.memory-summary-markdown th,
+.memory-summary-markdown td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 960px) {
+  .memory-summary-cell {
+    width: min(78vw, 560px);
+    max-width: min(78vw, 560px);
+  }
+
+  .memory-summary-markdown {
+    max-height: none;
   }
 }

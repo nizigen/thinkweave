@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { API_BASE, authHeaders, requestJson } from '../lib/apiBase'
+import { normalizeDisplayText } from '../lib/text'
 
 export function HomePage() {
   const navigate = useNavigate()
@@ -188,7 +189,7 @@ export function HomePage() {
             <tbody>
               {items.map((task) => (
                 <tr key={task.id}>
-                  <td>{task.title}</td>
+                  <td>{normalizeDisplayText(task.title)}</td>
                   <td>
                     <span className={`status-dot status-${task.status}`} />
                     {task.status}

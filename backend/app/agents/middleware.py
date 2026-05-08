@@ -6,11 +6,13 @@ import asyncio
 import time
 from abc import ABC
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from app.config import settings
 from app.memory.session import SessionMemory
 from app.services import communicator
+from app.services.writer_output import extract_writer_markdown
 from app.utils.logger import logger
 
 if TYPE_CHECKING:
@@ -338,7 +340,28 @@ class MemoryMiddleware(AgentMiddleware):
                 parts.append(content)
         return "\n".join(parts)
 
-    def _build_store_metadata(self, agent: BaseAgent, ctx: dict[str, Any], result: str) -> dict[str, Any]:
+    @staticmethod
+    def _normalize_summary_text(text: str, *, max_len: int = 500) -> str:
+        raw = str(text or "").replace("\r", "\n").strip()
+        if not raw:
+            return ""
+        normalized_lines = [" ".join(line.split()) for line in raw.split("\n")]
+        compact = "\n".join(line for line in normalized_lines if line)
+        return compact[:max_len]
+
+    def _build_store_content(self, agent: BaseAgent, result: str) -> str:
+        if agent.role == "writer":
+            markdown = extract_writer_markdown(result)
+            if markdown:
+                return markdown
+        return str(result or "")
+
+    def _build_store_metadata(
+        self,
+        agent: BaseAgent,
+        ctx: dict[str, Any],
+        stored_content: str,
+    ) -> dict[str, Any]:
         payload = ctx.get("payload", {})
         metadata: dict[str, Any] = {
             "role": agent.role,
@@ -352,7 +375,7 @@ class MemoryMiddleware(AgentMiddleware):
             metadata["assigned_evidence"] = payload.get("assigned_evidence", [])
         if agent.role == "consistency":
             metadata["issue_family"] = "document_consistency"
-        metadata["summary"] = result[:500]
+        metadata["summary"] = self._normalize_summary_text(stored_content)
         return metadata
 
     def _inject_kg_context(
@@ -410,7 +433,8 @@ class MemoryMiddleware(AgentMiddleware):
             if not enabled:
                 return result
 
-            metadata = self._build_store_metadata(agent, ctx, result)
+            stored_content = self._build_store_content(agent, result)
+            metadata = self._build_store_metadata(agent, ctx, stored_content)
             payload = ctx.get("payload", {})
             depth = ""
             if isinstance(payload, dict):
@@ -418,15 +442,36 @@ class MemoryMiddleware(AgentMiddleware):
             if depth == "quick":
                 await self._store_with_quick_soft_timeout(
                     session=session,
-                    result=result,
+                    result=stored_content,
                     metadata=metadata,
                 )
             else:
-                await session.store(result, metadata=metadata)
+                await session.store(stored_content, metadata=metadata)
             # Territory map extraction can be expensive on first cognee call.
             # Keep quick-path latency predictable by skipping this heavy step.
             if agent.role == "outline" and depth != "quick":
-                await session.store_territory_map(result)
+                await session.store_territory_map(stored_content)
+
+            task_id = str(ctx.get("task_id", "")).strip()
+            node_id = str(ctx.get("node_id", "")).strip()
+            if task_id and node_id:
+                from app.services.task_service import persist_monitor_recovery_event
+
+                await persist_monitor_recovery_event(
+                    task_id=task_id,
+                    node_id=node_id,
+                    event_type="memory_write",
+                    payload={
+                        "at": datetime.now(timezone.utc).isoformat(),
+                        "role": agent.role,
+                        "title": str(ctx.get("title", "") or ""),
+                        "summary": str(metadata.get("summary", "") or "")[:500],
+                        "chars": len(stored_content),
+                        "depth": depth,
+                        "chapter_index": metadata.get("chapter_index"),
+                        "chapter_title": metadata.get("chapter_title"),
+                    },
+                )
         except Exception:
             logger.opt(exception=True).warning(
                 "memory persistence failed, preserving task result without memory side effects"

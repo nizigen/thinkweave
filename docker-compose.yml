@@ -89,7 +89,9 @@ services:
       SYSTEM_ROOT_DIRECTORY: /app/.cognee_system
       DATA_ROOT_DIRECTORY: /app/.cognee_data
       CACHE_ROOT_DIRECTORY: /app/.cognee_cache
+      FASTEMBED_CACHE_PATH: /app/.cognee_cache/fastembed_cache
       COGNEE_LOGS_DIR: /app/logs/cognee
+      MEMORY_SESSION_ONLY_MODE: "true"
       DEBUG: "false"
       HTTP_PROXY: http://host.docker.internal:10808
       HTTPS_PROXY: http://host.docker.internal:10808

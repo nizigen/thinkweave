@@ -1,6 +1,7 @@
 """Task Pydantic Schema"""
 
 import uuid
+import re
 from typing import Any, Literal
 from datetime import datetime
 
@@ -14,6 +15,30 @@ from pydantic import BaseModel, Field, field_validator
 VALID_MODES = {"report", "novel", "custom"}
 VALID_DEPTHS = {"quick", "standard", "deep"}
 VALID_AGENT_ROLES = {"outline", "researcher", "writer", "reviewer", "consistency"}
+_MOJIBAKE_PATTERN = re.compile(r"[ÃÂâæçðï]")
+
+
+def _count_cjk(text: str) -> int:
+    return len(re.findall(r"[\u4e00-\u9fff]", text))
+
+
+def _count_mojibake_chars(text: str) -> int:
+    return len(_MOJIBAKE_PATTERN.findall(text))
+
+
+def _repair_utf8_mojibake(text: str) -> str:
+    source = str(text or "")
+    if not source or not _MOJIBAKE_PATTERN.search(source):
+        return source
+    try:
+        repaired = bytes((ord(ch) & 0xFF) for ch in source).decode("utf-8")
+    except Exception:
+        return source
+    source_score = _count_cjk(source) * 3 - _count_mojibake_chars(source)
+    repaired_score = _count_cjk(repaired) * 3 - _count_mojibake_chars(repaired)
+    if repaired_score > source_score:
+        return repaired
+    return source
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +66,21 @@ class TaskCreate(BaseModel):
         if v not in VALID_DEPTHS:
             raise ValueError(f"Invalid depth '{v}', must be one of {sorted(VALID_DEPTHS)}")
         return v
+
+    @field_validator("title")
+    @classmethod
+    def validate_title_encoding_health(cls, v: str) -> str:
+        title = _repair_utf8_mojibake(str(v or "")).strip()
+        if not title:
+            return title
+        q_count = title.count("?")
+        has_cjk = bool(re.search(r"[\u4e00-\u9fff]", title))
+        if q_count >= 4 and not has_cjk:
+            raise ValueError(
+                "Title appears encoding-corrupted (contains too many '?'). "
+                "Please re-enter title using UTF-8 input."
+            )
+        return title
 
 
 class TaskRead(BaseModel):

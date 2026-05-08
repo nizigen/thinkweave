@@ -727,10 +727,6 @@ class WorkerAgent(BaseAgent):
                 role="writer",
                 action="constraint_specification",
             )
-            actionable_output_spec = self._load_support_prompt(
-                role="writer",
-                action="actionable_output",
-            )
             return {
                 "depth": raw.get("depth", ""),
                 "chapter_index": raw.get("chapter_index", ""),
@@ -756,7 +752,6 @@ class WorkerAgent(BaseAgent):
                 "title_level_rule": raw.get("title_level_rule", ""),
                 "evidence_rule": raw.get("evidence_rule", ""),
                 "constraint_specification": constraint_specification,
-                "actionable_output_spec": actionable_output_spec,
                 "kg_context": raw.get("kg_context", kg_context or ""),
             }
         if agent_role == "researcher":

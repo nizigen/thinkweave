@@ -31,7 +31,6 @@ def test_writer_prompt_mentions_memory_topic_claims_and_evidence():
     assert "research_protocol" in content
     assert "mechanical connector" in content.lower() or "首先/其次/最后" in content
     assert "constraint_specification" in content
-    assert "actionable_output_spec" in content
 
 
 def test_researcher_prompt_mentions_source_scope_and_evidence_ledger():
@@ -68,17 +67,11 @@ def test_consistency_prompt_mentions_structured_issue_families():
 
 def test_writer_support_prompts_exist_and_define_contracts():
     constraint_path = Path("prompts/writer/constraint_specification.md")
-    actionable_path = Path("prompts/writer/actionable_output.md")
     if not constraint_path.exists():
         constraint_path = Path("backend/prompts/writer/constraint_specification.md")
-    if not actionable_path.exists():
-        actionable_path = Path("backend/prompts/writer/actionable_output.md")
     constraint = constraint_path.read_text(encoding="utf-8")
-    actionable = actionable_path.read_text(encoding="utf-8")
 
     assert "可观察阈值" in constraint
-    assert "ACTIONABLE_CHECKLIST" in actionable
-    assert "DECISION_MATRIX" in actionable
 
 
 def test_prompts_enforce_chinese_first_language_policy():

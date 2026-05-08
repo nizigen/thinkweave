@@ -1,8 +1,14 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 
 import { AgentsPage } from './pages/AgentsPage'
+import { ArtifactsPage } from './pages/ArtifactsPage'
+import { ConsistencyRepairPage } from './pages/ConsistencyRepairPage'
+import { DecompositionAuditPage } from './pages/DecompositionAuditPage'
 import { HomePage } from './pages/HomePage'
 import { MonitorPage } from './pages/MonitorPage'
+import { RoutingDebugPage } from './pages/RoutingDebugPage'
+import { RuntimeHealthPage } from './pages/RuntimeHealthPage'
+import { TaskDetailPage } from './pages/TaskDetailPage'
 
 export function App() {
   return (
@@ -18,6 +24,12 @@ export function App() {
           </NavLink>
           <NavLink to="/agents">Agent 管理</NavLink>
           <NavLink to="/monitor">监控中心</NavLink>
+          <NavLink to="/ops/task-detail">任务详情</NavLink>
+          <NavLink to="/ops/decomposition">分解审计</NavLink>
+          <NavLink to="/ops/routing">路由决策</NavLink>
+          <NavLink to="/ops/consistency">一致性修复</NavLink>
+          <NavLink to="/ops/artifacts">产物中心</NavLink>
+          <NavLink to="/ops/runtime">系统健康</NavLink>
         </nav>
 
         <div className="sidebar-foot">
@@ -31,6 +43,12 @@ export function App() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/monitor" element={<MonitorPage />} />
           <Route path="/monitor/:taskId" element={<MonitorPage />} />
+          <Route path="/ops/task-detail" element={<TaskDetailPage />} />
+          <Route path="/ops/decomposition" element={<DecompositionAuditPage />} />
+          <Route path="/ops/routing" element={<RoutingDebugPage />} />
+          <Route path="/ops/consistency" element={<ConsistencyRepairPage />} />
+          <Route path="/ops/artifacts" element={<ArtifactsPage />} />
+          <Route path="/ops/runtime" element={<RuntimeHealthPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

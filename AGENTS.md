@@ -48,6 +48,40 @@
 - 文档修改优先 `apply_patch`，避免整文件重写式命令造成编码漂移
 - 若发现乱码，先 `git restore` 目标文件，再按 UTF-8 流程重新补丁
 
+## Docker 后端真实测试标准流程（必须）
+
+> 目的：避免每次在 API 路径、鉴权、镜像更新上反复试错。
+
+1. 重建并启动后端（代码变更后必须）
+   - `docker compose up -d --build backend`
+   - 说明：`backend` 服务默认**不挂载源码目录**，改完代码不重建镜像不会生效。
+
+2. 健康检查
+   - `GET http://127.0.0.1:18080/health` 预期 `200`
+
+3. 先查 OpenAPI 再调用任务接口
+   - `GET http://127.0.0.1:18080/openapi.json`
+   - 当前任务路由前缀是 `/api`，即：
+     - 创建任务：`POST /api/tasks`
+     - 查询任务：`GET /api/tasks/{task_id}`
+   - 禁止直接用 `/tasks`（会 404）。
+
+4. 任务接口必须带 Bearer Token
+   - 读取 `backend/.env` 中 `TASK_AUTH_TOKENS`
+   - 本地默认开发 token：`local-dev-admin-token`
+   - 请求头：`Authorization: Bearer <token>`
+   - 未带 token 会返回 `401 Missing bearer token`。
+
+5. Quick 真实任务最小验证口径
+   - 入参：`mode=report`, `depth=quick`, `target_words=1000`
+   - 轮询：每 5 秒一次，至少观察到 `outline -> outline_review -> premise_gate/reviewing -> consistency` 阶段迁移。
+   - 同步看后端日志：`docker logs --since <timestamp> thinkweave-backend`
+   - 重点关键词：`Memory search returned empty corpus state`、`consistency`、`BUDGET_EXCEEDED`、`timeout`。
+
+6. 结果判定规则（本项目当前）
+   - 若失败原因为 `consistency_repair_budget_exhausted`，归类为一致性预算策略问题，不是 API 调用问题。
+   - 若出现 `/api` 路由错误或 401，先修调用方式再分析业务链路。
+
 ## 文档索引
 
 | 文档 | 位置 |
@@ -66,7 +100,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **thinkweave** (3043 symbols, 9257 relationships, 253 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **thinkweave** (3670 symbols, 11307 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

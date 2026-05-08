@@ -25,6 +25,10 @@ def normalize_checkpoint_data(
         control_dict["review_scores"] = (
             dict(review_scores) if isinstance(review_scores, dict) else {}
         )
+        memory_writes = control_dict.get("memory_writes")
+        control_dict["memory_writes"] = (
+            dict(memory_writes) if isinstance(memory_writes, dict) else {}
+        )
 
     checkpoint["control"] = control_dict
     return checkpoint
