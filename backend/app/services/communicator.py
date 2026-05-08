@@ -14,8 +14,14 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app.config import settings
 from app.database import async_session_factory
 from app.models.message import Message
+from app.protocols.tea_protocol import (
+    TeaEnvelope,
+    build_tea_envelope,
+    try_decode_tea_envelope,
+)
 from app.services.redis_streams import (
     MessageEnvelope,
     StreamMessage,
@@ -33,6 +39,51 @@ from app.utils.logger import logger
 # Consumer Group 名称约定
 AGENT_INBOX_GROUP = "agent_workers"
 TASK_EVENTS_GROUP = "task_subscribers"
+
+
+RuntimeEnvelope = MessageEnvelope | TeaEnvelope
+
+
+def _build_runtime_envelope(
+    *,
+    msg_type: str,
+    from_agent: str = "",
+    to_agent: str = "",
+    task_id: str = "",
+    node_id: str = "",
+    payload: dict[str, Any] | None = None,
+) -> RuntimeEnvelope:
+    if settings.enable_tea_protocol:
+        return build_tea_envelope(
+            schema_version=settings.tea_protocol_version,
+            msg_type=msg_type,
+            from_agent=from_agent,
+            to_agent=to_agent,
+            task_id=task_id,
+            node_id=node_id,
+            payload=payload or {},
+        )
+    return MessageEnvelope(
+        msg_type=msg_type,
+        from_agent=from_agent,
+        to_agent=to_agent,
+        task_id=task_id,
+        node_id=node_id,
+        payload=payload or {},
+    )
+
+
+def decode_incoming_envelope(data: dict[str, Any]) -> RuntimeEnvelope:
+    if settings.enable_tea_protocol:
+        tea_envelope, error = try_decode_tea_envelope(
+            data=data,
+            supported_version=settings.tea_protocol_version,
+        )
+        if tea_envelope is not None:
+            return tea_envelope
+        if error:
+            raise ValueError(f"TEA decode failed: {error}")
+    return MessageEnvelope.from_redis(data)
 
 
 # ---------------------------------------------------------------------------
@@ -56,13 +107,13 @@ async def send_task_assignment(
     stream = agent_inbox_key(agent_id)
     await ensure_consumer_group(stream, AGENT_INBOX_GROUP)
 
-    envelope = MessageEnvelope(
+    envelope = _build_runtime_envelope(
         msg_type="task_assign",
         from_agent=from_agent,
         to_agent=str(agent_id),
         task_id=str(task_id),
         node_id=str(node_id),
-        payload=payload or {},
+        payload=payload,
     )
     mid = await xadd(stream, envelope)
 
@@ -94,7 +145,7 @@ async def send_task_result(
     """
     stream = task_events_key(task_id)
 
-    envelope = MessageEnvelope(
+    envelope = _build_runtime_envelope(
         msg_type="task_result",
         from_agent=from_agent,
         task_id=str(task_id),
@@ -127,7 +178,7 @@ async def send_task_event(
     """发送通用任务事件到 task events stream。"""
     stream = task_events_key(task_id)
 
-    envelope = MessageEnvelope(
+    envelope = _build_runtime_envelope(
         msg_type=msg_type,
         from_agent=from_agent,
         task_id=str(task_id),
@@ -185,7 +236,7 @@ async def send_system_log(
     if extra:
         payload.update(extra)
 
-    envelope = MessageEnvelope(
+    envelope = _build_runtime_envelope(
         msg_type="log",
         from_agent=agent_id,
         task_id=task_id,
@@ -270,7 +321,7 @@ async def ack_task_event(
 # 消息持久化
 # ---------------------------------------------------------------------------
 
-async def _persist_message(envelope: MessageEnvelope) -> None:
+async def _persist_message(envelope: RuntimeEnvelope) -> None:
     """将消息保存到 PostgreSQL messages 表。"""
     try:
         async with async_session_factory() as session:

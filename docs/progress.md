@@ -1,3 +1,119 @@
+## Phase 7 Code Review Fix（2026-05-08）
+
+- 已完成 code review 修复（对应上轮 4 条 findings）：
+  - `llm_client` 工具生命周期语义修正：`chat_with_tools` 仅记录到 `running`，不再提前标记 `success`。
+  - `dag_scheduler` 已实际消费 `dag_recomposer.reconnects`（支持 `replace/append`），不再是旁路元数据。
+  - `ToolManagerAgent` 对未知 `action` 明确抛错：`invalid lifecycle action`，避免静默回退为 `list`。
+  - `ToolLifecycleService` 增加账本容量上限：`TOOL_LIFECYCLE_MAX_RECORDS`（默认 1000）并自动淘汰最旧记录。
+- 新增/更新测试：
+  - `backend/tests/test_tool_manager_agent.py`：新增非法 action 用例
+  - `backend/tests/test_tool_lifecycle.py`：新增容量裁剪用例
+  - `backend/tests/test_dag_scheduler.py`：新增 reconnect 生效用例
+  - `backend/tests/test_llm_client.py`：更新 lifecycle 期望状态
+- 验证结果：
+  - `pytest -q tests/test_llm_client.py -k "chat_with_tools or LifecycleTracing"` => `3 passed`
+  - `pytest -q tests/test_tool_manager_agent.py tests/test_tool_lifecycle.py` => `8 passed`
+  - `pytest -q tests/test_dag_scheduler.py -k "inject_repair_wave"` => `3 passed`
+  - `pytest -q tests/test_dag_eval.py tests/test_mcts_engine.py tests/test_tea_protocol.py tests/test_dag_recomposer.py` => `16 passed`
+
+## Phase 7 执行检查点（2026-05-08，07-04 Dynamic DAG Recomposition）
+
+- 已完成动态 DAG 重组模块：
+  - 新增 `backend/app/services/dag_recomposer.py`
+  - 输出结构化重组计划：`should_inject/reason/insertions/reconnects`
+  - 支持模式：`quick_compact`（writer->consistency）与 `review_chain`（writer->reviewer->consistency）
+- 已完成调度器接入：
+  - `backend/app/services/dag_scheduler.py::_inject_consistency_repair_wave` 改为消费 `build_consistency_recompose_plan()`
+  - 使用 logical-id 两阶段 materialization（先生成 UUID 映射，再解引用 depends_on）保证依赖连线稳定
+  - 保留既有标题/角色/状态约定，保持下游消费兼容
+- 新增测试：
+  - `backend/tests/test_dag_recomposer.py`（quick/standard/wave-limit）
+- 回归结果：
+  - `pytest -q tests/test_dag_recomposer.py` => `3 passed`
+  - `pytest -q tests/test_dag_scheduler.py -k "inject_repair_wave"` => `2 passed`
+  - `pytest -q tests/test_dag_eval.py tests/test_mcts_engine.py tests/test_tea_protocol.py` => `13 passed`
+  - `pytest -q tests/test_tool_lifecycle.py tests/test_tool_manager_agent.py tests/test_dag_recomposer.py` => `9 passed`
+
+## Phase 7 执行检查点（2026-05-08，07-03 Tool Lifecycle + ToolManagerAgent）
+
+- 已完成 Tool 生命周期服务（无 MCP 依赖）：
+  - 新增 `backend/app/services/tool_lifecycle.py`
+  - 生命周期状态：`registered -> running -> success|failed -> cleaned`
+  - 支持按 task context 输出 `tool_lifecycle` 事件（无 task_id 时仅本地记录）
+- 已完成 ToolManagerAgent：
+  - 新增 `backend/app/agents/tool_manager_agent.py`
+  - 支持 `register/update/get/list/cleanup` 操作生命周期记录
+- 已完成 runtime 最小侵入接入：
+  - `backend/app/services/runtime_bootstrap.py` 增加 `tool_manager` 角色分支（受 `ENABLE_TOOL_MANAGER_AGENT` 开关控制）
+  - `backend/app/services/agent_manager.py` 增加 `tool_manager` 角色预设
+- 已完成 LLM 工具路径 telemetry：
+  - `backend/app/utils/llm_client.py` 在 `chat_with_tools` 输出 `tool_calls` 时记录 lifecycle trace
+  - 默认 `ENABLE_TOOL_LIFECYCLE=false`，不影响现有行为
+- 配置新增：
+  - `backend/app/config.py`：`enable_tool_lifecycle`、`enable_tool_manager_agent`
+  - `backend/.env.example`：`ENABLE_TOOL_LIFECYCLE`、`ENABLE_TOOL_MANAGER_AGENT`
+- 新增测试：
+  - `backend/tests/test_tool_lifecycle.py`
+  - `backend/tests/test_tool_manager_agent.py`
+  - `backend/tests/test_llm_client.py`（新增 lifecycle tracing 测试）
+- 验证结果：
+  - `pytest -q tests/test_tool_lifecycle.py tests/test_tool_manager_agent.py` => `6 passed`
+  - `pytest -q tests/test_llm_client.py -k "chat_with_tools or LifecycleTracing"` => `3 passed`
+  - `pytest -q tests/test_tea_protocol.py tests/test_communicator.py -k "envelope or tea"` => `8 passed`
+
+## Phase 7 执行检查点（2026-05-08，07-02 MCTS Shadow）
+
+- 已完成 MCTS Shadow 核心模块：
+  - 新增 `backend/app/services/strategy_catalog.py`（5 个候选策略）
+  - 新增 `backend/app/services/mcts_engine.py`（UCB 评分 + 选择轨迹）
+- 已完成接入方式（不改运行路径）：
+  - `backend/app/services/task_decomposer.py` 在 `ENABLE_MCTS_SHADOW=true` 时写入 `decomposition_trace.strategy_trace`
+  - 默认关闭，不改变 DAG 结构与调度行为
+- 已新增配置：
+  - `backend/app/config.py`：`enable_mcts_shadow`、`mcts_ucb_c`
+  - `backend/.env.example`：`ENABLE_MCTS_SHADOW`、`MCTS_UCB_C`
+- 已新增测试：
+  - `backend/tests/test_mcts_engine.py`
+  - `backend/tests/test_task_decomposer.py`（新增 trace 覆盖）
+- 验证结果：
+  - `pytest -q backend/tests/test_mcts_engine.py backend/tests/test_task_decomposer.py` => `27 passed`
+  - `pytest -q backend/tests/test_tea_protocol.py backend/tests/test_communicator.py -k "message or envelope or tea"` => `9 passed`
+  - `pytest -q backend/tests/test_task_service.py -k "decomposition"` => `1 failed`（本地 PostgreSQL 不可达，非逻辑回归）
+
+## Phase 7 执行检查点（2026-05-08，07-01 TEA + DAG Eval）
+
+- 已完成 `TEA` 协议基础模块（无 MCP 依赖）：
+  - 新增 `backend/app/protocols/tea_protocol/`：`types.py`、`versioning.py`、`codec.py`、`__init__.py`
+  - 新增 `backend/app/protocols/__init__.py`
+- 已完成消息双栈兼容接入：
+  - `backend/app/services/communicator.py` 新增 TEA/legacy envelope 构建与解码入口
+  - `backend/app/agents/base_agent.py` 消费路径接入 TEA 版本校验 + 不兼容消息丢弃并 ACK
+- 已完成 DAG 评估指标基线：
+  - 新增 `backend/app/services/dag_eval.py`（SSI / Node F1 / Tool F1）
+- 已补充配置开关：
+  - `backend/app/config.py` 新增 `enable_tea_protocol`、`tea_protocol_version`
+  - `backend/.env.example` 同步 `ENABLE_TEA_PROTOCOL`、`TEA_PROTOCOL_VERSION`
+- 新增测试：
+  - `backend/tests/test_tea_protocol.py`
+  - `backend/tests/test_dag_eval.py`
+- 回归结果：
+  - `pytest -q backend/tests/test_tea_protocol.py backend/tests/test_dag_eval.py` => `11 passed`
+  - `pytest -q backend/tests/test_communicator.py backend/tests/test_agent_core.py -k "message or envelope"` => `4 passed`
+  - `pytest -q backend/tests/test_dag_scheduler.py -k "task_result or event"` => `11 passed`
+
+## Phase 7 计划落盘（2026-05-08，HALO/TEA/DAG）
+
+- 新增规划文件：`.planning/phases/07-halo-tea-dag-recompose/07-01-PLAN.md`。
+- 确认 Phase 7 首轮范围：
+  - 先做 `TEA 协议类型化 + 版本校验`；
+  - 先做 `dag_eval`（SSI / Node F1 / Tool F1）离线基线；
+  - 保持现有调度行为不变（观测优先）。
+- 明确执行约束：
+  - `MCP 暂不接入`（因稳定性问题，避免阻塞）；
+  - TEA 通过 `ENABLE_TEA_PROTOCOL` 开关灰度；
+  - 保留 legacy `MessageEnvelope` 兼容回退路径。
+- 已确定后续里程碑顺序：`TEA基线 -> MCTS Shadow -> ToolManagerAgent -> 动态DAG重组在线化`。
+
 ## Phase 6 Wave 1 检查点（2026-05-04，06-02 Runtime Hardening）
 
 - SessionMemory 持久化落地：

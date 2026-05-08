@@ -1,5 +1,59 @@
 # findings.md — 研究发现与技术决策知识库
 
+## 2026-05-08：Phase 7 Code Review Fix 决策补充
+
+- 修复策略：优先修“语义错误 + 未接线能力 + 容错可观测性 + 内存边界”四类问题，保持行为兼容优先。
+- 关键修正：
+  - 工具生命周期 `success` 只应由真实执行完成路径产生，`chat_with_tools` 仅标记到 `running`。
+  - `dag_recomposer.reconnects` 必须在调度器落地执行，避免“计划存在但执行缺失”。
+  - 控制面协议对未知 action fail-fast，避免 silent fallback 误导调用方。
+  - in-memory 账本必须有上限，避免长会话内存漂移。
+
+## 2026-05-08：Phase 7-4 动态 DAG 重组实现决策
+
+- 决策：在已有 `_inject_consistency_repair_wave` 路径上引入 `dag_recomposer`，先做“结构化计划化”而不是新增并行重组入口。
+- 原因：
+  - 一致性失败后本就存在修复波次注入逻辑，是最低风险的 runtime 重组切入点。
+  - 先把插入和重连显式化（`insertions + reconnects`）可为后续 SSI 驱动自动重组打基础。
+- 实现要点：
+  - `dag_recomposer` 负责目标归一化、波次上限、模式判定、依赖重连描述；
+  - `dag_scheduler` 只负责 materialization 与状态推进，不再内联重组策略细节。
+- 风险控制：
+  - 保持标题/角色/状态命名约定不变，兼容现有 UI/事件/测试消费；
+  - 注入依赖通过 logical-id 两阶段映射，避免先后顺序导致的依赖丢失。
+
+## 2026-05-08：Phase 7-3 Tool 生命周期实现决策（无 MCP）
+
+- 决策：先落地 `ToolLifecycleService + ToolManagerAgent` 内生闭环，不把 MCP 作为依赖前提。
+- 原因：现有主链路已经有 `chat_with_tools` 与 Redis Streams 事件通道，先做可观测生命周期比先接外部工具生态更稳。
+- 风险控制：
+  - `ENABLE_TOOL_LIFECYCLE=false` 默认关闭，避免影响现有任务执行；
+  - `ENABLE_TOOL_MANAGER_AGENT=false` 默认关闭，仅在显式启用后实例化 `tool_manager` 角色；
+  - `_build_runtime_agent` 属高影响符号，仅追加最小分支，不改原角色分发逻辑。
+- 生命周期语义（当前基线）：
+  - `registered -> running -> success|failed -> cleaned`
+  - `chat_with_tools` 当前仅做 telemetry（记录模型选出的 tool_calls），不接管真实工具执行控制流。
+
+## 2026-05-08：Phase 7 方案可行性与边界决策（HALO / AgentOrchestra / DAGAgent / WorFBench）
+
+- 可行性结论：
+  - `MCTS(HALO)`：可落地，但应先 Shadow（仅评分记录，不接管调度）。
+  - `TEA(AgentOrchestra)`：适合当前消息层（`redis_streams.MessageEnvelope`）演进为类型化协议。
+  - `动态DAG重组(DAGAgent+WorFBench)`：应复用现有 `dag_scheduler.py` 的波次注入能力，避免重复造轮子。
+- 关键落地顺序（风险从低到高）：
+  - `TEA协议+dag_eval基线 -> MCTS Shadow -> ToolManagerAgent -> 动态DAG重组在线化`。
+- 本轮执行边界（用户确认）：
+  - 由于历史 MCP 稳定性问题，Phase 7 首轮 **不把 MCP 作为前置依赖**。
+  - 先确保“无 MCP 依赖”的可运行闭环，再评估是否引入工具生态统一层。
+
+## 2026-05-08：MCTS Shadow 落地口径
+
+- 当前实现是 `Shadow only`：
+  - 仅在 `decomposition_trace.strategy_trace` 输出 5 候选 UCB 评分轨迹；
+  - 不改 DAG 结构，不改 scheduler dispatch，不改任务执行顺序。
+- 候选策略固定 5 类：`reliability_first / balanced_flow / evidence_intensive / chapter_parallel / fast_compact`。
+- 可复现性策略：随机扰动由 `title|mode|depth|target_words` 作为 seed 固定，保证同输入可复现。
+
 ## 2026-03-22：Aletheia 实施计划借鉴（已纠偏）
 
 - 借鉴点：

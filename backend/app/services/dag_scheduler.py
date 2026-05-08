@@ -34,6 +34,7 @@ from app.services.evidence_pool import (
     evidence_pool_seeds,
     normalize_evidence_ledger,
 )
+from app.services.dag_recomposer import build_consistency_recompose_plan
 from app.services.node_schema import coerce_output_to_role_schema, has_valid_schema_for_role
 from app.services.writer_output import (
     extract_writer_markdown,
@@ -66,6 +67,7 @@ from app.services.redis_streams import (
     timeout_watch_member,
     xread_latest,
 )
+from app.skills.loader import SkillLoader
 from app.utils.logger import logger
 
 # ---------------------------------------------------------------------------
@@ -440,6 +442,9 @@ class DAGScheduler:
         self._schedule_event = asyncio.Event()
         # task events 读取游标（用于消费 agent task_result）
         self._task_events_cursor = "0-0"
+        self._skill_loader = SkillLoader()
+        self._skills_by_name: dict[str, Any] = {}
+        self._skills_loaded_at = 0.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -992,6 +997,8 @@ class DAGScheduler:
 
             await self._promote_satisfied_pending_nodes(session)
             routing_nodes = await self._load_routing_nodes(session)
+            task = await session.get(Task, self.task_id)
+            task_mode = str(getattr(task, "mode", "all") or "all").strip().lower() or "all"
 
             # 查询所有 ready 节点
             stmt = select(TaskNode).where(
@@ -1036,12 +1043,15 @@ class DAGScheduler:
                 # 匹配空闲 Agent
                 routing_meta = routing_nodes.get(str(node.id), {})
                 routing_mode = str(routing_meta.get("routing_mode") or "auto")
+                stage_code = resolve_stage_code(role=node.agent_role, title=node.title)
                 match = await self._match_agent(
                     session,
                     role=node.agent_role,
                     required_capabilities=routing_meta.get("required_capabilities"),
                     preferred_agents=routing_meta.get("preferred_agents"),
                     routing_mode=routing_mode,
+                    task_mode=task_mode,
+                    stage_code=stage_code,
                 )
                 if isinstance(match, tuple):
                     agent, routing_reason = match
@@ -1360,6 +1370,8 @@ class DAGScheduler:
         required_capabilities: list[str] | None = None,
         preferred_agents: list[str] | None = None,
         routing_mode: str = "auto",
+        task_mode: str = "all",
+        stage_code: str | None = None,
     ) -> tuple[Agent | None, str]:
         """按 explicit bind -> capability -> role fallback 匹配空闲 Agent。"""
         required_caps = {
@@ -1396,20 +1408,143 @@ class DAGScheduler:
                 return None, "strict_bind_no_match"
 
         if required_caps:
+            capability_candidates: list[Agent] = []
             for agent in idle_agents:
                 if role and agent.role != role:
                     continue
                 if required_caps.issubset(_parse_capability_tokens(agent.capabilities)):
-                    return agent, "capability_match"
+                    capability_candidates.append(agent)
+            if capability_candidates:
+                picked, _ = self._pick_skill_matched_agent(
+                    candidates=capability_candidates,
+                    role=role,
+                    task_mode=task_mode,
+                    stage_code=stage_code,
+                )
+                return picked, "capability_match"
             if mode == "strict_bind":
                 return None, "strict_bind_no_match"
 
         if role:
-            for agent in idle_agents:
-                if agent.role == role:
-                    return agent, "role_fallback"
+            role_candidates = [agent for agent in idle_agents if agent.role == role]
+            if role_candidates:
+                picked, skill_reason = self._pick_skill_matched_agent(
+                    candidates=role_candidates,
+                    role=role,
+                    task_mode=task_mode,
+                    stage_code=stage_code,
+                )
+                if skill_reason:
+                    return picked, skill_reason
+                return picked, "role_fallback"
 
         return idle_agents[0], "idle_fallback"
+
+    def _pick_skill_matched_agent(
+        self,
+        *,
+        candidates: list[Agent],
+        role: str | None,
+        task_mode: str,
+        stage_code: str | None,
+    ) -> tuple[Agent, str | None]:
+        if len(candidates) == 1:
+            return candidates[0], None
+
+        self._refresh_skill_catalog()
+        if not self._skills_by_name:
+            return candidates[0], None
+
+        role_norm = str(role or "").strip().lower()
+        mode_norm = str(task_mode or "all").strip().lower() or "all"
+        stage_norm = str(stage_code or "all").strip().lower() or "all"
+        best_idx = 0
+        best_score = (-1, -1, -1, -1, -1, -1, -1)
+        best_reason: str | None = None
+
+        for idx, agent in enumerate(candidates):
+            allowlist = self._agent_skill_allowlist(agent)
+            mode_hits = 0
+            stage_hits = 0
+            role_hits = 0
+            mode_all_hits = 0
+            priority_score = 0
+
+            for skill_name in allowlist:
+                skill = self._skills_by_name.get(skill_name)
+                if skill is None:
+                    continue
+                roles = {str(v).strip().lower() for v in getattr(skill, "applicable_roles", ())}
+                if roles and role_norm not in roles:
+                    continue
+                role_hits += 1
+
+                modes = {str(v).strip().lower() for v in getattr(skill, "applicable_modes", ("all",))}
+                if mode_norm in modes:
+                    mode_hits += 1
+                elif "all" in modes:
+                    mode_all_hits += 1
+
+                stages = {str(v).strip().lower() for v in getattr(skill, "applicable_stages", ("all",))}
+                if stage_norm in stages:
+                    stage_hits += 1
+
+                try:
+                    priority_score += max(0, 200 - int(getattr(skill, "priority", 100)))
+                except (TypeError, ValueError):
+                    priority_score += 100
+
+            score = (
+                mode_hits,
+                stage_hits,
+                role_hits,
+                mode_all_hits,
+                priority_score,
+                len(allowlist),
+                -idx,
+            )
+            if score > best_score:
+                best_score = score
+                best_idx = idx
+                if mode_hits > 0:
+                    best_reason = "skill_mode_match"
+                elif role_hits > 0:
+                    best_reason = "skill_role_match"
+                else:
+                    best_reason = None
+
+        return candidates[best_idx], best_reason
+
+    def _refresh_skill_catalog(self, *, ttl_seconds: float = 30.0) -> None:
+        now = time.time()
+        if self._skills_by_name and (now - self._skills_loaded_at) < ttl_seconds:
+            return
+        try:
+            self._skill_loader.reload()
+            self._skills_by_name = {
+                str(name).strip().lower(): skill
+                for name, skill in self._skill_loader.skills.items()
+            }
+            self._skills_loaded_at = now
+        except Exception:
+            logger.opt(exception=True).warning("failed to refresh skill catalog for scheduler routing")
+
+    def _agent_skill_allowlist(self, agent: Agent) -> list[str]:
+        cfg = getattr(agent, "agent_config", None)
+        if not isinstance(cfg, dict):
+            return []
+        raw = cfg.get("skill_allowlist")
+        if not isinstance(raw, list):
+            return []
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in raw:
+            token = str(item or "").strip().lower()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            out.append(token)
+        return out
 
     async def _filter_alive_idle_agents(
         self,
@@ -2961,64 +3096,104 @@ class DAGScheduler:
             )
         )
         existing_titles = [str(row[0] or "") for row in writer_rows.all()]
-        wave_count = sum(1 for title in existing_titles if "一致性定向修复（轮次" in title)
-        if wave_count >= MAX_CONSISTENCY_REPAIR_WAVES:
-            return False
-
-        wave_no = wave_count + 1
         task = await session.get(Task, self.task_id)
         depth = str(getattr(task, "depth", "") or "").strip().lower()
         target_words = int(getattr(task, "target_words", 0) or 0)
-        quick_compact = depth == "quick" and 0 < target_words <= QUICK_REPAIR_TARGET_WORDS_MAX
-        selected_targets = repair_targets[:1] if quick_compact else repair_targets[:4]
+        plan = build_consistency_recompose_plan(
+            existing_titles=existing_titles,
+            repair_targets=repair_targets,
+            depth=depth,
+            target_words=target_words,
+            max_waves=MAX_CONSISTENCY_REPAIR_WAVES,
+            quick_target_words_max=QUICK_REPAIR_TARGET_WORDS_MAX,
+        )
+        if not bool(plan.get("should_inject")):
+            return False
 
         reviewer_ids: list[uuid.UUID] = []
         injected_writer_ids: list[uuid.UUID] = []
+        logical_id_map: dict[str, uuid.UUID] = {}
+        insertions = plan.get("insertions", [])
+        if not isinstance(insertions, list):
+            return False
 
-        for chapter_index in selected_targets:
-            writer_id = uuid.uuid4()
+        normalized_specs: list[dict[str, Any]] = []
+        for spec in insertions:
+            if not isinstance(spec, dict):
+                continue
+            logical_id = str(spec.get("logical_id", "") or "").strip()
+            if not logical_id:
+                continue
+            logical_id_map[logical_id] = uuid.uuid4()
+            normalized_specs.append(dict(spec))
+
+        reconnect_specs = plan.get("reconnects", [])
+        if isinstance(reconnect_specs, list):
+            spec_index = {
+                str(spec.get("logical_id", "") or "").strip(): spec
+                for spec in normalized_specs
+            }
+            for reconnect in reconnect_specs:
+                if not isinstance(reconnect, dict):
+                    continue
+                target_key = str(reconnect.get("logical_id", "") or "").strip()
+                target_spec = spec_index.get(target_key)
+                if target_spec is None:
+                    continue
+                new_depends = reconnect.get("new_depends_on", [])
+                if not isinstance(new_depends, list):
+                    continue
+                mode = str(reconnect.get("mode", "replace") or "replace").strip().lower()
+                current = target_spec.get("depends_on", [])
+                current_keys = current if isinstance(current, list) else []
+                dep_keys: list[str] = []
+                if mode == "append":
+                    dep_keys.extend(str(item or "").strip() for item in current_keys)
+                dep_keys.extend(str(item or "").strip() for item in new_depends)
+                seen: set[str] = set()
+                deduped: list[str] = []
+                for dep in dep_keys:
+                    if not dep or dep in seen:
+                        continue
+                    seen.add(dep)
+                    deduped.append(dep)
+                target_spec["depends_on"] = deduped
+
+        for spec in normalized_specs:
+            logical_id = str(spec.get("logical_id", "") or "").strip()
+            if not logical_id or logical_id not in logical_id_map:
+                continue
+            node_id = logical_id_map[logical_id]
+            role = str(spec.get("agent_role", "") or "").strip().lower()
+            depends_keys = spec.get("depends_on", [])
+            depends_on: list[uuid.UUID] = []
+            if isinstance(depends_keys, list):
+                for dep in depends_keys:
+                    dep_key = str(dep or "").strip()
+                    dep_id = logical_id_map.get(dep_key)
+                    if dep_id is not None:
+                        depends_on.append(dep_id)
             session.add(
                 TaskNode(
-                    id=writer_id,
+                    id=node_id,
                     task_id=self.task_id,
-                    title=f"第{chapter_index}章：一致性定向修复（轮次{wave_no}）",
-                    agent_role="writer",
-                    status=STATUS_READY,
-                    depends_on=[],
+                    title=str(spec.get("title", "") or ""),
+                    agent_role=role or None,
+                    status=str(spec.get("status", STATUS_PENDING) or STATUS_PENDING),
+                    depends_on=depends_on,
                     retry_count=0,
                 )
             )
-            if not quick_compact:
-                reviewer_id = uuid.uuid4()
-                session.add(
-                    TaskNode(
-                        id=reviewer_id,
-                        task_id=self.task_id,
-                        title=f"第{chapter_index}章：一致性修复审查（轮次{wave_no}）",
-                        agent_role="reviewer",
-                        status=STATUS_PENDING,
-                        depends_on=[writer_id],
-                        retry_count=0,
-                    )
-                )
-                reviewer_ids.append(reviewer_id)
-            injected_writer_ids.append(writer_id)
+            if role == "writer":
+                injected_writer_ids.append(node_id)
+            elif role == "reviewer":
+                reviewer_ids.append(node_id)
 
+        quick_compact = str(plan.get("mode", "")) == "quick_compact"
         consistency_depends_on = injected_writer_ids if quick_compact else reviewer_ids
         if not consistency_depends_on:
             return False
 
-        session.add(
-            TaskNode(
-                id=uuid.uuid4(),
-                task_id=self.task_id,
-                title=f"{'一致性快速复核' if quick_compact else '一致性复核'}（轮次{wave_no}）",
-                agent_role="consistency",
-                status=STATUS_PENDING,
-                depends_on=consistency_depends_on,
-                retry_count=0,
-            )
-        )
         await session.commit()
 
         for node_id in injected_writer_ids:

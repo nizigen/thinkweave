@@ -8,6 +8,8 @@ import re
 from typing import Any
 
 from app.config import settings
+from app.services.mcts_engine import run_mcts_shadow
+from app.services.strategy_catalog import build_strategy_candidates
 from app.schemas.task import DAGSchema, VALID_DEPTHS, VALID_MODES, ValidationResult
 from app.utils.llm_client import BaseLLMClient, LLMUnavailableError
 from app.utils.logger import logger
@@ -63,26 +65,24 @@ _CHAPTER_TITLE_TEMPLATES = [
     "监测评估与持续优化",
     "长期演进与战略展望",
 ]
-_IMPLEMENTATION_SIGNAL_KEYWORDS = (
-    "implementation",
-    "implement",
-    "how-to",
-    "how to",
-    "rollout",
-    "deployment",
-    "playbook",
-    "步骤",
-    "路径",
-    "实施",
-    "落地",
-    "建议",
+_FORBIDDEN_GLOBAL_STITCH_MARKERS = (
+    "全文衔接",
+    "全稿衔接",
+    "全篇衔接",
+    "全稿扩写",
+    "整稿扩写",
+    "全稿补写",
+    "全文补写",
+    "篇幅补足",
+    "全篇整合",
+    "整稿整合",
+    "全文整合",
+    "全稿整合",
+    "报告汇编",
+    "汇编与扩写",
+    "连接章节",
+    "补足篇幅",
 )
-_ACTIONABLE_NODE_SPECS: list[tuple[str, str, str]] = [
-    ("actionable_checklist", "ACTIONABLE_CHECKLIST", "实施检查清单"),
-    ("decision_matrix", "DECISION_MATRIX", "决策矩阵"),
-    ("timeline_estimate", "TIMELINE_ESTIMATE", "时间线估算"),
-    ("risk_assessment", "RISK_ASSESSMENT", "风险评估"),
-]
 
 
 def _parse_chapter_index(title: str) -> int | None:
@@ -106,11 +106,18 @@ def _is_expansion_title(title: str) -> bool:
     return any(marker in text for marker in markers)
 
 
-def _has_implementation_signal(text: str) -> bool:
-    normalized = str(text or "").strip().lower()
-    if not normalized:
+def _is_forbidden_global_stitch_writer_title(title: str) -> bool:
+    text = str(title or "").strip()
+    if not text:
         return False
-    return any(keyword in normalized for keyword in _IMPLEMENTATION_SIGNAL_KEYWORDS)
+    if _parse_chapter_index(text) is not None:
+        return False
+    if any(marker in text for marker in _FORBIDDEN_GLOBAL_STITCH_MARKERS):
+        return True
+    # Heuristic for global non-chapter expansion/stitch passes.
+    if "扩写" in text and any(token in text for token in ("汇编", "整合", "衔接", "补足")):
+        return True
+    return False
 
 
 def _normalized_chapter_title(chapter_index: int) -> str:
@@ -390,18 +397,6 @@ def _inject_long_form_expansion_nodes(dag: DAGSchema, *, target_words: int) -> D
         expansion_by_primary[writer.id] = expansion_id
         expansion_ids.append(expansion_id)
 
-    global_expansion_id: str | None = None
-    if target_words >= 16000 and len(expansion_ids) >= 2:
-        global_expansion_id = _allocate_node_id(existing_ids, "n_expand_global")
-        raw_nodes.append(
-            {
-                "id": global_expansion_id,
-                "title": "全稿扩写与篇幅补足",
-                "role": "writer",
-                "depends_on": expansion_ids,
-            }
-        )
-
     for raw in raw_nodes:
         role = str(raw.get("role") or "").strip().lower()
         if role not in {"reviewer", "consistency"}:
@@ -412,10 +407,7 @@ def _inject_long_form_expansion_nodes(dag: DAGSchema, *, target_words: int) -> D
             rewritten.append(expansion_by_primary.get(dep, dep))
 
         if role == "consistency":
-            if global_expansion_id is not None:
-                rewritten = [dep for dep in rewritten if dep not in expansion_ids]
-                rewritten.append(global_expansion_id)
-            elif expansion_ids:
+            if expansion_ids:
                 rewritten.extend(expansion_ids)
         raw["depends_on"] = _dedupe_preserve_order(rewritten)
 
@@ -598,82 +590,58 @@ def _compact_quick_short_dag(
     return compact
 
 
-def _inject_actionable_implementation_nodes(
-    dag: DAGSchema,
-    *,
-    task_title: str,
-) -> DAGSchema:
-    """Inject actionable implementation sub-nodes for implementation-heavy sections."""
+def _remove_forbidden_global_stitch_nodes(dag: DAGSchema) -> DAGSchema:
+    """Drop global stitch/expansion writer nodes and rewire dependents.
+
+    We do not allow a final "global stitching" writer pass such as
+    "报告全文衔接与篇幅补足". Downstream nodes will depend on the removed node's
+    original upstream dependencies to preserve DAG reachability.
+    """
     if not dag.nodes:
         return dag
 
     raw_nodes = [node.model_dump() for node in dag.nodes]
-    existing_ids = {str(node["id"]) for node in raw_nodes}
-    global_signal = _has_implementation_signal(task_title)
-
-    target_writer_ids: list[str] = []
-    for node in raw_nodes:
-        role = str(node.get("role") or "").strip().lower()
+    removed_dep_map: dict[str, list[str]] = {}
+    for raw in raw_nodes:
+        role = str(raw.get("role") or "").strip().lower()
+        title = str(raw.get("title") or "")
         if role != "writer":
             continue
-        title = str(node.get("title") or "")
-        if _is_expansion_title(title):
+        if not _is_forbidden_global_stitch_writer_title(title):
             continue
-        if _has_implementation_signal(title):
-            target_writer_ids.append(str(node["id"]))
+        node_id = str(raw.get("id") or "").strip()
+        if not node_id:
+            continue
+        deps = [str(dep).strip() for dep in raw.get("depends_on", []) if str(dep).strip()]
+        removed_dep_map[node_id] = deps
 
-    if not target_writer_ids and global_signal:
-        primary_writers = [
-            node for node in raw_nodes
-            if str(node.get("role") or "").strip().lower() == "writer"
-            and not _is_expansion_title(str(node.get("title") or ""))
-        ]
-        if primary_writers:
-            target_writer_ids.append(str(primary_writers[-1]["id"]))
-
-    if not target_writer_ids:
+    if not removed_dep_map:
         return dag
 
-    actionable_children: dict[str, list[str]] = {}
-    for writer_id in target_writer_ids:
-        writer_node = next((node for node in raw_nodes if str(node.get("id")) == writer_id), None)
-        if writer_node is None:
-            continue
-        chapter_title = str(writer_node.get("title") or "实施章节").strip() or "实施章节"
-        created_ids: list[str] = []
-        for capability, marker, label in _ACTIONABLE_NODE_SPECS:
-            child_id = _allocate_node_id(existing_ids, "n_actionable")
-            raw_nodes.append(
-                {
-                    "id": child_id,
-                    "title": f"{chapter_title} - {marker}（{label}）",
-                    "role": "writer",
-                    "depends_on": [writer_id],
-                    "required_capabilities": [capability],
-                    "routing_mode": "capability_first",
-                }
-            )
-            created_ids.append(child_id)
-        if created_ids:
-            actionable_children[writer_id] = created_ids
+    removed_ids = set(removed_dep_map)
+    kept_nodes = [
+        raw
+        for raw in raw_nodes
+        if str(raw.get("id") or "").strip() not in removed_ids
+    ]
 
-    if not actionable_children:
-        return dag
-
-    for node in raw_nodes:
-        role = str(node.get("role") or "").strip().lower()
-        if role not in {"reviewer", "consistency"}:
-            continue
-        deps = [str(dep) for dep in node.get("depends_on", [])]
+    for raw in kept_nodes:
+        deps = [str(dep).strip() for dep in raw.get("depends_on", []) if str(dep).strip()]
         rewritten: list[str] = []
         for dep in deps:
-            if dep in actionable_children:
-                rewritten.extend(actionable_children[dep])
+            if dep in removed_dep_map:
+                rewritten.extend(removed_dep_map[dep])
             else:
                 rewritten.append(dep)
-        node["depends_on"] = _dedupe_preserve_order(rewritten)
+        raw["depends_on"] = _dedupe_preserve_order(
+            [dep for dep in rewritten if dep and dep not in removed_ids]
+        )
 
-    return DAGSchema.model_validate({"nodes": raw_nodes})
+    logger.info(
+        "Removed forbidden global stitch writer nodes: {}",
+        sorted(removed_ids),
+    )
+    return DAGSchema.model_validate({"nodes": kept_nodes})
 
 
 # ---------------------------------------------------------------------------
@@ -686,6 +654,27 @@ DECOMPOSER_VERSION = "thinkweave.decomposer.v2"
 
 def _dag_dump(dag: DAGSchema) -> dict[str, Any]:
     return {"nodes": [node.model_dump() for node in dag.nodes]}
+
+
+def _build_mcts_shadow_trace(
+    *,
+    title: str,
+    mode: str,
+    depth: str,
+    target_words: int,
+) -> dict[str, Any]:
+    candidates = build_strategy_candidates()
+    trace = run_mcts_shadow(
+        candidates=candidates,
+        mode=mode,
+        depth=depth,
+        target_words=target_words,
+        ucb_c=float(settings.mcts_ucb_c),
+        iterations=32,
+        seed_text=f"{title}|{mode}|{depth}|{target_words}",
+    )
+    trace["shadow_mode"] = True
+    return trace
 
 
 def _append_repair_action(
@@ -796,6 +785,7 @@ async def decompose_task_with_trace(
         "validation_issues": [],
         "repair_actions": [],
         "raw_llm_output": None,
+        "strategy_trace": None,
     }
 
     # Ask the LLM for the DAG JSON.
@@ -815,6 +805,10 @@ async def decompose_task_with_trace(
         # chat_json with schema returns model_dump() dict.
         dag = parse_dag_response(raw)
         before = dag
+        after = _remove_forbidden_global_stitch_nodes(before)
+        _append_repair_action(trace["repair_actions"], step="remove_forbidden_global_stitch_nodes", before=before, after=after)
+        dag = after
+        before = dag
         after = _ensure_research_gate(before)
         _append_repair_action(trace["repair_actions"], step="ensure_research_gate", before=before, after=after)
         dag = after
@@ -830,13 +824,16 @@ async def decompose_task_with_trace(
         after = _compact_quick_short_dag(before, depth=depth, target_words=target_words)
         _append_repair_action(trace["repair_actions"], step="compact_quick_short_dag", before=before, after=after)
         dag = after
-        before = dag
-        after = _inject_actionable_implementation_nodes(before, task_title=title)
-        _append_repair_action(trace["repair_actions"], step="inject_actionable_implementation_nodes", before=before, after=after)
-        dag = after
         # Ensure the returned DAG is acyclic.
         validate_dag_acyclic(dag)
         trace["normalized_dag"] = _dag_dump(dag)
+        if settings.enable_mcts_shadow:
+            trace["strategy_trace"] = _build_mcts_shadow_trace(
+                title=title,
+                mode=mode,
+                depth=depth,
+                target_words=target_words,
+            )
         logger.bind(node_count=len(dag.nodes)).info("Task decomposed successfully")
         return dag, trace
     except LLMUnavailableError:
@@ -851,6 +848,10 @@ async def decompose_task_with_trace(
             {"step": "fallback_dag", "reason": str(exc)}
         )
         before = dag
+        after = _remove_forbidden_global_stitch_nodes(before)
+        _append_repair_action(trace["repair_actions"], step="remove_forbidden_global_stitch_nodes", before=before, after=after)
+        dag = after
+        before = dag
         after = _ensure_research_gate(before)
         _append_repair_action(trace["repair_actions"], step="ensure_research_gate", before=before, after=after)
         dag = after
@@ -866,10 +867,13 @@ async def decompose_task_with_trace(
         after = _compact_quick_short_dag(before, depth=depth, target_words=target_words)
         _append_repair_action(trace["repair_actions"], step="compact_quick_short_dag", before=before, after=after)
         dag = after
-        before = dag
-        after = _inject_actionable_implementation_nodes(before, task_title=title)
-        _append_repair_action(trace["repair_actions"], step="inject_actionable_implementation_nodes", before=before, after=after)
-        dag = after
         trace["normalized_dag"] = _dag_dump(dag)
+        if settings.enable_mcts_shadow:
+            trace["strategy_trace"] = _build_mcts_shadow_trace(
+                title=title,
+                mode=mode,
+                depth=depth,
+                target_words=target_words,
+            )
         logger.bind(node_count=len(dag.nodes)).info("Fallback DAG generated")
         return dag, trace

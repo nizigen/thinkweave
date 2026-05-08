@@ -38,6 +38,13 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
         "icon": "📋",
         "skill_allowlist": ["model_selection_guard"],
     },
+    "tool_manager": {
+        "layer": 1,
+        "label": "工具管理 (Tool Manager)",
+        "description": "统一工具生命周期管理",
+        "icon": "🧰",
+        "skill_allowlist": ["model_selection_guard"],
+    },
     "outline": {
         "layer": 2,
         "label": "大纲 (Outline)",
@@ -110,6 +117,7 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
 _ROLE_PRESET_ORDER = [
     "orchestrator",
     "manager",
+    "tool_manager",
     "outline",
     "researcher",
     "writer",

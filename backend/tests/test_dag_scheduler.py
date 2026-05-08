@@ -86,12 +86,14 @@ class FakeAgent:
         role: str = "writer",
         status: str = AGENT_IDLE,
         capabilities: str | None = None,
+        agent_config: dict | None = None,
     ):
         self.id = agent_id or make_uuid()
         self.name = name
         self.role = role
         self.status = status
         self.capabilities = capabilities
+        self.agent_config = agent_config
         self.created_at = datetime.now(UTC).replace(tzinfo=None)
 
 
@@ -1028,6 +1030,51 @@ class TestMatchAgentRouting:
 
         assert agent is None
         assert reason == "strict_bind_no_match"
+
+    @pytest.mark.asyncio
+    async def test_match_agent_prefers_mode_matched_skill_for_same_role(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        novel_writer = FakeAgent(
+            name="writer-novel",
+            role="writer",
+            agent_config={"skill_allowlist": ["novel"]},
+        )
+        report_writer = FakeAgent(
+            name="writer-report",
+            role="writer",
+            agent_config={"skill_allowlist": ["technical_report"]},
+        )
+        fake_result = MagicMock()
+        fake_result.scalars.return_value.all.return_value = [novel_writer, report_writer]
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=fake_result)
+        scheduler._skills_by_name = {
+            "novel": SimpleNamespace(
+                applicable_roles=("writer",),
+                applicable_modes=("novel",),
+                applicable_stages=("all",),
+                priority=100,
+            ),
+            "technical_report": SimpleNamespace(
+                applicable_roles=("writer",),
+                applicable_modes=("report",),
+                applicable_stages=("all",),
+                priority=100,
+            ),
+        }
+        scheduler._skills_loaded_at = datetime.now(UTC).timestamp()
+
+        with patch.object(scheduler, "_refresh_skill_catalog"):
+            agent, reason = await scheduler._match_agent(
+                session,
+                role="writer",
+                task_mode="report",
+            )
+
+        assert agent is report_writer
+        assert reason == "skill_mode_match"
 
 
 class TestAssignNode:
@@ -2572,6 +2619,71 @@ class TestConsistencyRepairWave:
         assert roles.count("writer") == 2
         assert roles.count("reviewer") == 2
         assert roles.count("consistency") == 1
+
+    @pytest.mark.asyncio
+    async def test_inject_repair_wave_applies_reconnect_spec(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        added_nodes: list[object] = []
+        mock_session = AsyncMock()
+        writer_rows = MagicMock()
+        writer_rows.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=writer_rows)
+        mock_session.get = AsyncMock(return_value=SimpleNamespace(depth="standard", target_words=4000))
+        mock_session.add = MagicMock(side_effect=lambda node: added_nodes.append(node))
+        mock_session.commit = AsyncMock()
+
+        custom_plan = {
+            "should_inject": True,
+            "mode": "review_chain",
+            "insertions": [
+                {
+                    "logical_id": "repair_writer_1_1",
+                    "title": "writer",
+                    "agent_role": "writer",
+                    "status": STATUS_READY,
+                    "depends_on": [],
+                },
+                {
+                    "logical_id": "repair_reviewer_1_1",
+                    "title": "reviewer",
+                    "agent_role": "reviewer",
+                    "status": STATUS_PENDING,
+                    "depends_on": ["repair_writer_1_1"],
+                },
+                {
+                    "logical_id": "repair_consistency_1",
+                    "title": "consistency",
+                    "agent_role": "consistency",
+                    "status": STATUS_PENDING,
+                    "depends_on": ["repair_reviewer_1_1"],
+                },
+            ],
+            "reconnects": [
+                {
+                    "logical_id": "repair_consistency_1",
+                    "new_depends_on": ["repair_writer_1_1"],
+                    "mode": "replace",
+                }
+            ],
+        }
+
+        with (
+            patch("app.services.dag_scheduler.build_consistency_recompose_plan", return_value=custom_plan),
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.push_ready_node", new_callable=AsyncMock),
+        ):
+            ok = await scheduler._inject_consistency_repair_wave(
+                session=mock_session,
+                repair_targets=[1],
+            )
+
+        assert ok is True
+        consistency = next(node for node in added_nodes if getattr(node, "agent_role", "") == "consistency")
+        assert len(getattr(consistency, "depends_on", []) or []) == 1
+        writer = next(node for node in added_nodes if getattr(node, "agent_role", "") == "writer")
+        assert consistency.depends_on[0] == writer.id
 
 
 # ---------------------------------------------------------------------------

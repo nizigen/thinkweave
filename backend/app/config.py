@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_retry_base_delay: float = 1.0
     llm_request_timeout_seconds: int = 120
+    enable_tea_protocol: bool = False
+    tea_protocol_version: str = "1.0"
+    enable_tool_lifecycle: bool = False
+    tool_lifecycle_max_records: int = 1000
+    enable_tool_manager_agent: bool = False
+    enable_mcts_shadow: bool = False
+    mcts_ucb_c: float = 1.4
 
     # DAG node timeout controls (seconds)
     dag_node_timeout_seconds: int = 300

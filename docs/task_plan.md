@@ -1,5 +1,13 @@
 # task_plan.md — 任务路线图
 
+> 2026-05-08 Phase 7 规划说明（HALO + TEA + DAG 重组）
+> - 已新增 `.planning/phases/07-halo-tea-dag-recompose/07-01-PLAN.md`。
+> - 执行顺序确定为：`TEA协议+dag_eval基线 -> MCTS Shadow -> ToolManagerAgent -> 动态DAG重组`。
+> - 按当前会话决策，**Phase 7 首轮不引入 MCP 依赖**，先落地无 MCP 闭环，避免因 MCP 不稳定阻塞主线。
+> - `07-02`（MCTS Shadow）已落盘并执行：新增 `mcts_engine + strategy_catalog`，仅写 `decomposition_trace.strategy_trace`，不改变 DAG 运行路径。
+> - `07-03`（Tool Lifecycle + ToolManagerAgent）已落盘并执行：新增 `tool_lifecycle` 服务、`ToolManagerAgent`、`chat_with_tools` 生命周期 telemetry，均以开关默认关闭方式接入。
+> - `07-04`（Dynamic DAG Recomposition）已落盘并执行：新增 `dag_recomposer` 结构化重组规划，并接入调度器一致性修复波次注入路径（逻辑 ID → 运行时 UUID 的两阶段 materialization）。
+
 > 2026-03-22 同步说明（Aletheia 参考）
 > - 路线保持“SessionMemory 生命周期闭环优先，Knowledge promote 后置”。
 > - provider 口径以本仓库验证为准：`cognee==0.5.5`，默认 `kuzu + lancedb`。

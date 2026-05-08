@@ -15,7 +15,7 @@ from typing import Any
 from app.agents.middleware import AgentMiddleware, DEFAULT_MIDDLEWARES
 from app.services import communicator
 from app.services.heartbeat import send_heartbeat
-from app.services.redis_streams import MessageEnvelope
+from app.services.communicator import RuntimeEnvelope
 from app.services.writer_output import extract_writer_markdown
 from app.utils.llm_client import BaseLLMClient
 from app.utils.logger import logger
@@ -227,7 +227,7 @@ class BaseAgent(ABC):
                 payload={"result": result},
             )
 
-    async def _handle_message(self, envelope: MessageEnvelope) -> None:
+    async def _handle_message(self, envelope: RuntimeEnvelope) -> None:
         """处理从 inbox 消费到的一条消息。"""
         task_id = envelope.task_id
         node_id = envelope.node_id
@@ -326,7 +326,17 @@ class BaseAgent(ABC):
                 )
 
                 for msg in messages:
-                    envelope = MessageEnvelope.from_redis(msg.data)
+                    try:
+                        envelope = communicator.decode_incoming_envelope(msg.data)
+                    except ValueError as exc:
+                        self._log.bind(message_id=msg.message_id).warning(
+                            "drop incompatible envelope: {}",
+                            exc,
+                        )
+                        await communicator.ack_agent_message(
+                            self.agent_id, msg.message_id,
+                        )
+                        continue
                     await self._handle_message(envelope)
 
                     # ACK 消息

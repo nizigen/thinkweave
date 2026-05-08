@@ -13,6 +13,7 @@ from app.agents.middleware import (
     TokenTrackingMiddleware,
 )
 from app.agents.orchestrator import OrchestratorAgent
+from app.agents.tool_manager_agent import ToolManagerAgent
 from app.agents.worker import WorkerAgent
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "MemoryMiddleware",
     "OrchestratorAgent",
     "TimeoutMiddleware",
+    "ToolManagerAgent",
     "TokenTrackingMiddleware",
     "WorkerAgent",
     "agent_registry",

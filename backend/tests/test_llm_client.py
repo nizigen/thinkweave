@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.config import settings
+from app.services.tool_lifecycle import tool_lifecycle_service
 from app.utils.llm_client import (
     MODEL_REGISTRY,
     ROLE_MODEL_MAP,
@@ -377,6 +379,88 @@ class TestGatewayResponseCompatibility:
                 [{"role": "user", "content": "hello"}],
                 model="deepseek-v3.2",
             )
+
+
+class TestChatWithToolsLifecycleTracing:
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_keeps_legacy_payload_when_lifecycle_disabled(self):
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {"name": "web.search", "arguments": "{\"q\":\"x\"}"},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        client = LLMClient.__new__(LLMClient)
+        client._clients = {"deepseek": _FakeProviderClient(payload)}
+        client._tracker = None
+        client._allow_build_clients = False
+
+        previous_enable = settings.enable_tool_lifecycle
+        settings.enable_tool_lifecycle = False
+        try:
+            await tool_lifecycle_service.clear()
+            result = await client.chat_with_tools(
+                [{"role": "user", "content": "call tool"}],
+                tools=[{"type": "function", "function": {"name": "web.search"}}],
+                model="deepseek-v3.2",
+            )
+            assert result["type"] == "tool_calls"
+            assert result["tool_calls"][0]["function"]["name"] == "web.search"
+            records = await tool_lifecycle_service.list()
+            assert records == []
+        finally:
+            settings.enable_tool_lifecycle = previous_enable
+            await tool_lifecycle_service.clear()
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_records_lifecycle_when_enabled(self):
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {"name": "browser.open", "arguments": "{\"url\":\"https://a.com\"}"},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        client = LLMClient.__new__(LLMClient)
+        client._clients = {"deepseek": _FakeProviderClient(payload)}
+        client._tracker = None
+        client._allow_build_clients = False
+
+        previous_enable = settings.enable_tool_lifecycle
+        settings.enable_tool_lifecycle = True
+        try:
+            await tool_lifecycle_service.clear()
+            result = await client.chat_with_tools(
+                [{"role": "user", "content": "call tool"}],
+                tools=[{"type": "function", "function": {"name": "browser.open"}}],
+                model="deepseek-v3.2",
+                role="researcher",
+            )
+            assert result["type"] == "tool_calls"
+            records = await tool_lifecycle_service.list()
+            assert len(records) == 1
+            assert records[0]["tool_name"] == "browser.open"
+            assert records[0]["status"] == "running"
+            transition_statuses = [item["status"] for item in records[0]["transitions"]]
+            assert transition_statuses == ["registered", "running"]
+        finally:
+            settings.enable_tool_lifecycle = previous_enable
+            await tool_lifecycle_service.clear()
 
 
 class TestBlockedPayloadDetector:

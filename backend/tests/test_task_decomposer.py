@@ -10,6 +10,7 @@ from app.services.task_decomposer import (
     CyclicDAGError,
     TaskValidationError,
     decompose_task,
+    decompose_task_with_trace,
     parse_dag_response,
     validate_dag_acyclic,
     validate_task_input,
@@ -179,6 +180,35 @@ class TestParseDAGResponse:
         assert all(any(rid in node.depends_on for rid in research_ids) for node in writer_nodes)
 
     @pytest.mark.asyncio
+    async def test_decompose_with_trace_includes_mcts_shadow_when_enabled(self):
+        class _SimpleLLM(MockLLMClient):
+            async def chat_json(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                return {
+                    "nodes": [
+                        {"id": "n1", "title": "大纲", "role": "outline", "depends_on": []},
+                        {"id": "n2", "title": "研究", "role": "researcher", "depends_on": ["n1"]},
+                        {"id": "n3", "title": "第1章：背景", "role": "writer", "depends_on": ["n2"]},
+                        {"id": "n4", "title": "审查", "role": "reviewer", "depends_on": ["n3"]},
+                        {"id": "n5", "title": "一致性检查", "role": "consistency", "depends_on": ["n4"]},
+                    ]
+                }
+
+        with patch("app.services.task_decomposer.settings.enable_mcts_shadow", True):
+            _dag, trace = await decompose_task_with_trace(
+                title="shadow strategy sample",
+                mode="report",
+                depth="standard",
+                target_words=10000,
+                llm_client=_SimpleLLM(),
+            )
+
+        strategy_trace = trace.get("strategy_trace")
+        assert isinstance(strategy_trace, dict)
+        assert strategy_trace.get("shadow_mode") is True
+        assert isinstance(strategy_trace.get("selected_strategy"), str)
+        assert len(strategy_trace.get("candidates", [])) == 5
+
+    @pytest.mark.asyncio
     async def test_decompose_injects_expansion_chain_for_long_target(self):
         class _ChapterLLM(MockLLMClient):
             async def chat_json(self, *args, **kwargs):  # noqa: ANN002, ANN003
@@ -203,6 +233,7 @@ class TestParseDAGResponse:
 
         writer_titles = [node.title for node in dag.nodes if node.role == "writer"]
         assert any("扩写" in title for title in writer_titles)
+        assert all("全稿扩写" not in title for title in writer_titles)
         consistency_nodes = [node for node in dag.nodes if node.role == "consistency"]
         assert len(consistency_nodes) == 1
         consistency_deps = set(consistency_nodes[0].depends_on)
@@ -325,7 +356,7 @@ class TestParseDAGResponse:
         assert len(dag.nodes) >= 7
 
     @pytest.mark.asyncio
-    async def test_decompose_injects_actionable_nodes_for_implementation_sections(self):
+    async def test_decompose_does_not_inject_actionable_nodes_for_implementation_sections(self):
         class _ImplementationLLM(MockLLMClient):
             async def chat_json(self, *args, **kwargs):  # noqa: ANN002, ANN003
                 return {
@@ -352,7 +383,8 @@ class TestParseDAGResponse:
         )
 
         actionable_titles = [
-            node.title for node in dag.nodes
+            node.title
+            for node in dag.nodes
             if node.role == "writer"
             and any(
                 marker in node.title
@@ -364,13 +396,67 @@ class TestParseDAGResponse:
                 )
             )
         ]
-        assert any("ACTIONABLE_CHECKLIST" in title for title in actionable_titles)
-        assert any("DECISION_MATRIX" in title for title in actionable_titles)
-        assert any("TIMELINE_ESTIMATE" in title for title in actionable_titles)
-        assert any("RISK_ASSESSMENT" in title for title in actionable_titles)
+        assert actionable_titles == []
 
+        node_by_id = {node.id: node for node in dag.nodes}
         reviewer_node = next(node for node in dag.nodes if node.role == "reviewer")
-        assert "n3" not in reviewer_node.depends_on
+        assert reviewer_node.depends_on
+        for dep in reviewer_node.depends_on:
+            assert dep in node_by_id
+            dep_node = node_by_id[dep]
+            assert dep_node.role == "writer"
+            assert not any(
+                marker in dep_node.title
+                for marker in (
+                    "ACTIONABLE_CHECKLIST",
+                    "DECISION_MATRIX",
+                    "TIMELINE_ESTIMATE",
+                    "RISK_ASSESSMENT",
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_decompose_removes_forbidden_global_stitch_writer_nodes(self):
+        class _GlobalStitchLLM(MockLLMClient):
+            async def chat_json(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                return {
+                    "nodes": [
+                        {"id": "n1", "title": "大纲", "role": "outline", "depends_on": []},
+                        {"id": "n2", "title": "研究", "role": "researcher", "depends_on": ["n1"]},
+                        {"id": "n3", "title": "第1章：背景", "role": "writer", "depends_on": ["n2"]},
+                        {"id": "n4", "title": "第1章审查", "role": "reviewer", "depends_on": ["n3"]},
+                        {
+                            "id": "n5",
+                            "title": "报告全文衔接与篇幅补足",
+                            "role": "writer",
+                            "depends_on": ["n3"],
+                        },
+                        {
+                            "id": "n5b",
+                            "title": "报告汇编与扩写：连接章节、强化分析、补足篇幅",
+                            "role": "writer",
+                            "depends_on": ["n3"],
+                        },
+                        {"id": "n6", "title": "全稿审查", "role": "reviewer", "depends_on": ["n5"]},
+                        {"id": "n7", "title": "一致性检查", "role": "consistency", "depends_on": ["n6"]},
+                    ]
+                }
+
+        dag = await decompose_task(
+            title="global stitch cleanup",
+            mode="report",
+            depth="standard",
+            target_words=10000,
+            llm_client=_GlobalStitchLLM(),
+        )
+
+        writer_titles = [node.title for node in dag.nodes if node.role == "writer"]
+        assert "报告全文衔接与篇幅补足" not in writer_titles
+        assert "报告汇编与扩写：连接章节、强化分析、补足篇幅" not in writer_titles
+        reviewer_global = next(node for node in dag.nodes if node.id == "n6")
+        assert "n5" not in reviewer_global.depends_on
+        assert "n5b" not in reviewer_global.depends_on
+        assert "n3" in reviewer_global.depends_on
 
 
 class TestDecomposeTask:

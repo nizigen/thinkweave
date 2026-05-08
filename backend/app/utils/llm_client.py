@@ -15,6 +15,7 @@ import httpx
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
 from app.config import settings
+from app.services.tool_lifecycle import tool_lifecycle_service
 from app.utils.logger import logger
 
 
@@ -319,6 +320,44 @@ class LLMClient(BaseLLMClient):
         if isinstance(choice, dict):
             return choice.get("message")
         return getattr(choice, "message", None)
+
+    async def _trace_tool_lifecycle(
+        self,
+        *,
+        tool_calls: list[dict[str, Any]],
+        model: str,
+        role: str | None,
+    ) -> None:
+        if not settings.enable_tool_lifecycle:
+            return
+        for index, tool_call in enumerate(tool_calls):
+            function_block = tool_call.get("function") if isinstance(tool_call, dict) else {}
+            tool_name = str((function_block or {}).get("name", "") or "").strip()
+            if not tool_name:
+                continue
+            metadata = {
+                "source": "llm_chat_with_tools",
+                "model": model,
+                "role": role or "",
+                "tool_call_id": str(tool_call.get("id", "") or ""),
+                "arguments": str((function_block or {}).get("arguments", "") or ""),
+                "ordinal": index,
+            }
+            try:
+                record = await tool_lifecycle_service.register(
+                    tool_name=tool_name,
+                    metadata=metadata,
+                )
+                await tool_lifecycle_service.mark_running(
+                    run_id=record.run_id,
+                    metadata={"phase": "selected_by_model"},
+                )
+            except Exception:
+                logger.bind(
+                    tool_name=tool_name,
+                    model=model,
+                    role=role or "",
+                ).opt(exception=True).warning("tool lifecycle trace failed")
 
     @staticmethod
     def _extract_content_from_message(message: Any) -> str | None:
@@ -726,26 +765,32 @@ class LLMClient(BaseLLMClient):
             else:
                 tool_calls = getattr(message, "tool_calls", None) or []
             if tool_calls:
+                normalized_calls = [
+                    {
+                        "id": tc.get("id") if isinstance(tc, dict) else tc.id,
+                        "function": {
+                            "name": (
+                                tc.get("function", {}).get("name")
+                                if isinstance(tc, dict)
+                                else tc.function.name
+                            ),
+                            "arguments": (
+                                tc.get("function", {}).get("arguments")
+                                if isinstance(tc, dict)
+                                else tc.function.arguments
+                            ),
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+                await self._trace_tool_lifecycle(
+                    tool_calls=normalized_calls,
+                    model=config.model,
+                    role=role,
+                )
                 return {
                     "type": "tool_calls",
-                    "tool_calls": [
-                        {
-                            "id": tc.get("id") if isinstance(tc, dict) else tc.id,
-                            "function": {
-                                "name": (
-                                    tc.get("function", {}).get("name")
-                                    if isinstance(tc, dict)
-                                    else tc.function.name
-                                ),
-                                "arguments": (
-                                    tc.get("function", {}).get("arguments")
-                                    if isinstance(tc, dict)
-                                    else tc.function.arguments
-                                ),
-                            },
-                        }
-                        for tc in tool_calls
-                    ],
+                    "tool_calls": normalized_calls,
                 }
             content = self._extract_text_content(resp)
             self._assert_clean_model_output(

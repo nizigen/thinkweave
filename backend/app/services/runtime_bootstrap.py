@@ -16,6 +16,7 @@ from app.agents.orchestrator import OrchestratorAgent
 from app.agents.outline_agent import OutlineAgent
 from app.agents.researcher_agent import ResearcherAgent
 from app.agents.reviewer_agent import ReviewerAgent
+from app.agents.tool_manager_agent import ToolManagerAgent
 from app.agents.worker import WorkerAgent
 from app.agents.writer_agent import WriterAgent
 from app.config import settings
@@ -108,6 +109,8 @@ def _build_runtime_agent(agent: Agent) -> Any:
         return ReviewerAgent(**common)
     if role == "consistency":
         return ConsistencyAgent(**common)
+    if role == "tool_manager" and settings.enable_tool_manager_agent:
+        return ToolManagerAgent(**common)
     return WorkerAgent(role=role or "writer", layer=int(getattr(agent, "layer", 2) or 2), **common)
 
 
