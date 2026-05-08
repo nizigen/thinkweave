@@ -1,81 +1,65 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { API_BASE, authHeaders, requestJson } from '../lib/apiBase'
+
+import { EmptyState } from '../components/EmptyState'
+import { PageHeader } from '../components/PageHeader'
+import { SectionCard } from '../components/SectionCard'
+import { apiUrl, authHeaders } from '../lib/apiBase'
+
+function summarize(items) {
+  const total = items.length
+  const running = items.filter((t) => t.status === 'running').length
+  const done = items.filter((t) => t.status === 'done').length
+  const blocked = items.filter((t) => t.status === 'blocked').length
+  return [
+    { label: '总记录', value: total },
+    { label: '进行中', value: running },
+    { label: '已完成', value: done },
+    { label: '阻塞', value: blocked },
+  ]
+}
 
 export function HomePage() {
   const navigate = useNavigate()
-  const [title, setTitle] = useState('二次元行业盈利方式调研')
+  const [title, setTitle] = useState('')
   const [depth, setDepth] = useState('standard')
   const [mode, setMode] = useState('report')
   const [targetWords, setTargetWords] = useState(10000)
-  const [taskToken, setTaskToken] = useState(
-    sessionStorage.getItem('task_auth_token') || 'local-dev-admin-token'
-  )
-  const [items, setItems] = useState([])
   const [loading, setLoading] = useState(false)
-  const [loadingTasks, setLoadingTasks] = useState(true)
   const [error, setError] = useState('')
-  const [taskError, setTaskError] = useState('')
+  const [items, setItems] = useState([])
 
   useEffect(() => {
-    let cancelled = false
-    let timer = null
-
-    const load = async () => {
-      setLoadingTasks(true)
-      setTaskError('')
-      try {
-        const data = await requestJson('/api/tasks', { headers: authHeaders() })
-        if (!cancelled) {
-          setItems(Array.isArray(data?.items) ? data.items : [])
-        }
-      } catch (e) {
-        if (!cancelled) setTaskError(String(e))
-      } finally {
-        if (!cancelled) setLoadingTasks(false)
-      }
-      if (!cancelled) {
-        timer = setTimeout(load, 4000)
-      }
+    let canceled = false
+    async function load() {
+      const resp = await fetch(apiUrl('/api/tasks'), { headers: authHeaders() })
+      if (!resp.ok) return
+      const data = await resp.json()
+      if (!canceled) setItems(data.items || [])
     }
-
-    load()
+    void load()
     return () => {
-      cancelled = true
-      if (timer) clearTimeout(timer)
+      canceled = true
     }
   }, [])
 
-  const statusSummary = useMemo(() => {
-    const summary = {}
-    for (const task of items) {
-      const key = task.status || 'unknown'
-      summary[key] = (summary[key] || 0) + 1
-    }
-    return summary
-  }, [items])
+  const kpis = useMemo(() => summarize(items), [items])
+  const recent = useMemo(() => items.slice(0, 3), [items])
 
   async function createTask() {
     setError('')
     setLoading(true)
     try {
-      const cleanToken = taskToken.trim()
-      if (cleanToken) {
-        sessionStorage.setItem('task_auth_token', cleanToken)
-      } else {
-        sessionStorage.removeItem('task_auth_token')
-      }
-
-      const data = await requestJson('/api/tasks', {
+      const resp = await fetch(apiUrl('/api/tasks'), {
         method: 'POST',
         headers: authHeaders({ 'content-type': 'application/json' }),
-        body: JSON.stringify({
-          title,
-          depth,
-          mode,
-          target_words: targetWords,
-        }),
+        body: JSON.stringify({ title, depth, mode, target_words: targetWords }),
       })
+      if (!resp.ok) {
+        setError(`创建失败: ${resp.status}`)
+        return
+      }
+      const data = await resp.json()
       navigate(`/monitor/${data.id}`)
     } catch (e) {
       setError(String(e))
@@ -85,137 +69,96 @@ export function HomePage() {
   }
 
   return (
-    <div className="page page-home page-pro-max">
-      <section className="card card-create">
-        <header className="card-head">
-          <h2>任务启动台</h2>
-          <p>创建新任务并进入实时监控</p>
-        </header>
+    <div className="page-stack">
+      <PageHeader
+        title="总览"
+        subtitle="管理你的内容生产与记录流，查看进度并快速继续。"
+      />
 
-        <div className="form-grid">
-          <label>
-            <span>标题</span>
+      <div className="kpi-grid">
+        {kpis.map((item) => (
+          <SectionCard key={item.label}>
+            <p className="muted-label">{item.label}</p>
+            <p className="kpi-value">{item.value}</p>
+          </SectionCard>
+        ))}
+      </div>
+
+      <div className="two-col-grid">
+        <SectionCard title="新建记录任务">
+          <div className="form-grid">
+            <label htmlFor="task-title">标题</label>
             <input
+              id="task-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="输入主题标题"
             />
-          </label>
 
-          <label>
-            <span>模式</span>
-            <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <label htmlFor="task-mode">模式</label>
+            <select id="task-mode" value={mode} onChange={(e) => setMode(e.target.value)}>
               <option value="report">report</option>
               <option value="novel">novel</option>
               <option value="custom">custom</option>
             </select>
-          </label>
 
-          <label>
-            <span>深度</span>
-            <select value={depth} onChange={(e) => setDepth(e.target.value)}>
+            <label htmlFor="task-depth">深度</label>
+            <select id="task-depth" value={depth} onChange={(e) => setDepth(e.target.value)}>
               <option value="quick">quick</option>
               <option value="standard">standard</option>
               <option value="deep">deep</option>
             </select>
-          </label>
 
-          <label>
-            <span>目标字数</span>
+            <label htmlFor="task-words">目标字数</label>
             <input
+              id="task-words"
               type="number"
-              min={500}
+              min="100"
               value={targetWords}
               onChange={(e) => setTargetWords(Number(e.target.value || 0))}
             />
-          </label>
-
-          <label className="field-full">
-            <span>任务 Token</span>
-            <input
-              value={taskToken}
-              onChange={(e) => setTaskToken(e.target.value)}
-              placeholder="local-dev-admin-token"
-            />
-          </label>
-        </div>
-
-        <div className="actions">
-          <button
-            className="btn btn-primary"
-            onClick={createTask}
-            disabled={loading || title.trim().length < 6}
-          >
-            {loading ? '创建中...' : '开始生成并进入监控'}
-          </button>
-          <span className="hint">API Base: {API_BASE || '(same-origin)'}</span>
-        </div>
-        {error ? <p className="error">{error}</p> : null}
-      </section>
-
-      <section className="card card-summary">
-        <header className="card-head">
-          <h2>运行概览</h2>
-          <p>最近 20 个任务实时状态</p>
-        </header>
-        {loadingTasks ? <p className="muted">加载中...</p> : null}
-        {taskError ? <p className="error">{taskError}</p> : null}
-
-        <div className="kpi-grid">
-          <div className="kpi-item">
-            <span>Total</span>
-            <strong>{items.length}</strong>
           </div>
-          {Object.entries(statusSummary).map(([status, count]) => (
-            <div className="kpi-item" key={status}>
-              <span>{status}</span>
-              <strong>{count}</strong>
-            </div>
-          ))}
-        </div>
+          <div className="button-row">
+            <button
+              type="button"
+              onClick={createTask}
+              disabled={loading || title.trim().length < 6}
+              className="btn btn-primary"
+            >
+              {loading ? '创建中...' : '开始生成'}
+            </button>
+          </div>
+          {error ? <p className="error-text">{error}</p> : null}
+        </SectionCard>
 
-        <div className="task-table-wrap">
-          <table className="task-table">
-            <thead>
-              <tr>
-                <th>标题</th>
-                <th>状态</th>
-                <th>FSM</th>
-                <th>字数</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((task) => (
-                <tr key={task.id}>
-                  <td>{task.title}</td>
-                  <td>
-                    <span className={`status-dot status-${task.status}`} />
-                    {task.status}
-                  </td>
-                  <td>{task.fsm_state || '-'}</td>
-                  <td>{task.word_count || 0}</td>
-                  <td>
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => navigate(`/monitor/${task.id}`)}
-                    >
-                      打开监控
-                    </button>
-                  </td>
-                </tr>
+        <SectionCard
+          title="继续进行"
+          extra={
+            <button className="btn btn-ghost" type="button" onClick={() => navigate('/history')}>
+              查看全部
+            </button>
+          }
+        >
+          {recent.length ? (
+            <ul className="simple-list">
+              {recent.map((task) => (
+                <li key={task.id}>
+                  <button
+                    type="button"
+                    className="list-link"
+                    onClick={() => navigate(`/monitor/${task.id}`)}
+                  >
+                    <span>{task.title}</span>
+                    <span className="status-pill">{task.status}</span>
+                  </button>
+                </li>
               ))}
-              {!items.length && !loadingTasks ? (
-                <tr>
-                  <td colSpan={5} className="muted">
-                    暂无任务
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </ul>
+          ) : (
+            <EmptyState title="暂无记录" description="新建一个任务后会出现在这里。" />
+          )}
+        </SectionCard>
+      </div>
     </div>
   )
 }
