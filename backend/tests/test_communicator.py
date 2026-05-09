@@ -222,9 +222,56 @@ class TestSendSystemLog:
 
 class TestConsumeAgentInbox:
     @pytest.mark.asyncio
+    async def test_reads_new_messages_first(self, _mock_streams):
+        _mock_streams["xreadgroup"].side_effect = [
+            [
+                StreamMessage(
+                    stream="agent:a1:inbox",
+                    message_id="1-0",
+                    data={"msg_type": "task_assign"},
+                ),
+            ],
+        ]
+        msgs = await consume_agent_inbox("a1", "consumer-1", count=5, block=1000)
+        assert len(msgs) == 1
+
+        _mock_streams["xreadgroup"].assert_awaited_once()
+        call_args = _mock_streams["xreadgroup"].call_args
+        assert call_args[0][0] == AGENT_INBOX_GROUP
+        assert call_args[0][1] == "consumer-1"
+        assert call_args[0][2] == {"agent:a1:inbox": ">"}
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_pending_when_no_new_messages(self, _mock_streams):
+        _mock_streams["xreadgroup"].side_effect = [
+            [],
+            [
+                StreamMessage(
+                    stream="agent:a1:inbox",
+                    message_id="2-0",
+                    data={"msg_type": "task_assign"},
+                ),
+            ],
+        ]
+        msgs = await consume_agent_inbox("a1", "consumer-1", count=5, block=1000)
+        assert len(msgs) == 1
+
+        assert _mock_streams["xreadgroup"].await_count == 2
+        first_call = _mock_streams["xreadgroup"].await_args_list[0]
+        second_call = _mock_streams["xreadgroup"].await_args_list[1]
+        assert first_call[0][2] == {"agent:a1:inbox": ">"}
+        assert second_call[0][2] == {"agent:a1:inbox": "0"}
+
+    @pytest.mark.asyncio
     async def test_calls_xreadgroup(self, _mock_streams):
-        _mock_streams["xreadgroup"].return_value = [
-            StreamMessage(stream="agent:a1:inbox", message_id="1-0", data={"msg_type": "task_assign"}),
+        _mock_streams["xreadgroup"].side_effect = [
+            [
+                StreamMessage(
+                    stream="agent:a1:inbox",
+                    message_id="1-0",
+                    data={"msg_type": "task_assign"},
+                ),
+            ],
         ]
         msgs = await consume_agent_inbox("a1", "consumer-1", count=5, block=1000)
         assert len(msgs) == 1

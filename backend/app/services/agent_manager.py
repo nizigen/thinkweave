@@ -67,6 +67,7 @@ _ROLE_PRESET_CATALOG: dict[str, dict[str, object]] = {
             "revision_closure_policy",
             "research_tooling_policy",
             "experiment_analysis_protocol",
+            "humanizer-zh",
             "no_hallucination_policy",
             "evidence_driven_report",
             "quantified_claims",
@@ -144,6 +145,17 @@ def _normalize_capabilities(raw: str | None) -> str | None:
     if not out:
         return None
     return ", ".join(out)
+
+
+def _append_mcp_capability(role: str, capabilities: str | None) -> str | None:
+    role_name = str(role or "").strip().lower()
+    if role_name != "researcher":
+        return capabilities
+    if not settings.enable_mcp_gateway:
+        return capabilities
+    base = str(capabilities or "").strip()
+    merged = f"{base}, mcp_tools" if base else "mcp_tools"
+    return _normalize_capabilities(merged)
 
 
 def _normalize_preset_allowlist(
@@ -253,6 +265,10 @@ async def create_agent(session: AsyncSession, agent_in: AgentCreate) -> Agent:
     """Register a new agent."""
     payload = agent_in.model_dump()
     payload["capabilities"] = _normalize_capabilities(payload.get("capabilities"))
+    payload["capabilities"] = _append_mcp_capability(
+        str(payload.get("role", "")),
+        payload.get("capabilities"),
+    )
     if payload.get("agent_config") is None:
         default_config = _build_default_agent_config(str(payload.get("role", "")))
         if default_config is not None:

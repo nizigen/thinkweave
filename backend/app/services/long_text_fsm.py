@@ -687,6 +687,7 @@ class LongTextFSM:
         nodes.sort(key=lambda node: self._natural_title_key(node.title or ""))
 
         chapter_nodes: dict[int, dict[str, Any]] = {}
+        chapter_expansions: dict[int, list[dict[str, Any]]] = {}
         assembly_parts: list[str] = []
         fallback_parts: list[str] = []
         for node in nodes:
@@ -705,6 +706,14 @@ class LongTextFSM:
                     assembly_markdown = extract_writer_markdown(raw).strip() or markdown
                     assembly_parts.append(assembly_markdown)
                 if chapter_index is not None and chapter_index > 0:
+                    if self._is_expansion_writer_title(node_title):
+                        chapter_expansions.setdefault(chapter_index, []).append(
+                            {
+                                "markdown": markdown,
+                                "finished_at": getattr(node, "finished_at", None),
+                            }
+                        )
+                        continue
                     word_units = self._count_words(markdown)
                     existing = chapter_nodes.get(chapter_index)
                     existing_units = int(existing.get("word_units", 0)) if existing else -1
@@ -729,11 +738,35 @@ class LongTextFSM:
                     if self._is_nonchapter_primary_title(node_title):
                         fallback_parts.append(markdown)
 
-        ordered_parts = [
-            str(chapter_nodes[idx]["markdown"]).strip()
-            for idx in sorted(chapter_nodes.keys())
-            if str(chapter_nodes[idx].get("markdown") or "").strip()
-        ]
+        ordered_parts: list[str] = []
+        chapter_indexes = sorted(set(chapter_nodes.keys()) | set(chapter_expansions.keys()))
+        for idx in chapter_indexes:
+            chapter_chunks: list[str] = []
+            base_markdown = str(chapter_nodes.get(idx, {}).get("markdown") or "").strip()
+            if base_markdown:
+                chapter_chunks.append(base_markdown)
+            expansions = chapter_expansions.get(idx, [])
+            if expansions:
+                def _expansion_sort_key(item: dict[str, Any]) -> str:
+                    value = item.get("finished_at")
+                    if isinstance(value, datetime):
+                        return value.isoformat()
+                    return str(value or "")
+
+                expansions_sorted = sorted(
+                    expansions,
+                    key=_expansion_sort_key,
+                )
+                for item in expansions_sorted:
+                    text = str(item.get("markdown") or "").strip()
+                    if not text:
+                        continue
+                    if text in chapter_chunks:
+                        continue
+                    chapter_chunks.append(text)
+            merged_chapter = "\n\n".join(chunk for chunk in chapter_chunks if chunk).strip()
+            if merged_chapter:
+                ordered_parts.append(merged_chapter)
         fallback_nonchapter_parts = [part for part in fallback_parts if part]
         if ordered_parts and fallback_nonchapter_parts:
             ordered_parts.extend(fallback_nonchapter_parts)
@@ -909,6 +942,28 @@ class LongTextFSM:
             elif marker in text:
                 return False
         return True
+
+    @staticmethod
+    def _is_expansion_writer_title(title: str) -> bool:
+        text = str(title or "")
+        markers = (
+            "自动补写",
+            "补写轮次",
+            "全稿扩写",
+            "扩写轮次",
+            "审阅定向修复",
+            "修复复审",
+            "补充轮次",
+            "扩展轮次",
+        )
+        lowered = text.lower()
+        for marker in markers:
+            if marker.isascii():
+                if marker in lowered:
+                    return True
+            elif marker in text:
+                return True
+        return False
 
     @staticmethod
     def _is_low_quality_paragraph(text: str) -> bool:

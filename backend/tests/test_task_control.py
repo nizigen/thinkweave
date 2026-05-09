@@ -44,6 +44,7 @@ def _build_task(
 def _build_node(status: str) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.uuid4(),
+        title="test node",
         status=status,
         agent_role="writer",
         started_at="started",
@@ -505,6 +506,7 @@ async def test_retry_node_resets_budget_then_scheduler_can_dispatch_same_node() 
         ),
         patch("app.services.task_control.communicator") as mock_comm,
         patch("app.services.task_control.get_scheduler", return_value=None, create=True),
+        patch("app.services.task_control.start_scheduler", new=AsyncMock(return_value=None)),
     ):
         mock_comm.send_task_event = AsyncMock()
         mock_comm.send_status_update = AsyncMock()

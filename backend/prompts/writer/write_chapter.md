@@ -8,6 +8,7 @@
 - stage_contract: {stage_contract}
 - full_outline: {full_outline}
 - chapter_description: {chapter_description}
+- repair_guidance: {repair_guidance}
 - context_bridges: {context_bridges}
 - Memory Context: {memory_context}
 - topic_claims: {topic_claims}

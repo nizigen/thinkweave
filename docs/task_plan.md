@@ -1,5 +1,13 @@
 # task_plan.md — 任务路线图
 
+> 2026-05-09 Phase 7 MCP 规划说明（参考 DeerFlow 2.0）
+> - 已新增 `.planning/phases/07-halo-tea-dag-recompose/07-05-PLAN.md`。
+> - 执行策略调整为：在既有 `TEA + ToolLifecycle` 基础上，新增 **MCP Gateway 灰度接入**。
+> - 首轮 MCP 范围：`mcp-server-fetch`（researcher 主用）+ `mcp-server-time`（健康检查基准）+ `mcp-server-filesystem`（可选，只读白名单）。
+> - 明确安全边界：仅 `researcher` 角色默认可用，其他角色禁用；MCP 开关默认关闭，可一键回退。
+> - 验证口径：同类 `quick 2000` 任务 + Redis 事件流中 `tool_lifecycle(source=mcp)` 全链路检查。
+> - `07-05` 已执行完成（本地测试通过）：新增 `mcp_registry/mcp_gateway`、researcher MCP 路径、tool manager `list_tools/invoke`，并通过 `18 + 11` 项相关回归测试。
+
 > 2026-05-08 Phase 7 规划说明（HALO + TEA + DAG 重组）
 > - 已新增 `.planning/phases/07-halo-tea-dag-recompose/07-01-PLAN.md`。
 > - 执行顺序确定为：`TEA协议+dag_eval基线 -> MCTS Shadow -> ToolManagerAgent -> 动态DAG重组`。

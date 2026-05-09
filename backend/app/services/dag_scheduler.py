@@ -79,7 +79,11 @@ MAX_RETRIES = 3
 MIN_TARGET_WORD_RATIO = 1.0
 AUTO_EXPANSION_MAX_WAVES = 3
 MAX_CONSISTENCY_REPAIR_WAVES = 2
+MAX_REVIEWER_REPAIR_WAVES = 2
 QUICK_REPAIR_TARGET_WORDS_MAX = 2000
+QUICK_TARGET_WORD_TOLERANCE_RATIO = 0.02
+QUICK_TARGET_WORD_TOLERANCE_FLOOR = 40
+WRITER_HUMANIZER_SKILL = "humanizer-zh"
 DEFAULT_NODE_WORD_FLOOR = 300
 LONGFORM_PLAN_UPLIFT_RATIO = 1.15
 RUNTIME_MIN_PRIMARY_CHAPTERS_BY_TARGET: list[tuple[int, int]] = [
@@ -1533,9 +1537,10 @@ class DAGScheduler:
         cfg = getattr(agent, "agent_config", None)
         if not isinstance(cfg, dict):
             return []
+        role_name = str(getattr(agent, "role", "") or "").strip().lower()
         raw = cfg.get("skill_allowlist")
         if not isinstance(raw, list):
-            return []
+            raw = []
         out: list[str] = []
         seen: set[str] = set()
         for item in raw:
@@ -1544,6 +1549,8 @@ class DAGScheduler:
                 continue
             seen.add(token)
             out.append(token)
+        if role_name == "writer" and WRITER_HUMANIZER_SKILL not in seen:
+            out.append(WRITER_HUMANIZER_SKILL)
         return out
 
     async def _filter_alive_idle_agents(
@@ -1823,6 +1830,14 @@ class DAGScheduler:
             if isinstance(agent_config.get("skill_allowlist", []), list)
             else []
         )
+        if node_role == "writer":
+            normalized_allowlist = {
+                str(item or "").strip().lower()
+                for item in payload["skill_allowlist"]
+                if str(item or "").strip()
+            }
+            if WRITER_HUMANIZER_SKILL not in normalized_allowlist:
+                payload["skill_allowlist"].append(WRITER_HUMANIZER_SKILL)
         tags = (
             list(agent_config.get("tags", []))
             if isinstance(agent_config.get("tags", []), list)
@@ -1987,6 +2002,10 @@ class DAGScheduler:
                     "boundary": "Do not invent unsupported claims.",
                 }
             if is_expansion_pass:
+                repair_guidance = await self._build_chapter_repair_guidance(
+                    session=session,
+                    chapter_index=chapter_index,
+                )
                 payload["chapter_description"] = (
                     _build_chapter_mission(
                         chapter_index=chapter_index,
@@ -1995,6 +2014,12 @@ class DAGScheduler:
                     )
                     + "\n- 扩写要求：只能在现有章节观点上加深论证与证据，不得改写为泛化模板段落。"
                 )
+                if repair_guidance:
+                    payload["repair_guidance"] = repair_guidance
+                    payload["chapter_description"] += (
+                        "\n- 必须落实以下修复清单（来自 reviewer / consistency）：\n"
+                        f"{repair_guidance}"
+                    )
                 payload["chapter_content"] = self._pick_writer_content_for_chapter(
                     writer_nodes,
                     chapter_index=chapter_index,
@@ -2194,6 +2219,8 @@ class DAGScheduler:
             "补写轮次",
             "扩写",
             "篇幅补足",
+            "审阅定向修复",
+            "修复复审",
             "一致性定向修复",
             "一致性修复",
             "全稿扩写",
@@ -2342,10 +2369,29 @@ class DAGScheduler:
                 if content:
                     return content
             return ""
+
+        best_primary_content = ""
+        best_primary_units = -1
+        best_fallback_content = ""
+        best_fallback_units = -1
         for title, content in writer_nodes:
             parsed_index, _ = self._parse_chapter_meta(str(title or ""))
-            if parsed_index == chapter_index and content:
-                return content
+            if parsed_index != chapter_index or not content:
+                continue
+            units = _count_text_units(content)
+            is_expansion = self._is_expansion_writer_title(str(title or ""))
+            if not is_expansion and units > best_primary_units:
+                best_primary_units = units
+                best_primary_content = content
+            if units > best_fallback_units:
+                best_fallback_units = units
+                best_fallback_content = content
+
+        if best_primary_content:
+            return best_primary_content
+        if best_fallback_content:
+            return best_fallback_content
+
         for _, content in writer_nodes:
             if content:
                 return content
@@ -2545,6 +2591,42 @@ class DAGScheduler:
                                 agent_id=agent_id,
                             )
                             continue
+                    if node_role_norm == "reviewer":
+                        parsed = _parse_json_object(output)
+                        if isinstance(parsed, dict):
+                            must_fix = parsed.get("must_fix", [])
+                            must_fix_items = (
+                                [str(item or "").strip() for item in must_fix if str(item or "").strip()]
+                                if isinstance(must_fix, list)
+                                else []
+                            )
+                            pass_flag = bool(parsed.get("pass", False))
+                            chapter_index = None
+                            try:
+                                chapter_index = int(parsed.get("chapter_index"))
+                            except Exception:
+                                chapter_index, _ = self._parse_chapter_meta(node_title)
+                            needs_repair = (not pass_flag) or bool(must_fix_items)
+                            if needs_repair and chapter_index is not None and chapter_index > 0:
+                                injected = await self._inject_reviewer_repair_wave(
+                                    session=session,
+                                    chapter_index=chapter_index,
+                                    trigger_node_id=node_id,
+                                )
+                                if injected:
+                                    logger.bind(
+                                        task_id=str(self.task_id),
+                                        node_id=str(node_id),
+                                        chapter_index=chapter_index,
+                                    ).warning(
+                                        "reviewer requested fixes; injected reviewer-driven repair wave"
+                                    )
+                                    await self.on_node_completed(
+                                        node_id=node_id,
+                                        result=output,
+                                        agent_id=agent_id,
+                                    )
+                                    continue
                     if node_role_norm == "consistency":
                         parsed = _parse_json_object(output)
                         if isinstance(parsed, dict) and parsed.get("pass") is False:
@@ -2617,6 +2699,7 @@ class DAGScheduler:
                                 injected = await self._inject_consistency_repair_wave(
                                     session=session,
                                     repair_targets=budget_targets,
+                                    trigger_node_id=node_id,
                                 )
                                 if injected:
                                     logger.bind(
@@ -2975,6 +3058,103 @@ class DAGScheduler:
                     continue
         return False
 
+    async def _build_chapter_repair_guidance(
+        self,
+        *,
+        session: AsyncSession,
+        chapter_index: int | None,
+    ) -> str:
+        if chapter_index is None or chapter_index <= 0:
+            return ""
+
+        guidance_lines: list[str] = []
+        seen: set[str] = set()
+
+        def _push_line(line: str) -> None:
+            text = str(line or "").strip()
+            if not text:
+                return
+            if text in seen:
+                return
+            seen.add(text)
+            guidance_lines.append(text)
+
+        reviewer_rows = await session.execute(
+            select(TaskNode.title, TaskNode.result)
+            .where(
+                TaskNode.task_id == self.task_id,
+                TaskNode.agent_role == "reviewer",
+                TaskNode.result.is_not(None),
+            )
+            .order_by(TaskNode.finished_at.desc())
+            .limit(10)
+        )
+        for title_raw, result_raw in reviewer_rows.all():
+            parsed_index, _ = self._parse_chapter_meta(str(title_raw or ""))
+            if parsed_index != chapter_index:
+                continue
+            parsed = _parse_json_object(str(result_raw or ""))
+            if not isinstance(parsed, dict):
+                continue
+            must_fix = parsed.get("must_fix", [])
+            if isinstance(must_fix, list):
+                for item in must_fix:
+                    _push_line(f"- reviewer must_fix: {str(item or '').strip()}")
+            feedback = str(parsed.get("feedback") or "").strip()
+            if feedback:
+                _push_line(f"- reviewer feedback: {feedback}")
+
+        consistency_rows = await session.execute(
+            select(TaskNode.result)
+            .where(
+                TaskNode.task_id == self.task_id,
+                TaskNode.agent_role == "consistency",
+                TaskNode.result.is_not(None),
+            )
+            .order_by(TaskNode.finished_at.desc())
+            .limit(6)
+        )
+        issue_buckets = (
+            "style_conflicts",
+            "claim_conflicts",
+            "duplicate_coverage",
+            "term_inconsistency",
+            "transition_gaps",
+            "language_policy_conflicts",
+            "source_policy_violations",
+            "unapplied_recommendations",
+        )
+        for (result_raw,) in consistency_rows.all():
+            parsed = _parse_json_object(str(result_raw or ""))
+            if not isinstance(parsed, dict):
+                continue
+            for bucket in issue_buckets:
+                entries = parsed.get(bucket, [])
+                if not isinstance(entries, list):
+                    continue
+                for item in entries:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        issue_chapter = int(item.get("chapter_index"))
+                    except Exception:
+                        continue
+                    if issue_chapter != chapter_index:
+                        continue
+                    severity = str(item.get("severity") or "").strip().lower() or "info"
+                    problem = str(item.get("problem") or "").strip()
+                    suggestion = str(item.get("suggestion") or item.get("recommendation") or "").strip()
+                    if problem and suggestion:
+                        _push_line(f"- consistency[{severity}]: {problem} -> {suggestion}")
+                    elif problem:
+                        _push_line(f"- consistency[{severity}]: {problem}")
+                    elif suggestion:
+                        _push_line(f"- consistency[{severity}]: {suggestion}")
+
+        if not guidance_lines:
+            return ""
+        return "\n".join(guidance_lines[:12])
+
     async def _consume_consistency_repair_budget(
         self,
         *,
@@ -3088,6 +3268,7 @@ class DAGScheduler:
         *,
         session: AsyncSession,
         repair_targets: list[int],
+        trigger_node_id: uuid.UUID | None = None,
     ) -> bool:
         writer_rows = await session.execute(
             select(TaskNode.title).where(
@@ -3173,6 +3354,12 @@ class DAGScheduler:
                     dep_id = logical_id_map.get(dep_key)
                     if dep_id is not None:
                         depends_on.append(dep_id)
+            if (
+                trigger_node_id is not None
+                and role == "writer"
+                and trigger_node_id not in depends_on
+            ):
+                depends_on.append(trigger_node_id)
             session.add(
                 TaskNode(
                     id=node_id,
@@ -3202,6 +3389,77 @@ class DAGScheduler:
         if not quick_compact:
             for node_id in reviewer_ids:
                 await set_dag_node_status(self.task_id, str(node_id), STATUS_PENDING)
+        return True
+
+    async def _inject_reviewer_repair_wave(
+        self,
+        *,
+        session: AsyncSession,
+        chapter_index: int,
+        trigger_node_id: uuid.UUID,
+    ) -> bool:
+        if chapter_index <= 0:
+            return False
+
+        existing_rows = await session.execute(
+            select(TaskNode.title).where(TaskNode.task_id == self.task_id)
+        )
+        existing_titles = [str(row[0] or "") for row in existing_rows.all()]
+        wave_count = sum(
+            1
+            for title in existing_titles
+            if f"第{chapter_index}章：审阅定向修复（轮次" in title
+        )
+        if wave_count >= MAX_REVIEWER_REPAIR_WAVES:
+            return False
+        wave_no = wave_count + 1
+
+        writer_node_id = uuid.uuid4()
+        reviewer_node_id = uuid.uuid4()
+        writer_title = f"第{chapter_index}章：审阅定向修复（轮次{wave_no}）"
+        reviewer_title = f"第{chapter_index}章：修复复审（轮次{wave_no}）"
+
+        session.add(
+            TaskNode(
+                id=writer_node_id,
+                task_id=self.task_id,
+                title=writer_title,
+                agent_role="writer",
+                status=STATUS_READY,
+                depends_on=[trigger_node_id],
+                retry_count=0,
+            )
+        )
+        session.add(
+            TaskNode(
+                id=reviewer_node_id,
+                task_id=self.task_id,
+                title=reviewer_title,
+                agent_role="reviewer",
+                status=STATUS_PENDING,
+                depends_on=[writer_node_id],
+                retry_count=0,
+            )
+        )
+
+        pending_consistency_rows = await session.execute(
+            select(TaskNode.id, TaskNode.depends_on)
+            .where(TaskNode.task_id == self.task_id, TaskNode.agent_role == "consistency", TaskNode.status == STATUS_PENDING)
+        )
+        for consistency_id, deps_raw in pending_consistency_rows.all():
+            deps = list(deps_raw or [])
+            if reviewer_node_id not in deps:
+                deps.append(reviewer_node_id)
+            await session.execute(
+                update(TaskNode)
+                .where(TaskNode.id == consistency_id)
+                .values(depends_on=deps)
+            )
+
+        await session.commit()
+        await set_dag_node_status(self.task_id, str(writer_node_id), STATUS_READY)
+        await push_ready_node(str(writer_node_id), priority=0.0)
+        await set_dag_node_status(self.task_id, str(reviewer_node_id), STATUS_PENDING)
         return True
 
     async def _validate_writer_output_length(
@@ -3519,7 +3777,14 @@ class DAGScheduler:
                     depth = ""
                 if word_count is not None and target_words > 0:
                     min_required = int(target_words * MIN_TARGET_WORD_RATIO)
-                    if word_count < min_required:
+                    effective_min_required = min_required
+                    if depth == "quick":
+                        quick_tolerance = max(
+                            QUICK_TARGET_WORD_TOLERANCE_FLOOR,
+                            int(target_words * QUICK_TARGET_WORD_TOLERANCE_RATIO),
+                        )
+                        effective_min_required = max(1, min_required - quick_tolerance)
+                    if word_count < effective_min_required:
                         allow_auto_expand, expand_reason = await self._allow_auto_expansion_after_finalize(
                             session=session,
                             task=task,
@@ -3552,10 +3817,17 @@ class DAGScheduler:
                                 return "extended"
                         fail_reason = (
                             f"Output below target words: got={word_count}, "
-                            f"required_min={min_required}, target={target_words}"
+                            f"required_min={effective_min_required}, target={target_words}"
                         )
                         if expand_reason:
                             fail_reason = f"{fail_reason}; auto_expand_blocked={expand_reason}"
+                    elif word_count < min_required:
+                        logger.bind(task_id=str(self.task_id)).info(
+                            "word gate passed with quick tolerance: got={}, hard_min={}, effective_min={}",
+                            word_count,
+                            min_required,
+                            effective_min_required,
+                        )
             except Exception:
                 logger.bind(task_id=str(self.task_id)).opt(exception=True).warning(
                     "failed to finalize task output before mark done"

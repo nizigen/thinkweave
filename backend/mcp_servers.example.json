@@ -1,13 +1,27 @@
 {
   "servers": {
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"],
+      "enabled": true,
+      "description": "时间工具（连通性基线）"
+    },
     "web_search": {
       "command": "uvx",
       "args": ["mcp-server-fetch"],
+      "enabled": true,
       "description": "网页抓取工具"
+    },
+    "filesystem_readonly": {
+      "command": "uvx",
+      "args": ["mcp-server-filesystem"],
+      "enabled": false,
+      "description": "本地只读文件访问（需配 MCP_FILESYSTEM_ROOTS）"
     },
     "brave_search": {
       "command": "npx",
       "args": ["-y", "@anthropic-ai/mcp-server-brave-search"],
+      "enabled": false,
       "env": {
         "BRAVE_API_KEY": "$BRAVE_API_KEY"
       },

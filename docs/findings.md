@@ -1,5 +1,43 @@
 # findings.md — 研究发现与技术决策知识库
 
+## 2026-05-09：Phase 7-05 MCP 接入执行决策
+
+- 执行形态：采用“网关内建工具 + 配置驱动服务识别”的最小可运行方案，避免首轮直接绑定外部 SDK 造成依赖链不稳定。
+- 生命周期语义落地：
+  - `llm_client.chat_with_tools` 在 MCP 执行开启时，会把 `mcp.*` 工具调用推进到 `registered -> running -> success|failed -> cleaned`。
+  - lifecycle metadata 新增 `source=mcp`、`server_name` 等字段用于 Redis 事件流观测。
+- researcher 实际接入：
+  - `WorkerAgent` 仅在 `researcher + ENABLE_MCP_GATEWAY=true` 时走工具辅助路径，其他角色不受影响。
+  - 工具输出以文本上下文回灌后再走普通 `chat` 生成 researcher JSON，降低 provider 对“tool message schema”差异带来的风险。
+- 配置热更新策略：
+  - `mcp_gateway` 使用配置指纹（`mtime_ns + size`）失效缓存，解决仅靠 mtime 可能漏刷新的问题。
+- 安全边界：
+  - 角色白名单默认仅 researcher。
+  - filesystem 工具必须配置 `MCP_FILESYSTEM_ROOTS`，且严格路径白名单校验。
+  - 任一 MCP 调用异常均以 fail-safe 处理，不中断主 DAG 运行。
+
+## 2026-05-09：DeerFlow 2.0 MCP 调研结论与 thinkweave 接入策略
+
+- DeerFlow 2.0 可借鉴的实现要点（来自其 backend 文档与开发指南）：
+  - 多 server 管理 + 懒加载（首次使用再初始化工具）。
+  - 配置变更触发缓存失效（通过配置文件变更检测刷新工具清单）。
+  - 支持 stdio / SSE / HTTP 传输与 OAuth（HTTP/SSE）扩展能力。
+  - 在工具数量较大时采用“先搜索、后激活”思路，避免一次性注入全部工具导致上下文膨胀。
+- MCP 官方 servers 仓库结论：
+  - reference servers 主要是示例实现，不应直接等同生产级安全方案。
+  - TypeScript server 可 `npx` 运行，Python server 可 `uvx` / `pip` 运行，适合本项目做可控 PoC。
+- 与当前 thinkweave 架构的契合点：
+  - 我们已有 `TEA envelope + ToolLifecycleService + ToolManagerAgent`，可直接承接 MCP 生命周期可观测性。
+  - 我们已有开关体系，能把 MCP 放入灰度与回滚通道，不需要改动 DAG/FSM 主链路。
+- 本轮选型决策（先小后大）：
+  - 必选：`mcp-server-fetch`、`mcp-server-time`
+  - 可选：`mcp-server-filesystem`（只读白名单）
+  - 暂缓：高权限/高副作用 server（写库、浏览器自动化、git 写操作）
+- 风险控制决策：
+  - 首轮仅开放 `researcher` 角色使用 MCP。
+  - 任何 MCP 异常 fail-safe，不中断任务主流程。
+  - 通过 `tool_lifecycle(source=mcp)` 事件作为上线与回归准入标准。
+
 ## 2026-05-08：Phase 7 Code Review Fix 决策补充
 
 - 修复策略：优先修“语义错误 + 未接线能力 + 容错可观测性 + 内存边界”四类问题，保持行为兼容优先。

@@ -15,6 +15,7 @@ import httpx
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI, RateLimitError
 
 from app.config import settings
+from app.services.mcp_gateway import mcp_gateway
 from app.services.tool_lifecycle import tool_lifecycle_service
 from app.utils.logger import logger
 
@@ -142,6 +143,8 @@ class BaseLLMClient(ABC):
         max_tokens: int | None = None,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
+        task_id: str = "",
+        node_id: str = "",
     ) -> dict:
         """Run a tool-capable chat request."""
 
@@ -327,27 +330,34 @@ class LLMClient(BaseLLMClient):
         tool_calls: list[dict[str, Any]],
         model: str,
         role: str | None,
-    ) -> None:
+        task_id: str = "",
+        node_id: str = "",
+    ) -> dict[str, str]:
+        run_id_by_call_id: dict[str, str] = {}
         if not settings.enable_tool_lifecycle:
-            return
+            return run_id_by_call_id
         for index, tool_call in enumerate(tool_calls):
             function_block = tool_call.get("function") if isinstance(tool_call, dict) else {}
             tool_name = str((function_block or {}).get("name", "") or "").strip()
             if not tool_name:
                 continue
+            call_id = str(tool_call.get("id", "") or f"call_{index}")
             metadata = {
                 "source": "llm_chat_with_tools",
                 "model": model,
                 "role": role or "",
-                "tool_call_id": str(tool_call.get("id", "") or ""),
+                "tool_call_id": call_id,
                 "arguments": str((function_block or {}).get("arguments", "") or ""),
                 "ordinal": index,
             }
             try:
                 record = await tool_lifecycle_service.register(
                     tool_name=tool_name,
+                    task_id=task_id,
+                    node_id=node_id,
                     metadata=metadata,
                 )
+                run_id_by_call_id[call_id] = record.run_id
                 await tool_lifecycle_service.mark_running(
                     run_id=record.run_id,
                     metadata={"phase": "selected_by_model"},
@@ -358,6 +368,85 @@ class LLMClient(BaseLLMClient):
                     model=model,
                     role=role or "",
                 ).opt(exception=True).warning("tool lifecycle trace failed")
+        return run_id_by_call_id
+
+    @staticmethod
+    def _parse_tool_arguments(raw: Any) -> dict[str, Any]:
+        if isinstance(raw, dict):
+            return raw
+        if not isinstance(raw, str):
+            return {}
+        text = raw.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    async def _execute_mcp_tool_calls(
+        self,
+        *,
+        tool_calls: list[dict[str, Any]],
+        role: str | None,
+        run_id_by_call_id: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
+        outputs: list[dict[str, Any]] = []
+        run_map = dict(run_id_by_call_id or {})
+        for index, tool_call in enumerate(tool_calls):
+            function_block = tool_call.get("function") if isinstance(tool_call, dict) else {}
+            tool_name = str((function_block or {}).get("name", "") or "").strip()
+            if not tool_name.startswith("mcp."):
+                continue
+            arguments = self._parse_tool_arguments((function_block or {}).get("arguments"))
+            call_id = str(tool_call.get("id", "") or f"call_{index}")
+            run_id = run_map.get(call_id, "")
+            try:
+                tool_result = await mcp_gateway.invoke_tool(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    role=role,
+                )
+                outputs.append(
+                    {
+                        "tool_call_id": call_id,
+                        "tool_name": tool_name,
+                        "ok": True,
+                        "output": tool_result,
+                    }
+                )
+                if run_id:
+                    await tool_lifecycle_service.mark_success(
+                        run_id=run_id,
+                        metadata={
+                            "phase": "tool_executed",
+                            "source": "mcp",
+                            "server_name": str(tool_result.get("server_name", "") or ""),
+                        },
+                    )
+            except Exception as exc:
+                outputs.append(
+                    {
+                        "tool_call_id": call_id,
+                        "tool_name": tool_name,
+                        "ok": False,
+                        "error": str(exc),
+                    }
+                )
+                if run_id:
+                    await tool_lifecycle_service.mark_failed(
+                        run_id=run_id,
+                        error=str(exc),
+                        metadata={"phase": "tool_executed", "source": "mcp"},
+                    )
+            finally:
+                if run_id:
+                    await tool_lifecycle_service.mark_cleaned(
+                        run_id=run_id,
+                        metadata={"phase": "post_execution"},
+                    )
+        return outputs
 
     @staticmethod
     def _extract_content_from_message(message: Any) -> str | None:
@@ -746,6 +835,8 @@ class LLMClient(BaseLLMClient):
         max_tokens: int | None = None,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
+        task_id: str = "",
+        node_id: str = "",
     ) -> dict:
         model_name = self._resolve_model(model, role)
 
@@ -783,11 +874,25 @@ class LLMClient(BaseLLMClient):
                     }
                     for tc in tool_calls
                 ]
-                await self._trace_tool_lifecycle(
+                run_id_by_call_id = await self._trace_tool_lifecycle(
                     tool_calls=normalized_calls,
                     model=config.model,
                     role=role,
+                    task_id=task_id,
+                    node_id=node_id,
                 )
+                if settings.enable_mcp_tool_execution:
+                    mcp_outputs = await self._execute_mcp_tool_calls(
+                        tool_calls=normalized_calls,
+                        role=role,
+                        run_id_by_call_id=run_id_by_call_id,
+                    )
+                    if mcp_outputs:
+                        return {
+                            "type": "tool_result",
+                            "tool_calls": normalized_calls,
+                            "tool_outputs": mcp_outputs,
+                        }
                 return {
                     "type": "tool_calls",
                     "tool_calls": normalized_calls,
@@ -916,6 +1021,8 @@ class DebugMockLLMClient(BaseLLMClient):
         max_tokens: int | None = None,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
+        task_id: str = "",
+        node_id: str = "",
     ) -> dict:
         return {"type": "text", "content": "mock tool response"}
 

@@ -71,6 +71,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: thinkweave-backend
+    restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
@@ -97,6 +98,13 @@ services:
       HTTPS_PROXY: http://host.docker.internal:10808
       ALL_PROXY: ""
       NO_PROXY: localhost,127.0.0.1,postgres,redis
+      ENABLE_MCP_GATEWAY: "true"
+      ENABLE_MCP_TOOL_EXECUTION: "true"
+      MCP_SERVER_CONFIG_PATH: mcp_servers.json
+      MCP_ENABLED_ROLES: researcher
+      MCP_TOOL_TIMEOUT_SECONDS: 20
+      MCP_FETCH_MAX_CHARS: 8000
+      MCP_FILESYSTEM_ROOTS: /app/artifacts,/app/reports,/app/prompts
     ports:
       - "18080:8000"
     depends_on:
@@ -105,6 +113,9 @@ services:
       redis:
         condition: service_healthy
     volumes:
+      - ./backend/app:/app/app
+      - ./backend/prompts:/app/prompts
+      - ./backend/mcp_servers.json:/app/mcp_servers.json
       - backend_cognee_system:/app/.cognee_system
       - backend_cognee_data:/app/.cognee_data
       - backend_cognee_cache:/app/.cognee_cache
@@ -122,6 +133,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: thinkweave-frontend
+    restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy

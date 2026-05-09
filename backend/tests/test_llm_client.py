@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.config import settings
+from app.services.mcp_gateway import mcp_gateway
 from app.services.tool_lifecycle import tool_lifecycle_service
 from app.utils.llm_client import (
     MODEL_REGISTRY,
@@ -460,6 +461,65 @@ class TestChatWithToolsLifecycleTracing:
             assert transition_statuses == ["registered", "running"]
         finally:
             settings.enable_tool_lifecycle = previous_enable
+            await tool_lifecycle_service.clear()
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_executes_mcp_tools_when_enabled(self, monkeypatch):
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "function": {"name": "mcp.time.now", "arguments": "{\"timezone\":\"UTC\"}"},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        client = LLMClient.__new__(LLMClient)
+        client._clients = {"deepseek": _FakeProviderClient(payload)}
+        client._tracker = None
+        client._allow_build_clients = False
+        monkeypatch.setattr(
+            mcp_gateway,
+            "invoke_tool",
+            AsyncMock(
+                return_value={
+                    "tool_name": "mcp.time.now",
+                    "server_name": "time",
+                    "iso_time": "2026-05-09T00:00:00+00:00",
+                }
+            ),
+        )
+
+        previous_lifecycle = settings.enable_tool_lifecycle
+        previous_exec = settings.enable_mcp_tool_execution
+        settings.enable_tool_lifecycle = True
+        settings.enable_mcp_tool_execution = True
+        try:
+            await tool_lifecycle_service.clear()
+            result = await client.chat_with_tools(
+                [{"role": "user", "content": "call mcp time"}],
+                tools=[{"type": "function", "function": {"name": "mcp.time.now"}}],
+                model="deepseek-v3.2",
+                role="researcher",
+                task_id="task-mcp",
+                node_id="node-mcp",
+            )
+            assert result["type"] == "tool_result"
+            assert result["tool_outputs"][0]["ok"] is True
+
+            records = await tool_lifecycle_service.list()
+            assert len(records) == 1
+            statuses = [item["status"] for item in records[0]["transitions"]]
+            assert statuses == ["registered", "running", "success", "cleaned"]
+            assert records[0]["task_id"] == "task-mcp"
+        finally:
+            settings.enable_tool_lifecycle = previous_lifecycle
+            settings.enable_mcp_tool_execution = previous_exec
             await tool_lifecycle_service.clear()
 
 

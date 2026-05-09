@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.agents.tool_manager_agent import ToolManagerAgent
+from app.services.mcp_gateway import mcp_gateway
 from app.services.tool_lifecycle import tool_lifecycle_service
 from tests.conftest import MockLLMClient
 
@@ -150,3 +152,65 @@ async def test_tool_manager_agent_rejects_invalid_action():
                 }
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_tool_manager_agent_list_tools(monkeypatch: pytest.MonkeyPatch):
+    agent = ToolManagerAgent(
+        agent_id=uuid.uuid4(),
+        name="tool-manager",
+        llm_client=MockLLMClient(),
+        middlewares=(),
+    )
+    mocked = [{"type": "function", "function": {"name": "mcp.time.now"}}]
+    monkeypatch.setattr(
+        mcp_gateway,
+        "get_cached_mcp_tools",
+        AsyncMock(return_value=mocked),
+    )
+
+    raw = await agent.handle_task({"payload": {"action": "list_tools", "role": "researcher"}})
+    data = json.loads(raw)
+    assert len(data["items"]) == 1
+    assert data["items"][0]["function"]["name"] == "mcp.time.now"
+
+
+@pytest.mark.asyncio
+async def test_tool_manager_agent_invoke_records_full_lifecycle(monkeypatch: pytest.MonkeyPatch):
+    agent = ToolManagerAgent(
+        agent_id=uuid.uuid4(),
+        name="tool-manager",
+        llm_client=MockLLMClient(),
+        middlewares=(),
+    )
+    monkeypatch.setattr(
+        mcp_gateway,
+        "invoke_tool",
+        AsyncMock(
+            return_value={
+                "tool_name": "mcp.time.now",
+                "server_name": "time",
+                "iso_time": "2026-05-09T00:00:00+00:00",
+            }
+        ),
+    )
+
+    raw = await agent.handle_task(
+        {
+            "task_id": "task-2",
+            "node_id": "node-2",
+            "payload": {
+                "action": "invoke",
+                "tool_name": "mcp.time.now",
+                "arguments": {"timezone": "UTC"},
+                "role": "researcher",
+            },
+        }
+    )
+    data = json.loads(raw)
+    assert data["ok"] is True
+    run_id = str(data["run_id"])
+    record = await tool_lifecycle_service.get(run_id)
+    assert record is not None
+    statuses = [item["status"] for item in record["transitions"]]
+    assert statuses == ["registered", "running", "success", "cleaned"]

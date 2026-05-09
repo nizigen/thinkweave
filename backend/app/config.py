@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     enable_tool_manager_agent: bool = False
     enable_mcts_shadow: bool = False
     mcts_ucb_c: float = 1.4
+    enable_mcp_gateway: bool = False
+    enable_mcp_tool_execution: bool = False
+    mcp_server_config_path: str = "mcp_servers.json"
+    mcp_enabled_roles: str = "researcher"
+    mcp_tool_timeout_seconds: int = 20
+    mcp_fetch_max_chars: int = 8000
+    mcp_filesystem_roots: str = ""
 
     # DAG node timeout controls (seconds)
     dag_node_timeout_seconds: int = 300
@@ -100,6 +107,22 @@ class Settings(BaseSettings):
             origin.strip()
             for origin in self.cors_allow_origins.split(",")
             if origin.strip()
+        ]
+
+    @property
+    def mcp_role_allowlist(self) -> set[str]:
+        return {
+            item.strip().lower()
+            for item in self.mcp_enabled_roles.split(",")
+            if item.strip()
+        }
+
+    @property
+    def mcp_filesystem_root_list(self) -> list[str]:
+        return [
+            item.strip()
+            for item in self.mcp_filesystem_roots.split(",")
+            if item.strip()
         ]
 
 

@@ -1,3 +1,34 @@
+## Phase 7-05 MCP Gateway 执行检查点（2026-05-09）
+
+- 已完成 MCP 最小闭环接入（灰度开关，默认关闭）：
+  - 新增 `backend/app/services/mcp_registry.py`（MCP 配置加载、环境变量注入、配置指纹）
+  - 新增 `backend/app/services/mcp_gateway.py`（工具发现缓存、角色白名单、工具执行）
+  - `backend/app/utils/llm_client.py` 增加 MCP tool 执行分支与 lifecycle 全链路状态写入
+  - `backend/app/agents/worker.py` 为 researcher 增加 MCP 辅助路径（工具结果回灌后再生成结构化 JSON）
+  - `backend/app/agents/tool_manager_agent.py` 增加 `list_tools/invoke` 动作用于独立验证
+- 已完成配置与样例：
+  - `backend/app/config.py` 新增 MCP 开关、角色白名单、超时、fetch 截断、filesystem 白名单
+  - `backend/.env.example` 新增 MCP 相关环境变量
+  - `backend/mcp_servers.example.json` 新增 `time/fetch/filesystem` 样例项
+- 已完成角色边界：
+  - `runtime_bootstrap` 与 `agent_manager` 在启用 MCP 时仅为 researcher 注入 `mcp_tools` 能力
+- 测试结果：
+  - `pytest -q tests/test_mcp_gateway.py tests/test_llm_client.py -k "tool or mcp" tests/test_tool_manager_agent.py tests/test_tool_lifecycle.py` => `18 passed`
+  - `pytest -q tests/test_agent_core.py -k "WorkerAgent or researcher_agent_preserves_depth"` => `11 passed`
+- 状态：`EXECUTED`（本地单测通过，待你确认后可做 docker 真实任务回归）。
+
+## Phase 7 MCP 调研与规划（2026-05-09）
+
+- 完成 DeerFlow 2.0 MCP 方案调研，并对齐本项目现状（TEA + ToolLifecycle + ToolManagerAgent）。
+- 新增计划文件：
+  - `.planning/phases/07-halo-tea-dag-recompose/07-05-PLAN.md`
+- 规划结论：
+  - MCP 首轮采用灰度接入，不改 DAG/FSM 主路径；
+  - 首轮只放开 `researcher` 角色；
+  - MCP 下载优先级：`mcp-server-fetch` + `mcp-server-time`（必选），`mcp-server-filesystem`（可选，只读白名单）；
+  - 以 `tool_lifecycle(source=mcp)` 作为验收证据。
+- 状态：`PLANNED`，待执行 `07-05`。
+
 ## Phase 7 Code Review Fix（2026-05-08）
 
 - 已完成 code review 修复（对应上轮 4 条 findings）：

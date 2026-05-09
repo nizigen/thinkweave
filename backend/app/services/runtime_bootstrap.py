@@ -62,11 +62,14 @@ async def _ensure_required_role_agents(session: Any) -> int:
         created += 1
 
     if "researcher" not in existing_roles:
+        researcher_capabilities = "research, retrieval, evidence, source_policy"
+        if settings.enable_mcp_gateway:
+            researcher_capabilities += ", mcp_tools"
         agent = Agent(
             name="researcher-auto",
             role="researcher",
             layer=2,
-            capabilities="research, retrieval, evidence, source_policy",
+            capabilities=researcher_capabilities,
             model=settings.default_model,
             status="idle",
         )

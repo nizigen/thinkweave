@@ -264,12 +264,24 @@ async def consume_agent_inbox(
     stream = agent_inbox_key(agent_id)
     await ensure_consumer_group(stream, AGENT_INBOX_GROUP)
 
-    return await xreadgroup(
+    new_messages = await xreadgroup(
         AGENT_INBOX_GROUP,
         consumer_name,
         {stream: ">"},
         count=count,
         block=block,
+    )
+    if new_messages:
+        return new_messages
+
+    # If no fresh assignment arrives, recover pending deliveries for this
+    # consumer (e.g. after process/container restart).
+    return await xreadgroup(
+        AGENT_INBOX_GROUP,
+        consumer_name,
+        {stream: "0"},
+        count=count,
+        block=0,
     )
 
 

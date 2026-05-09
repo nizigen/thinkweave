@@ -6,13 +6,22 @@ import json
 from typing import Any, cast
 
 from app.agents.base_agent import BaseAgent
+from app.services.mcp_gateway import mcp_gateway
 from app.services.tool_lifecycle import (
     ToolLifecycleStatus,
     tool_lifecycle_service,
 )
 
 _VALID_STATUSES: set[str] = {"registered", "running", "success", "failed", "cleaned"}
-_VALID_ACTIONS: set[str] = {"register", "update", "get", "cleanup", "list"}
+_VALID_ACTIONS: set[str] = {
+    "register",
+    "update",
+    "get",
+    "cleanup",
+    "list",
+    "list_tools",
+    "invoke",
+}
 
 
 class ToolManagerAgent(BaseAgent):
@@ -78,6 +87,57 @@ class ToolManagerAgent(BaseAgent):
                 metadata=payload.get("metadata"),
             )
             return json.dumps(record.to_dict(), ensure_ascii=False)
+
+        if action == "list_tools":
+            role_hint = str(payload.get("role", "researcher") or "researcher").strip().lower()
+            items = await mcp_gateway.get_cached_mcp_tools(role=role_hint)
+            return json.dumps({"items": items}, ensure_ascii=False)
+
+        if action == "invoke":
+            tool_name = str(payload.get("tool_name", "") or "").strip()
+            if not tool_name:
+                raise ValueError("tool_name is required for invoke action")
+            role_hint = str(payload.get("role", "researcher") or "researcher").strip().lower()
+            arguments = payload.get("arguments")
+            if arguments is not None and not isinstance(arguments, dict):
+                raise ValueError("arguments must be an object")
+            record = await tool_lifecycle_service.register(
+                tool_name=tool_name,
+                task_id=task_id,
+                node_id=node_id,
+                metadata={"source": "tool_manager_agent", "role": role_hint},
+                run_id=payload.get("run_id"),
+            )
+            await tool_lifecycle_service.mark_running(run_id=record.run_id)
+            try:
+                result = await mcp_gateway.invoke_tool(
+                    tool_name=tool_name,
+                    arguments=arguments if isinstance(arguments, dict) else {},
+                    role=role_hint,
+                )
+                await tool_lifecycle_service.mark_success(
+                    run_id=record.run_id,
+                    metadata={
+                        "source": "mcp",
+                        "server_name": str(result.get("server_name", "") or ""),
+                    },
+                )
+                return json.dumps(
+                    {"ok": True, "run_id": record.run_id, "result": result},
+                    ensure_ascii=False,
+                )
+            except Exception as exc:
+                await tool_lifecycle_service.mark_failed(
+                    run_id=record.run_id,
+                    error=str(exc),
+                    metadata={"source": "mcp"},
+                )
+                raise
+            finally:
+                await tool_lifecycle_service.mark_cleaned(
+                    run_id=record.run_id,
+                    metadata={"source": "mcp"},
+                )
 
         status_filter = payload.get("status")
         if status_filter is None:

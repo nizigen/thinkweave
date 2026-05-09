@@ -382,6 +382,7 @@ class TestWriterBudgetHelpers:
         ):
             payload = await scheduler._build_assignment_payload(
                 session=session,
+                agent_id=make_uuid(),
                 node_id=node_id,
                 node_title="第1章：背景",
                 node_role="writer",
@@ -2685,6 +2686,68 @@ class TestConsistencyRepairWave:
         writer = next(node for node in added_nodes if getattr(node, "agent_role", "") == "writer")
         assert consistency.depends_on[0] == writer.id
 
+    @pytest.mark.asyncio
+    async def test_inject_repair_wave_links_writer_to_consistency_trigger(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        added_nodes: list[object] = []
+        mock_session = AsyncMock()
+        writer_rows = MagicMock()
+        writer_rows.all.return_value = []
+        mock_session.execute = AsyncMock(return_value=writer_rows)
+        mock_session.get = AsyncMock(return_value=SimpleNamespace(depth="quick", target_words=1200))
+        mock_session.add = MagicMock(side_effect=lambda node: added_nodes.append(node))
+        mock_session.commit = AsyncMock()
+        trigger_node_id = make_uuid()
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.push_ready_node", new_callable=AsyncMock),
+        ):
+            ok = await scheduler._inject_consistency_repair_wave(
+                session=mock_session,
+                repair_targets=[1],
+                trigger_node_id=trigger_node_id,
+            )
+
+        assert ok is True
+        writer = next(node for node in added_nodes if getattr(node, "agent_role", "") == "writer")
+        assert trigger_node_id in (writer.depends_on or [])
+
+    @pytest.mark.asyncio
+    async def test_inject_reviewer_repair_wave_creates_linked_chain(
+        self,
+        scheduler: DAGScheduler,
+    ):
+        added_nodes: list[object] = []
+        mock_session = AsyncMock()
+        titles_rows = MagicMock()
+        titles_rows.all.return_value = []
+        pending_consistency_rows = MagicMock()
+        pending_consistency_rows.all.return_value = [(make_uuid(), [])]
+        update_result = MagicMock()
+        mock_session.execute = AsyncMock(side_effect=[titles_rows, pending_consistency_rows, update_result])
+        mock_session.add = MagicMock(side_effect=lambda node: added_nodes.append(node))
+        mock_session.commit = AsyncMock()
+        trigger_node_id = make_uuid()
+
+        with (
+            patch("app.services.dag_scheduler.set_dag_node_status", new_callable=AsyncMock),
+            patch("app.services.dag_scheduler.push_ready_node", new_callable=AsyncMock),
+        ):
+            ok = await scheduler._inject_reviewer_repair_wave(
+                session=mock_session,
+                chapter_index=1,
+                trigger_node_id=trigger_node_id,
+            )
+
+        assert ok is True
+        writer = next(node for node in added_nodes if getattr(node, "agent_role", "") == "writer")
+        reviewer = next(node for node in added_nodes if getattr(node, "agent_role", "") == "reviewer")
+        assert trigger_node_id in (writer.depends_on or [])
+        assert writer.id in (reviewer.depends_on or [])
+
 
 # ---------------------------------------------------------------------------
 # Test: _match_agent
@@ -2716,6 +2779,15 @@ class TestMatchAgent:
         matched, reason = await scheduler._match_agent(mock_session, "writer")
         assert matched is None
         assert reason == "no_idle_agent"
+
+    def test_writer_allowlist_enforces_humanizer_skill(self):
+        scheduler = DAGScheduler(make_uuid())
+        agent = FakeAgent(
+            role="writer",
+            agent_config={"skill_allowlist": ["technical_report"]},
+        )
+        allowlist = scheduler._agent_skill_allowlist(agent)
+        assert "humanizer-zh" in allowlist
 
 
 class TestOutputSanitization:

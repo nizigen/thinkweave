@@ -15,6 +15,8 @@ import re
 from typing import Any
 
 from app.agents.base_agent import BaseAgent
+from app.config import settings
+from app.services.mcp_gateway import mcp_gateway
 from app.services.writer_output import (
     is_valid_writer_output_text,
     make_fallback_writer_payload,
@@ -120,6 +122,13 @@ class WorkerAgent(BaseAgent):
         role_norm = str(agent_role or "").strip().lower()
         for attempt in range(1, _STAGE_AUTORETRY_LIMIT + 2):
             try:
+                if role_norm == "researcher" and settings.enable_mcp_gateway:
+                    result = await self._run_researcher_tool_assisted_path(
+                        messages=messages,
+                        model_override=model_override,
+                        task_id=str(task_id or ""),
+                        node_id=str(ctx.get("node_id", "") or ""),
+                    )
                 if role_norm == "writer":
                     result = await self._run_writer_hard_json_path(
                         messages=messages,
@@ -160,6 +169,58 @@ class WorkerAgent(BaseAgent):
 
         log.info("sub-task completed, result length={}", len(result))
         return result
+
+    async def _run_researcher_tool_assisted_path(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        model_override: str | None,
+        task_id: str,
+        node_id: str,
+    ) -> str | None:
+        tools = await mcp_gateway.get_cached_mcp_tools(role="researcher")
+        if not tools:
+            return None
+        try:
+            tool_result = await self.llm_client.chat_with_tools(
+                messages=messages,
+                tools=tools,
+                role="researcher",
+                model=model_override,
+                task_id=task_id,
+                node_id=node_id,
+            )
+        except Exception:
+            logger.bind(agent_id=str(self.agent_id)).opt(exception=True).warning(
+                "researcher MCP path failed before execution"
+            )
+            return None
+
+        result_type = str(tool_result.get("type", "") or "").strip().lower()
+        if result_type == "text":
+            return str(tool_result.get("content", "") or "")
+        if result_type != "tool_result":
+            return None
+        tool_outputs = tool_result.get("tool_outputs", [])
+        if not isinstance(tool_outputs, list):
+            return None
+
+        tool_context = json.dumps(tool_outputs, ensure_ascii=False)
+        follow_up_messages = list(messages) + [
+            {
+                "role": "assistant",
+                "content": (
+                    "以下是 MCP 工具返回结果，请仅基于这些结果与已有上下文，"
+                    "输出符合 researcher schema 的严格 JSON：\n"
+                    f"{tool_context}"
+                ),
+            }
+        ]
+        return await self.llm_client.chat(
+            messages=follow_up_messages,
+            role="researcher",
+            model=model_override,
+        )
 
     async def _apply_output_contract(
         self,
@@ -736,6 +797,7 @@ class WorkerAgent(BaseAgent):
                 "stage_contract": raw.get("stage_contract", ""),
                 "full_outline": raw.get("full_outline", ""),
                 "chapter_description": raw.get("chapter_description", ""),
+                "repair_guidance": raw.get("repair_guidance", ""),
                 "context_bridges": raw.get("context_bridges", ""),
                 "memory_context": raw.get("memory_context", memory_context or ""),
                 "topic_claims": raw.get("topic_claims", {}),

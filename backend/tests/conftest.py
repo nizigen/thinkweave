@@ -139,10 +139,13 @@ class MockLLMClient(BaseLLMClient):
         max_tokens: int | None = None,
         max_retries: int | None = None,
         fallback_models: list[str] | None = None,
+        task_id: str = "",
+        node_id: str = "",
     ) -> dict:
         self.call_log.append({
             "method": "chat_with_tools", "role": role, "tools": tools,
             "max_retries": max_retries, "fallback_models": fallback_models,
+            "task_id": task_id, "node_id": node_id,
         })
         return {"type": "text", "content": "mock tool response"}
 

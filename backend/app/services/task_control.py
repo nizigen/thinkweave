@@ -1,4 +1,4 @@
-"""Task control service for pause/resume/skip/retry commands."""
+﻿"""Task control service for pause/resume/skip/retry commands."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from app.models.task_node import TaskNode
 from app.schemas.task import TaskDetailRead
 from app.services.checkpoint_control import ensure_task_control
 from app.services import communicator, task_service
-from app.services.dag_scheduler import get_scheduler
+from app.services.dag_scheduler import get_scheduler, start_scheduler
 from app.services.long_text_fsm import LongTextState
 from app.services.redis_streams import remove_timeout_watch, timeout_watch_member
 from app.services.state_store import StateStore, StateTransitionConflictError
@@ -135,10 +135,12 @@ def _retry_node_in_memory(task: Any, *, node_id: uuid.UUID | None) -> Any:
     return node
 
 
-def _wake_scheduler(task_id: uuid.UUID) -> None:
+async def _wake_scheduler(task_id: uuid.UUID) -> None:
     scheduler = get_scheduler(task_id)
     if scheduler is not None:
         scheduler.wake()
+        return
+    await start_scheduler(task_id)
 
 
 def _dependencies_satisfied(task: Any, node: Any) -> bool:
@@ -390,7 +392,7 @@ async def pause_task(
         control=dict(task.checkpoint_data["control"]),
         message="pause requested",
     )
-    _wake_scheduler(task_id)
+    await _wake_scheduler(task_id)
     return detail
 
 
@@ -421,7 +423,7 @@ async def resume_task(
         control=dict(task.checkpoint_data["control"]),
         message="task resumed",
     )
-    _wake_scheduler(task_id)
+    await _wake_scheduler(task_id)
     return detail
 
 
@@ -493,7 +495,7 @@ async def skip_node(
         node=SimpleNamespace(id=node_id, status="skipped"),
         message="node skipped",
     )
-    _wake_scheduler(task_id)
+    await _wake_scheduler(task_id)
     return detail
 
 
@@ -568,7 +570,7 @@ async def retry_node(
         node=SimpleNamespace(id=node_id, status=next_status),
         message="node retried",
     )
-    _wake_scheduler(task_id)
+    await _wake_scheduler(task_id)
     return detail
 
 
@@ -635,7 +637,7 @@ async def admin_force_transition(
         reason=reason,
         metadata={"to_state": target_state},
     )
-    _wake_scheduler(task_id)
+    await _wake_scheduler(task_id)
     return detail
 
 
@@ -676,7 +678,7 @@ async def admin_resume_from_checkpoint(
         control=dict(control),
         message="resume from checkpoint requested",
     )
-    _wake_scheduler(task_id)
+    await _wake_scheduler(task_id)
     return detail
 
 
@@ -732,3 +734,4 @@ async def admin_retry_node(
         metadata={"node_id": str(node_id)},
     )
     return detail
+
